@@ -543,7 +543,7 @@
               <label class="erp-label">Mandatory Flag</label>
               <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
                 [items]="['Yes', 'No']" [searchable]="false" [clearable]="false"
-                [ngModel]="host.formValues()['quickAttributeMandatory'] || 'No'"
+                [ngModel]="host.formValues()['quickAttributeMandatory'] || 'Yes'"
                 (ngModelChange)="host.collectFormField('quickAttributeMandatory', $event)"
                 placeholder="Select Mandatory Flag">
               </ng-select>

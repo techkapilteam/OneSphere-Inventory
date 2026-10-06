@@ -5259,7 +5259,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         ...fv,
         quickAttributeType: 'Dropdown',
         quickAttributeValues: '',
-        quickAttributeMandatory: 'No',
+        quickAttributeMandatory: 'Yes',
         quickAttributeStatus: 'active'
       }));
     }
