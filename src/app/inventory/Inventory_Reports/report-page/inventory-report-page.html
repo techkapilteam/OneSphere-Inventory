@@ -204,8 +204,8 @@
         <span>Showing {{ rowStart() }}-{{ rowEnd() }} of {{ totalRecords() }}</span>
         <div>
           <ng-select class="erp-ng-select inventory-ng-select inventory-report-page-size" appendTo="body" [items]="pageSizeOptions" bindLabel="label" bindValue="value" [clearable]="false" [searchable]="false" [ngModel]="pageSize()" (ngModelChange)="changePageSize($event)"></ng-select>
-          <button type="button" class="erp-btn btn-white btn-sm" [disabled]="!canMovePrevious()" (click)="changePage(-1)"><i class="pi pi-angle-left"></i></button>
-          <button type="button" class="erp-btn btn-white btn-sm" [disabled]="!canMoveNext()" (click)="changePage(1)"><i class="pi pi-angle-right"></i></button>
+          <button title="Previous Page" type="button" class="erp-btn btn-white btn-sm" [disabled]="!canMovePrevious()" (click)="changePage(-1)"><i class="pi pi-angle-left"></i></button>
+          <button title="Next Page" type="button" class="erp-btn btn-white btn-sm" [disabled]="!canMoveNext()" (click)="changePage(1)"><i class="pi pi-angle-right"></i></button>
         </div>
       </div>
     </section>
