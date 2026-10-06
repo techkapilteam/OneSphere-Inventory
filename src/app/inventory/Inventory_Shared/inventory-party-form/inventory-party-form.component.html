@@ -45,7 +45,8 @@
         <div class="erp-form-group"><label class="erp-label">{{ partyLabel }} Code</label><input class="erp-input" type="text" placeholder="Auto / manual code" [ngModel]="host.formFieldValue({key:'code', label:'Code', type:'text'})" (ngModelChange)="host.collectFormField('code', $event)" /></div>
       }
 
-      <div class="erp-form-group"><label class="erp-label">PAN</label><input class="erp-input" type="text" [ngModel]="host.formValues()[pfx('pan')] || ''" (ngModelChange)="host.collectFormField(pfx('pan'), $event)" placeholder="Auto bind from Global Contact, editable" /></div>
+      <!-- Previous: <div class="erp-form-group"><label class="erp-label">PAN</label><input class="erp-input" type="text" [ngModel]="host.formValues()[pfx('pan')] || ''" (ngModelChange)="host.collectFormField(pfx('pan'), $event)" placeholder="Auto bind from Global Contact, editable" /></div> -->
+      <div class="erp-form-group"><label class="erp-label">PAN</label><input class="erp-input" type="text" [ngModel]="host.formValues()[pfx('pan')] || ''" (ngModelChange)="host.collectFormField(pfx('pan'), $event)" [placeholder]="host.panPlaceholder(!!host.selectedPartyContact())" /></div>
       @if (partyKind === 'channelPartner') {
         <div class="erp-form-group"><label class="erp-label">GSTIN</label><input class="erp-input" type="text" maxlength="15" [ngModel]="host.formValues()[pfx('gstin')] || ''" (ngModelChange)="host.collectFormField(pfx('gstin'), $event)" placeholder="Auto bind from Global Contact, editable" /></div>
       }

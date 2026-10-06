@@ -5437,7 +5437,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const sourceKey = this.addMasterSourceFieldKey();
     if (sourceKey) this.collectFormField(sourceKey, name);
     if (this.config?.key === 'productServiceMaster') {
-      this.selectedProductCategory.set(name);
+      // --- Previous code (kept for reference) ---
+      // this.selectedProductCategory.set(name);
+      // if (normalized.id) this.collectFormField('categoryId', normalized.id);
+      // this.queueTaxCodeSearch(true);
+      // --- End previous code ---
+
+      // Bind everything the new category carries (serial/batch policy, tracking,
+      // base UOM, SKU) right after creation, exactly as picking an existing
+      // category does -- the category was added to loadedCategoryObjects above.
+      this.onProductCategoryChange(name);
       if (normalized.id) this.collectFormField('categoryId', normalized.id);
       this.queueTaxCodeSearch(true);
     }
@@ -5828,6 +5837,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   saveQuickContact(): void {
     const name = this.quickAddName().trim();
     if (!name) { this.quickAddError.set('Contact name is required.'); return; }
+    const quickContactPanError = this.panValidationMessage(this.formValues()['quickContactPan']);
+    if (quickContactPanError) { this.quickAddError.set(quickContactPanError); return; }
     if (this.isSavingQuickAdd()) return;
     const v = this.formValues();
     const primaryPartyQuickAdd = this.addMasterSourceFieldKey() === 'partyIdentity';
@@ -5965,6 +5976,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   saveQuickVendor(): void {
     const name = this.quickAddName().trim();
     if (!name) { this.quickAddError.set('Vendor name is required.'); return; }
+    const quickVendorPanError = this.panValidationMessage(this.formValues()['quickVendorPan']);
+    if (quickVendorPanError) { this.quickAddError.set(quickVendorPanError); return; }
     if (this.isSavingQuickAdd()) return;
     const v = this.formValues();
     const code = this.quickAddCode().trim() || this.generateCodeFromName(name) || null;
@@ -6024,6 +6037,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   saveQuickCustomer(): void {
     const name = this.quickAddName().trim();
     if (!name) { this.quickAddError.set('Customer name is required.'); return; }
+    const quickCustomerPanError = this.panValidationMessage(this.formValues()['quickCustomerPan']);
+    if (quickCustomerPanError) { this.quickAddError.set(quickCustomerPanError); return; }
     if (this.isSavingQuickAdd()) return;
     const v = this.formValues();
     const code = this.quickAddCode().trim() || this.generateCodeFromName(name) || null;
@@ -6084,6 +6099,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   saveQuickChannelPartner(): void {
     const name = this.quickAddName().trim();
     if (!name) { this.quickAddError.set('Channel Partner name is required.'); return; }
+    const quickChannelPartnerPanError = this.panValidationMessage(this.formValues()['quickChannelPartnerPan']);
+    if (quickChannelPartnerPanError) { this.quickAddError.set(quickChannelPartnerPanError); return; }
     if (this.isSavingQuickAdd()) return;
     const v = this.formValues();
     const code = this.quickAddCode().trim() || this.generateCodeFromName(name) || null;
@@ -17836,9 +17853,38 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // productSubtitleFromParts(), called from its own triggerSubtitle()
   // computed) renders an identically-formatted subtitle to the saved-records
   // drilldown -- one join rule, not two.
-  productSubtitleFromParts(variantName: string, attrPairs: Array<{ name: string; value: string }>): string {
+  // --- Previous code (kept for reference) ---
+  // productSubtitleFromParts(variantName: string, attrPairs: Array<{ name: string; value: string }>): string {
+  //   const attributeParts = (attrPairs || []).map(part => `${part.name} ${part.value}`);
+  //   return [variantName, ...attributeParts].filter(Boolean).join(' · ');
+  // }
+  // --- End previous code ---
+  productSubtitleFromParts(variantName: string, attrPairs: Array<{ name: string; value: string }>, brandName = ''): string {
     const attributeParts = (attrPairs || []).map(part => `${part.name} ${part.value}`);
-    return [variantName, ...attributeParts].filter(Boolean).join(' · ');
+    return [variantName, ...attributeParts, brandName].filter(Boolean).join(' · ');
+  }
+
+  // PAN format check used on save (optional field: empty is fine).
+  panValidationMessage(value: any): string {
+    const pan = String(value ?? '').trim().toUpperCase();
+    if (!pan) return '';
+    return /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan) ? '' : 'Enter a valid PAN (e.g. ABCDE1234F).';
+  }
+
+  // PAN field placeholder, one rule everywhere: says where the value came from
+  // when it was auto-filled from a Global Contact, otherwise shows the format.
+  panPlaceholder(autoBound = false): string {
+    return autoBound
+      ? 'Auto-filled from Global Contact (editable)'
+      : 'ABCDE1234F (5 letters, 4 digits, 1 letter)';
+  }
+
+  // Sales / Purchase Invoice show the product as Name + Variant + Attribute +
+  // Brand; every other screen keeps Variant + Attribute only (returns '').
+  productBrandForSummary(product: any): string {
+    const key = this.config?.key;
+    if (key !== 'salesInvoice' && key !== 'purchaseInvoice') return '';
+    return String(product?.brand_name || product?.brandName || '').trim();
   }
 
   // Item 8: Variant + every captured Attribute name/value, combined into the
@@ -17847,7 +17893,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // columns (see grnExpandedColumns()).
   grnExpandedProductSubtitle(item: any): string {
     const variant = this.grnExpandedValue(item, 'variant_name', 'variantName');
-    return this.productSubtitleFromParts(variant, this.grnExpandedAttributeParts(item));
+    // Previous: return this.productSubtitleFromParts(variant, this.grnExpandedAttributeParts(item));
+    const productId = Number(item?.product_id ?? item?.productId ?? 0);
+    const product = productId ? this.loadedProductObjects().find(p => Number(p.id) === productId) : null;
+    return this.productSubtitleFromParts(variant, this.grnExpandedAttributeParts(item), this.productBrandForSummary(product ?? item));
   }
 
   grnExpandedCell(item: any, column: GrnExpandedColumn, rowIndex: number): string {
@@ -21980,6 +22029,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (this.config?.key === 'productServiceMaster' && this.editingId() !== null && this.isCurrentProductLocked()) {
       return 'This product has already been used in a posted transaction and can no longer be edited. Deactivate it and create a new product instead.';
     }
+
+    // PAN format (Vendor / Customer / Channel Partner / Contact masters).
+    const panMessage = this.panValidationMessage(payload['pan']);
+    if (panMessage) return panMessage;
 
     // GRN / Purchase Invoice / Delivery Challan: a Branch picked in the merged
     // Warehouse/Branch dropdown must resolve to exactly one real warehouse, or

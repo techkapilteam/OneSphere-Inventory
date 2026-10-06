@@ -1188,6 +1188,12 @@ export class LoginComponent implements OnInit, OnDestroy {
       this.errorMessage.set('Please wait while the company code is being verified.');
       return;
     }
+    // PAN is optional, but when given it must be in PAN format.
+    const companyPan = (company.panNumber || '').trim().toUpperCase();
+    if (companyPan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(companyPan)) {
+      this.errorMessage.set('Enter a valid PAN (e.g. ABCDE1234F).');
+      return;
+    }
     const adminPassword = company.adminPassword.trim();
     const confirmAdminPassword = company.confirmAdminPassword.trim();
     if (adminPassword || confirmAdminPassword) {
