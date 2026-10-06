@@ -190,9 +190,10 @@
           @if (bodyFieldByKey('warehouse'); as field) {
             <div class="erp-form-group">
               <label class="erp-label">{{ field.label }}</label>
+              <!-- Previous: [searchable]="true" [clearable]="true"  (Warehouse / Branch is now locked to the login branch) -->
               <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
                 [items]="grnReceivingLocationGroups()" bindLabel="label" bindValue="label" groupBy="group"
-                [searchable]="true" [clearable]="true"
+                [searchable]="true" [clearable]="false" [readonly]="true"
                 [ngModel]="formFieldValue(field)"
                 (ngModelChange)="collectFormField(field.key, $event)"
                 placeholder="Select Warehouse or Branch">
@@ -210,12 +211,12 @@
           <!-- Admin only: turning this on posts stock transfers between branches
                before the invoice saves, so it is not offered to ordinary branch
                users. interbranchSaleEnabled() enforces the same rule in code. -->
-          @if (isAdmin() && bodyFieldByKey('interbranchSale'); as swField) {
+          <!-- Interbranch Sale: shown to everyone, fixed at "No" (switch disabled). -->
+          @if (bodyFieldByKey('interbranchSale'); as swField) {
             <div class="erp-form-group">
               <label class="erp-label">{{ swField.label }}</label>
               <label class="inventory-labeled-switch yes-no">
-                <input type="checkbox" [checked]="fieldSwitchChecked(swField)"
-                  (change)="setFieldSwitchChecked(swField, $any($event.target).checked)" />
+                <input type="checkbox" [checked]="false" disabled />
                 <span class="inventory-switch-track">
                   <span class="switch-text switch-on">{{ fieldSwitchOnLabel(swField) }}</span>
                   <span class="switch-text switch-off">{{ fieldSwitchOffLabel(swField) }}</span>

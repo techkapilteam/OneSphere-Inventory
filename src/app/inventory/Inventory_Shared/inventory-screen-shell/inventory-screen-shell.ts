@@ -1507,16 +1507,28 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   ngOnInit(): void {
-    const token = sessionStorage.getItem('token') || sessionStorage.getItem('jwt') || sessionStorage.getItem('access_token') || localStorage.getItem('token') || '';
-    if (token) {
-      try {
-        const jwtPayload = JSON.parse(atob(token.split('.')[1]));
-        const role: any = jwtPayload?.role || jwtPayload?.roles || jwtPayload?.userRole || '';
-        const roleStr = Array.isArray(role) ? role.join(',') : String(role);
-        this.isAdmin.set(roleStr.toLowerCase().includes('admin'));
-      } catch { this.isAdmin.set(true); }
-    } else {
-      this.isAdmin.set(true); // dev fallback — no token means dev mode
+    // --- Previous code (kept for reference) ---
+    // const token = sessionStorage.getItem('token') || sessionStorage.getItem('jwt') || sessionStorage.getItem('access_token') || localStorage.getItem('token') || '';
+    // if (token) {
+    //   try {
+    //     const jwtPayload = JSON.parse(atob(token.split('.')[1]));
+    //     const role: any = jwtPayload?.role || jwtPayload?.roles || jwtPayload?.userRole || '';
+    //     const roleStr = Array.isArray(role) ? role.join(',') : String(role);
+    //     this.isAdmin.set(roleStr.toLowerCase().includes('admin'));
+    //   } catch { this.isAdmin.set(true); }
+    // } else {
+    //   this.isAdmin.set(true); // dev fallback — no token means dev mode
+    // }
+    // --- End previous code ---
+
+    // Same company-admin rule as inventory-report-page.ts / auth.service.ts.
+    try {
+      const user = JSON.parse(sessionStorage.getItem('authUser') || '{}') as { isSuperAdmin?: boolean };
+      const roles = JSON.parse(sessionStorage.getItem('authRoles') || '[]') as Array<{ roleType?: string }>;
+      this.isAdmin.set(user.isSuperAdmin === true ||
+        roles.some(role => String(role.roleType ?? '').toLowerCase() === 'company_admin'));
+    } catch {
+      this.isAdmin.set(false);
     }
     // Item 26: must run before directEntryLineRows() below (and before the
     // rest of ngOnInit touches formValues/entryLineRows) — it restores a
@@ -3423,10 +3435,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     deliveryChallan:     [{ field: 'fromWarehouse', kind: 'merged' }],
     // Sales Invoice's own merged Warehouse/Branch picker, plus its separate
     // Interbranch Sale Branch field -- two independent capabilities.
-    salesInvoice:        [{ field: 'warehouse', kind: 'merged' }, { field: 'branch', kind: 'branchOnly' }],
+    // Previous: salesInvoice: [{ field: 'warehouse', kind: 'merged' }, { field: 'branch', kind: 'branchOnly' }],
+    salesInvoice:        [{ field: 'warehouse', kind: 'merged', preferBranch: true }, { field: 'branch', kind: 'branchOnly' }],
     // Only fromWarehouse defaults -- toWarehouse is deliberately left blank
     // so the existing mutual-exclusivity logic isn't pre-violated.
-    stockTransfer:       [{ field: 'fromWarehouse', kind: 'merged' }],
+    // Previous: stockTransfer: [{ field: 'fromWarehouse', kind: 'merged' }],
+    stockTransfer:       [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true }],
     // Was 'warehouseOnly' — fn_post_sales_return_stock is now branch-aware
     // (migration 241), matching Purchase Return's merged picker.
     salesReturn:         [{ field: 'returnToWarehouse', kind: 'merged' }],
@@ -18185,6 +18199,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // is still Draft — once Posted (or Cancelled), the row is locked here too,
   // not just inside the opened form.
   canEditOrDeleteRow(row: string[]): boolean {
+    // Only a company admin may edit/delete saved records.
+    if (!this.isAdmin()) return false;
     if (!this.isDraftLockedScreen()) return true;
     return this.rowStatusKey(row) === 'draft';
   }

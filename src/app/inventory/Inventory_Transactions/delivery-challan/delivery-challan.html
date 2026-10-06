@@ -134,7 +134,7 @@
                 <div class="inventory-field-with-add">
                   <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
                     [items]="grnReceivingLocationGroups()" bindLabel="label" bindValue="label" groupBy="group"
-                    [searchable]="true" [clearable]="true"
+                    [searchable]="true" [clearable]="false" [readonly]="true"
                     [ngModel]="formFieldValue(field)"
                     (ngModelChange)="collectFormField(field.key, $event)"
                     [placeholder]="fieldTypingHint(field)">
@@ -147,7 +147,8 @@
                       @if (item.type === 'warehouse') { <span class="inventory-location-badge">WH</span> }
                     </ng-template>
                   </ng-select>
-                  @if (field.addMaster) {
+                  <!-- From Warehouse / Branch is locked to the login branch (auto-filled), so no "+" here. -->
+                  @if (field.addMaster && false) {
                     <button type="button" class="erp-btn btn-white btn-icon"
                       [title]="'Add ' + field.addMaster"
                       (click)="openFieldAddMaster(field)">

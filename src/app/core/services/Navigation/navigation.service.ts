@@ -78,6 +78,7 @@ export class NavigationService {
               name: 'Masters',
               screens: [
                 { id: 'product-service-master', name: 'Product Master', route: '/dashboard/inventory/masters/product-service-master', group: 'Product Config' },
+                // Previous: { id: 'product-type-master', name: 'Product Nature Master', route: '/dashboard/inventory/masters/product-type-master', group: 'Product Config' },
                 { id: 'product-type-master', name: 'Product Nature Master', route: '/dashboard/inventory/masters/product-type-master', group: 'Product Config', disabled: true },
                 { id: 'category-master', name: 'Product Category', route: '/dashboard/inventory/masters/category-master', group: 'Product Config' },
                 { id: 'brand-master', name: 'Brand Master', route: '/dashboard/inventory/masters/brand-master', group: 'Product Config' },

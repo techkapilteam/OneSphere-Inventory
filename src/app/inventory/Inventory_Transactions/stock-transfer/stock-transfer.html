@@ -84,7 +84,7 @@
               } @else if (field.key === 'fromWarehouse' || field.key === 'toWarehouse') {
                 <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
                   [items]="locationGroupsForField(field)" bindLabel="label" bindValue="label" groupBy="group"
-                  [searchable]="true" [clearable]="true"
+                  [searchable]="true" [clearable]="field.key !== 'fromWarehouse'" [readonly]="field.key === 'fromWarehouse'"
                   [ngModel]="formFieldValue(field)"
                   (ngModelChange)="collectFormField(field.key, $event)"
                   [placeholder]="fieldTypingHint(field)">
@@ -135,7 +135,7 @@
                   (ngModelChange)="collectFormField(field.key, $event)"
                   [placeholder]="fieldTypingHint(field)" />
               }
-              @if (field.addMaster) {
+              @if (field.addMaster && field.key !== 'fromWarehouse') {
                 <button type="button" class="erp-btn btn-white btn-icon"
                   [title]="'Add ' + field.addMaster"
                   (click)="openFieldAddMaster(field)">

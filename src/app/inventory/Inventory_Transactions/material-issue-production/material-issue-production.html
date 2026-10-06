@@ -111,7 +111,7 @@
                 </label>
               } @else if (field.type === 'select' || field.type === 'multiselect') {
                 <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
-                  [items]="field.options || []" [searchable]="true" [clearable]="true"
+                  [items]="field.options || []" [searchable]="true" [clearable]="field.key !== 'fromWarehouse'" [readonly]="field.key === 'fromWarehouse'"
                   [multiple]="field.type === 'multiselect'"
                   [closeOnSelect]="field.type !== 'multiselect'"
                   [ngModel]="formFieldValue(field)"
@@ -147,7 +147,7 @@
                   (ngModelChange)="collectFormField(field.key, $event)"
                   [placeholder]="fieldTypingHint(field)" />
               }
-              @if (field.addMaster) {
+              @if (field.addMaster && field.key !== 'fromWarehouse') {
                 <button type="button" class="erp-btn btn-white btn-icon"
                   [title]="'Add ' + field.addMaster"
                   (click)="openFieldAddMaster(field)">
