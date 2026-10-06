@@ -668,6 +668,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   get segmentOptions(): string[] { return this.segmentOptionList(); }
   get segmentCount(): number { return this.segmentOptions.length; }
   get currentSegmentId(): number | null { return this.selectedSegmentId(); }
+  // True once the segment list has loaded and a segment is selected (or the
+  // load failed / the company has no segments, which degrades to unscoped).
+  // Segment-scoped reference fetches must wait for this: a request sent
+  // earlier carries no segmentId and the server returns EVERY segment.
+  get segmentScopeReady(): boolean {
+    if (!this.segmentsResolved()) return false;
+    return !this.loadedSegmentObjects().length || this.selectedSegmentId() != null;
+  }
   get categoryOptions(): string[] { return this.categoryOptionList(); }
   get categoryCodes(): string[] {
     return this.loadedCategoryObjects()
@@ -11429,7 +11437,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return [];
   }
 
-  private recalculateLineRow(row: string[], rowIndex?: number): void {
+  private recalculateLineRow(row: string[], rowIndex?: number, qtyColumn?: string): void {
     // GRN bills on what was actually kept, not what arrived — Amount = Accepted Qty x Rate.
     // The generic first-match lookup below would otherwise lock onto "Received Qty"
     // since it appears earlier in GRN's lineColumns than "Accepted Qty".
@@ -11448,7 +11456,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       }
       return;
     }
-    const qtyIndex = key === 'purchaseReturn' || key === 'salesReturn'
+    const qtyIndex = qtyColumn
+      ? this.lineColumnIndex(qtyColumn)
+      : key === 'purchaseReturn' || key === 'salesReturn'
       ? this.lineColumnIndex('Return Qty')
       : key === 'goodsReceipt'
         ? this.lineColumnIndex('Accepted Qty')
@@ -12616,6 +12626,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
     const type = this.purchaseReferenceType() || this.salesReferenceType();
     if (!type) return;
+    if (!this.segmentScopeReady) return;
     this.refPickerType.set(type);
     this.refPickerOpen.set(false);
     this.refPickerLoading.set(true);
@@ -13835,7 +13846,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       set('Serial No', item?.serial_no || item?.serialNo || '');
       set('Expiry Date', item?.expiry_date || item?.expiryDate || '');
       set('Amount', String(item?.amount ?? ''));
-      this.recalculateLineRow(row);
+      // Bill on Accepted Qty explicitly: these rows are built before grnId is
+      // patched onto the form, so isGrnLinkedPurchaseInvoice() is still false
+      // here and the default would multiply the (empty) plain Qty column,
+      // overwriting the GRN amount with 0.
+      this.recalculateLineRow(row, undefined, 'Accepted Qty');
       return row;
     }
 
