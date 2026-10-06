@@ -5257,7 +5257,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (master === 'Attribute') {
       this.formValues.update(fv => ({
         ...fv,
-        quickAttributeType: 'Text',
+        quickAttributeType: 'Dropdown',
         quickAttributeValues: '',
         quickAttributeMandatory: 'No',
         quickAttributeStatus: 'active'
