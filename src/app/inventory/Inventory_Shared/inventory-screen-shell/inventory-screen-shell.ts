@@ -14795,6 +14795,21 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       return;
     }
 
+    // Stock screens sit outside the Purchase/Sales/Manufacturing groups above,
+    // so without this the header cleared after Save Draft / Post (and Clear)
+    // but the previous document's line rows stayed in the grid.
+    if (['stockTransfer', 'stockAdjustment', 'openingStockEntry', 'cycleCount'].includes(this.config?.key || '')) {
+      this.entryLineRowsKey.set(this.config.key);
+      this.entryLineRows.set([this.blankLineRow()]);
+      this.lineAttrValueMap.set({});
+      this.lineSerialValueMap.set({});
+      this.lineRefItemIdMap.set({});
+      this.lineSerialUnitsMap.set({});
+      this.lineSerialWarrantyMap.set({});
+      this.applyDefaultLocationToCurrentTransaction(true);
+      return;
+    }
+
     if (this.config?.key === 'vendorMaster' || this.config?.key === 'customerMaster' || this.config?.key === 'channelPartnerMaster') {
       this.selectedPartyContact.set(null);
       this.selectedPartyContactPerson.set(null);
