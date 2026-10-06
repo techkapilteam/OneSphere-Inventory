@@ -11138,7 +11138,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       return this.variantAttributeValueOptions(this.variantLineAttributeName(row));
     }
     if (this.config?.key === 'productServiceMaster' && key.includes('alternate uom')) {
-      return this.uomOptions;
+      return this.productAlternateUomOptions(row);
     }
     const rowProduct = row ? this.findProductBySelection(this.lineValue(row, ['product', 'item', 'sku', 'material'])) : null;
     if (key.includes('variant') && rowProduct) return this.variantOptionsForTransactionRow(rowProduct, row);

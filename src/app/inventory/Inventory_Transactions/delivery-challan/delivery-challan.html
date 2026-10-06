@@ -274,13 +274,13 @@
                       @let cellApplies = lineGridColumnAppliesToRow(row, rowIndex, column, rowView);
                       <td [class]="lineGridColumnCssClass(column)" [class.inventory-hint-anchor]="cellView?.stockHint || cellView?.priceHint">
                         @if (!cellApplies) {
-                          <span class="inventory-grid-na">ï¿½ N/A ï¿½</span>
+                          <span class="inventory-grid-na"> N/A </span>
                         } @else if (lineGridCellReadonly(rowIndex, row, column)) {
-                          <span class="inventory-grid-static-value">{{ lineGridReadonlyCellText(rowIndex, row, column, cellView, rowView) || 'ï¿½' }}</span>
+                          <span class="inventory-grid-static-value">{{ lineGridReadonlyCellText(rowIndex, row, column, cellView, rowView) || '' }}</span>
                         } @else if (lineGridColumnIsAttributeValue(column)) {
                           @if (lineGridAttributeSelection(rowView, column); as attr) {
                             @if (attr.isAuto) {
-                              <span class="inventory-grid-static-value">{{ attr.value || 'ï¿½' }}</span>
+                              <span class="inventory-grid-static-value">{{ attr.value || '' }}</span>
                             } @else {
                               <ng-select class="erp-ng-select inventory-ng-select inventory-grid-select inventory-attr-select" appendTo="body"
                                 [items]="attr.options" [searchable]="false" [clearable]="false"
@@ -289,7 +289,7 @@
                               </ng-select>
                             }
                           } @else {
-                            <span class="inventory-grid-empty-hint">ï¿½</span>
+                            <span class="inventory-grid-empty-hint"></span>
                           }
                         } @else if (lineGridColumnIsSerialPicker(column) && isSerialApplicableRow(row)) {
                           <button type="button" class="erp-btn btn-white btn-sm inventory-serial-trigger" (click)="openSerialPicker(rowIndex, row)">
@@ -559,12 +559,12 @@
                                 @for (column of dcColumns; track column.key) {
                                   <td>
                                     @if (column.key === 'product') {
-                                      <strong>{{ grnExpandedCell(item, column, i) || 'ï¿½' }}</strong>
+                                      <strong>{{ grnExpandedCell(item, column, i) || '' }}</strong>
                                       @if (grnExpandedProductSubtitle(item); as subtitle) {
                                         <br><small class="inventory-grid-subtitle">{{ subtitle }}</small>
                                       }
                                     } @else {
-                                      {{ grnExpandedCell(item, column, i) || 'ï¿½' }}
+                                      {{ grnExpandedCell(item, column, i) || '' }}
                                     }
                                   </td>
                                 }
@@ -586,7 +586,7 @@
                       @if (isDeliveryChallanCloseable(row)) {
                         <div class="grn-expand-actions">
                           <button type="button" class="erp-btn btn-white btn-sm" title="Reverse the unbilled quantity back to stock and stop further invoicing against this DC" (click)="closeDeliveryChallanRecordByRow(row)">
-                            <i class="pi pi-lock"></i> Close DC â€” Return unbilled qty to stock
+                            <i class="pi pi-lock"></i> Close DC  Return unbilled qty to stock
                           </button>
                         </div>
                       }
@@ -643,7 +643,7 @@
                           <i class="pi" [class.pi-chevron-down]="isRefPickerExpanded(doc.id)" [class.pi-chevron-right]="!isRefPickerExpanded(doc.id)"></i>
                         </button>
                       </td>
-                      <td>{{ doc.doc_type || 'ï¿½' }}</td>
+                      <td>{{ doc.doc_type || '' }}</td>
                       <td>{{ doc.doc_number }}</td>
                       <td>{{ gridDateDisplay(doc.doc_date) }}</td>
                       <td>{{ doc.party_name }}</td>

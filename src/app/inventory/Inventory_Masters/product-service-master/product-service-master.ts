@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, computed, signal } from '@angular/core';
+import { Component, computed, effect, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { NgSelectModule } from '@ng-select/ng-select';
@@ -36,6 +36,35 @@ export class InventoryProductServiceMasterComponent extends InventoryScreenShell
 
   private pmTabsPinned = false;
   private readonly onProductMasterTabsScroll = () => this.syncProductMasterTabsPin();
+
+  constructor() {
+    super();
+    // Product natures arrive asynchronously (GET /inventory/config/product-types),
+    // so apply the default once they're loaded. untracked() keeps this effect
+    // from re-running on every form edit -- it only reacts to the natures list.
+    effect(() => {
+      if (!this.productNatureObjects.length) return;
+      untracked(() => this.applyDefaultProductNature());
+    });
+  }
+
+  // A fresh form (after Save or Clear) gets the default nature again.
+  override clearConfigForm(): void {
+    super.clearConfigForm();
+    this.applyDefaultProductNature();
+  }
+
+  // New products default to "Physical Stock". Never overrides a nature that is
+  // already set (editing a saved product, or the BOM "Add Product" return flow).
+  private applyDefaultProductNature(): void {
+    if (this.editingId() !== null) return;
+    const values = this.formValues();
+    if (values['productNatureId'] || values['productNatureName']) return;
+    const nature = this.productNatureObjects.find(n =>
+      String(n.type_name || '').trim().toLowerCase() === 'physical stock'
+    );
+    if (nature) this.onProductNatureChange(nature.id);
+  }
 
   override ngAfterViewInit(): void {
     super.ngAfterViewInit();

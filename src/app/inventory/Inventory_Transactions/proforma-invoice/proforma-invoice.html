@@ -377,12 +377,12 @@
                                 @for (column of proformaColumns; track column.key) {
                                   <td>
                                     @if (column.key === 'product') {
-                                      <strong>{{ grnExpandedCell(item, column, i) || 'ï¿½' }}</strong>
+                                      <strong>{{ grnExpandedCell(item, column, i) || '' }}</strong>
                                       @if (grnExpandedProductSubtitle(item); as subtitle) {
                                         <br><small class="inventory-grid-subtitle">{{ subtitle }}</small>
                                       }
                                     } @else {
-                                      {{ grnExpandedCell(item, column, i) || 'ï¿½' }}
+                                      {{ grnExpandedCell(item, column, i) || '' }}
                                     }
                                   </td>
                                 }

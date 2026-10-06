@@ -21,7 +21,7 @@
               <div [class.inventory-reference-picker-field]="transactionReferencePickerButtonVisible(refField)">
                 @if (config.key === 'salesReturn') {
                   <div class="erp-input inventory-readonly-label" [class.inventory-readonly-label--empty]="!formFieldValue(refField)">
-                    {{ formFieldValue(refField) || 'Not selected â€” use Pick Reference' }}
+                    {{ formFieldValue(refField) || 'Not selected  use Pick Reference' }}
                   </div>
                 } @else if (transactionReferenceUsesSelect(refField)) {
                   <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
@@ -253,7 +253,7 @@
                           @if (!cellApplies) {
                             <span class="inventory-grid-na">-</span>
                           } @else if (lineGridCellReadonly(rowIndex, row, column)) {
-                            <span class="inventory-grid-static-value">{{ lineGridReadonlyCellText(rowIndex, row, column, cellView, rowView) || 'â€”' }}</span>
+                            <span class="inventory-grid-static-value">{{ lineGridReadonlyCellText(rowIndex, row, column, cellView, rowView) || '' }}</span>
                           } @else if (lineGridColumnIsSerialPicker(column) && isSerialApplicableRow(row)) {
                             <button type="button" class="erp-btn btn-white btn-sm inventory-serial-trigger" (click)="openSerialPicker(rowIndex, row)">
                               {{ serialPickerSummaryForRow(rowIndex, row) }}
@@ -481,12 +481,12 @@
                                 @for (column of returnColumns; track column.key) {
                                   <td>
                                     @if (column.key === 'product') {
-                                      <strong>{{ grnExpandedCell(item, column, i) || 'ï¿½' }}</strong>
+                                      <strong>{{ grnExpandedCell(item, column, i) || '' }}</strong>
                                       @if (grnExpandedProductSubtitle(item); as subtitle) {
                                         <br><small class="inventory-grid-subtitle">{{ subtitle }}</small>
                                       }
                                     } @else {
-                                      {{ grnExpandedCell(item, column, i) || 'ï¿½' }}
+                                      {{ grnExpandedCell(item, column, i) || '' }}
                                     }
                                   </td>
                                 }

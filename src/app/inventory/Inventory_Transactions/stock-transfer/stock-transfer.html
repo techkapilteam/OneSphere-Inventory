@@ -192,9 +192,9 @@
                       @let cellApplies = lineGridColumnAppliesToRow(row, rowIndex, column, rowView);
                       <td [class]="lineGridColumnCssClass(column)" [class.inventory-hint-anchor]="cellView?.stockHint">
                         @if (!cellApplies) {
-                          <span class="inventory-grid-na">â€” N/A â€”</span>
+                          <span class="inventory-grid-na"> N/A </span>
                         } @else if (lineGridCellReadonly(rowIndex, row, column)) {
-                          <span class="inventory-grid-static-value">{{ lineGridReadonlyCellText(rowIndex, row, column, cellView, rowView) || 'â€”' }}</span>
+                          <span class="inventory-grid-static-value">{{ lineGridReadonlyCellText(rowIndex, row, column, cellView, rowView) || '' }}</span>
                         } @else if (lineGridColumnIsSerialPicker(column) && isSerialApplicableRow(row)) {
                           <button type="button" class="erp-btn btn-white btn-sm inventory-serial-trigger" (click)="openSerialPicker(rowIndex, row)">
                             {{ serialPickerSummaryForRow(rowIndex, row) }}

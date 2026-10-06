@@ -368,9 +368,9 @@
                       @let cellApplies = lineGridColumnAppliesToRow(row, rowIndex, column, rowView);
                       <td [class]="lineGridColumnCssClass(column)" [class.inventory-hint-anchor]="cellView?.stockHint || cellView?.priceHint">
                         @if (!cellApplies) {
-                          <span class="inventory-grid-na">ï¿½ N/A ï¿½</span>
+                          <span class="inventory-grid-na"> N/A </span>
                         } @else if (lineGridCellReadonly(rowIndex, row, column)) {
-                          <span class="inventory-grid-static-value">{{ lineGridReadonlyCellText(rowIndex, row, column, cellView, rowView) || 'ï¿½' }}</span>
+                          <span class="inventory-grid-static-value">{{ lineGridReadonlyCellText(rowIndex, row, column, cellView, rowView) || '' }}</span>
                         } @else if (lineGridColumnIsProduct(column)) {
                           <app-inventory-line-product-picker
                             [host]="this" [rowIndex]="rowIndex" [column]="column"
@@ -381,7 +381,7 @@
                         } @else if (lineGridColumnIsAttributeValue(column)) {
                           @if (lineGridAttributeSelection(rowView, column); as attr) {
                             @if (attr.isAuto) {
-                              <span class="inventory-grid-static-value">{{ attr.value || 'ï¿½' }}</span>
+                              <span class="inventory-grid-static-value">{{ attr.value || '' }}</span>
                             } @else {
                               <ng-select class="erp-ng-select inventory-ng-select inventory-grid-select inventory-attr-select" appendTo="body"
                                 [items]="attr.options" [searchable]="false" [clearable]="false"
@@ -390,7 +390,7 @@
                               </ng-select>
                             }
                           } @else {
-                            <span class="inventory-grid-empty-hint">ï¿½</span>
+                            <span class="inventory-grid-empty-hint"></span>
                           }
                         } @else if (lineGridColumnIsSerialPicker(column) && isSerialApplicableRow(row)) {
                           @if (isCurrentRecordPosted()) {
@@ -763,12 +763,12 @@
                                 @for (column of siColumns; track column.key) {
                                   <td>
                                     @if (column.key === 'product') {
-                                      <strong>{{ grnExpandedCell(item, column, i) || 'ï¿½' }}</strong>
+                                      <strong>{{ grnExpandedCell(item, column, i) || '' }}</strong>
                                       @if (grnExpandedProductSubtitle(item); as subtitle) {
                                         <br><small class="inventory-grid-subtitle">{{ subtitle }}</small>
                                       }
                                     } @else {
-                                      {{ grnExpandedCell(item, column, i) || 'ï¿½' }}
+                                      {{ grnExpandedCell(item, column, i) || '' }}
                                     }
                                   </td>
                                 }
@@ -850,7 +850,7 @@
                           <i class="pi" [class.pi-chevron-down]="isRefPickerExpanded(referenceDocTrackKey(doc))" [class.pi-chevron-right]="!isRefPickerExpanded(referenceDocTrackKey(doc))"></i>
                         </button>
                       </td>
-                      @if (refPickerDocsHaveType()) { <td>{{ doc.doc_type || 'ï¿½' }}</td> }
+                      @if (refPickerDocsHaveType()) { <td>{{ doc.doc_type || '' }}</td> }
                       <td>{{ doc.doc_number }}</td>
                       <td>{{ gridDateDisplay(doc.doc_date) }}</td>
                       <td>{{ doc.party_name }}</td>
