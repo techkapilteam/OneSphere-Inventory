@@ -59,6 +59,7 @@
             <div class="erp-form-group">
               <label class="erp-label">{{ numField.label }}</label>
               <input class="erp-input" type="text"
+                readonly
                 [ngModel]="transactionNumberValue(numField)"
                 (ngModelChange)="collectFormField(numField.key, $event)"
                 [placeholder]="transactionNumberPlaceholder(numField)" />
