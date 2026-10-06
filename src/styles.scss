@@ -3706,13 +3706,9 @@ input[type='date'].erp-input {
   .erp-btn:has(.pi-file-pdf),
   .erp-btn:has(.pi-file-excel),
   .erp-btn:has(.pi-download),
-  .erp-btn:has(.pi-envelope),
-  .erp-btn:has(.pi-whatsapp),
   .icon-action:has(.pi-print),
   .icon-action:has(.pi-file-pdf),
-  .icon-action:has(.pi-file-excel),
-  .icon-action:has(.pi-envelope),
-  .icon-action:has(.pi-whatsapp) {
+  .icon-action:has(.pi-file-excel) {
     width: 34px;
     min-width: 34px;
     height: 32px;
@@ -3736,8 +3732,6 @@ input[type='date'].erp-input {
   :has(.pi-file-pdf) { order: 2; }
   :has(.pi-file-excel),
   :has(.pi-download) { order: 3; }
-  :has(.pi-envelope) { order: 4; }
-  :has(.pi-whatsapp) { order: 5; }
 }
 
 /* Table wrapper */

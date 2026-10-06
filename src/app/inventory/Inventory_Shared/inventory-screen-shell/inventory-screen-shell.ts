@@ -66,7 +66,6 @@ interface GridExportPayload {
   summary?: Array<[string, string]>;
   notes?: string;
   notesLabel?: string;
-  mailBody?: string;
   fileName?: string;
 }
 
@@ -6846,17 +6845,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.setGridPage(tableId, this.gridPage(tableId) + 1);
   }
 
-  runGridToolbarAction(tableId: string, action: 'print' | 'pdf' | 'excel' | 'mail' | 'whatsapp'): void {
-    if (action === 'whatsapp') {
-      this.saveError.set('Secure WhatsApp sending is not configured yet. Use Print, PDF, Excel, or Mail for now.');
-      setTimeout(() => this.saveError.set(''), 3500);
-      return;
-    }
-
+  runGridToolbarAction(tableId: string, action: 'print' | 'pdf' | 'excel'): void {
     const docStyledKeys = ['purchaseInvoice', 'salesInvoice', 'deliveryChallan'];
-    if ((action === 'print' || action === 'pdf' || action === 'mail') && tableId === 'records'
+    if ((action === 'print' || action === 'pdf') && tableId === 'records'
         && docStyledKeys.includes(this.config?.key || '') && !this.expandedGrnId()) {
-      this.saveMsg.set(`Expand a ${this.config?.title || 'record'} row first, then use Print, PDF, or Mail for the document format.`);
+      this.saveMsg.set(`Expand a ${this.config?.title || 'record'} row first, then use Print or PDF for the document format.`);
       setTimeout(() => this.saveMsg.set(''), 3500);
       return;
     }
@@ -6868,11 +6861,6 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       return;
     }
 
-    if (action === 'mail') {
-      this.mailGridPayload(payload);
-      return;
-    }
-
     if (action === 'print' || action === 'pdf') {
       this.printGridPayload(payload, action === 'pdf');
       return;
@@ -6881,7 +6869,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.downloadGridExcel(payload);
   }
 
-  private gridToolbarActionFromTitle(title: string): 'print' | 'pdf' | 'excel' | 'mail' | 'whatsapp' | '' {
+  private gridToolbarActionFromTitle(title: string): 'print' | 'pdf' | 'excel' | '' {
     switch (String(title || '').trim().toLowerCase()) {
       case 'print':
         return 'print';
@@ -6889,10 +6877,6 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         return 'pdf';
       case 'export excel':
         return 'excel';
-      case 'mail':
-        return 'mail';
-      case 'whatsapp':
-        return 'whatsapp';
       default:
         return '';
     }
@@ -7188,16 +7172,6 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]]),
       ['Round off', this.moneyValue(totals.roundOff)]
     ];
-    const mailBody = [
-      `Purchase Invoice: ${docNo}`,
-      '',
-      ...fields.map(([label, value]) => `${label}: ${value}`),
-      '',
-      exportColumns.join(' | '),
-      ...exportRows.map(row => row.join(' | ')),
-      '',
-      `Grand total: ${this.formatCurrency(totals.total)}`
-    ].join('\n');
     return {
       title: `Purchase Invoice - ${docNo || 'Selected Record'}`,
       fields,
@@ -7206,7 +7180,6 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       summary: [...summaryRows, ['Grand Total', this.formatCurrency(totals.total)]] as Array<[string, string]>,
       notes: String(record.remarks || ''),
       notesLabel: 'Notes / Terms',
-      mailBody,
       fileName: `Purchase_Invoice_${docNo || 'Selected_Record'}`
     };
   }
@@ -7268,16 +7241,6 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         ? [['IGST', this.moneyValue(totals.igst)]]
         : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]])
     ];
-    const mailBody = [
-      `Sales Invoice: ${docNo}`,
-      '',
-      ...fields.map(([label, value]) => `${label}: ${value}`),
-      '',
-      exportColumns.join(' | '),
-      ...exportRows.map(row => row.join(' | ')),
-      '',
-      `Grand total: ${this.formatCurrency(totals.total)}`
-    ].join('\n');
     return {
       title: `Sales Invoice - ${docNo || 'Selected Record'}`,
       fields,
@@ -7286,7 +7249,6 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       summary: [...summaryRows, ['Grand Total', this.formatCurrency(totals.total)]] as Array<[string, string]>,
       notes: String(record.customer_notes || record.customerNotes || ''),
       notesLabel: 'Notes / Terms',
-      mailBody,
       fileName: `Sales_Invoice_${docNo || 'Selected_Record'}`
     };
   }
@@ -7336,16 +7298,6 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['SI Reference', siReference],
       ['Status', toInventoryTitleCase(String(record.display_status || record.displayStatus || record.status || 'draft'))]
     ];
-    const mailBody = [
-      `Delivery Challan: ${docNo}`,
-      '',
-      ...fields.map(([label, value]) => `${label}: ${value}`),
-      '',
-      exportColumns.join(' | '),
-      ...exportRows.map(row => row.join(' | ')),
-      '',
-      `Total Dispatch Qty: ${this.moneyValue(totalDispatchQty)}`
-    ].join('\n');
     return {
       title: `Delivery Challan - ${docNo || 'Selected Record'}`,
       fields,
@@ -7354,7 +7306,6 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       summary: [['Items', String(items.length)], ['Total Dispatch Qty', this.moneyValue(totalDispatchQty)]],
       notes: String(record.remarks || ''),
       notesLabel: 'Notes / Remarks',
-      mailBody,
       fileName: `Delivery_Challan_${docNo || 'Selected_Record'}`
     };
   }
@@ -7376,25 +7327,6 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       notesLabel: payload.notesLabel,
       fileName: payload.fileName || payload.title
     };
-  }
-
-  private mailGridPayload(payload: GridExportPayload): void {
-    const fieldLines = payload.fields.map(([label, value]) => `${label}: ${value}`);
-    const tableLines = [
-      payload.columns.join(' | '),
-      ...payload.rows.map(row => row.join(' | '))
-    ];
-    const body = payload.mailBody || [
-      payload.title,
-      '',
-      ...fieldLines,
-      ...(fieldLines.length ? [''] : []),
-      ...tableLines
-    ].join('\n');
-    const url = `mailto:?subject=${encodeURIComponent(payload.title)}&body=${encodeURIComponent(body)}`;
-    window.location.href = url;
-    this.saveMsg.set('Mail draft opened with the selected details.');
-    setTimeout(() => this.saveMsg.set(''), 3000);
   }
 
   private downloadGridExcel(payload: GridExportPayload): void {
@@ -17114,7 +17046,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // line grid (via [attr.inert]) and to disable Save Draft/Post once a
   // record has moved past Draft — dispatches to the per-family posted checks
   // above so the "is this record locked" rule lives in exactly one place.
-  // Print/Export PDF/Export Excel/Mail/WhatsApp toolbar icons above each
+  // Print/Export PDF/Export Excel toolbar icons above each
   // transaction screen's "Existing Saved" grid hide while the record
   // currently open in the form above is still a Draft -- nothing finalized
   // to export/print/share yet. Deliberately status-based rather than
