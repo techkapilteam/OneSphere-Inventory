@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, ViewChild, inject, signal } from '@angular/core';
+import { Component, OnDestroy, ViewChild, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, SafeResourceUrl, SafeUrl } from '@angular/platform-browser';
 import { RouterModule } from '@angular/router';
@@ -190,17 +190,21 @@ export class InventoryPurchaseInvoiceComponent extends InventoryScreenShell impl
   readonly expandedAttachmentPreviewFrameUrl = signal<SafeResourceUrl | null>(null);
   private expandedAttachmentPreviewObjectUrl: string | null = null;
 
-  override ngOnInit(): void {
-    super.ngOnInit();
-    [0, 350, 900].forEach(delay => {
-      setTimeout(() => {
-        const alreadyPicked = String(this.formValues()['grnReference'] || '').trim();
-        if (!this.editingId() && !alreadyPicked && !this.refPickerOpen()) {
-          this.openPurchaseReferencePicker();
-        }
-      }, delay);
+  // Auto-opens the Posted GRNs tray once, as soon as the segment is known.
+  // This used to fire on fixed 0/350/900ms timers; the 0ms one ran before the
+  // segment list loaded, so its request had no segmentId and the tray listed
+  // GRNs from every segment on first open.
+  private grnTrayAutoOpened = false;
+  private readonly autoOpenGrnTray = effect(() => {
+    if (this.grnTrayAutoOpened || !this.segmentScopeReady) return;
+    this.grnTrayAutoOpened = true;
+    untracked(() => {
+      const alreadyPicked = String(this.formValues()['grnReference'] || '').trim();
+      if (!this.editingId() && !alreadyPicked && !this.refPickerOpen()) {
+        this.openPurchaseReferencePicker();
+      }
     });
-  }
+  });
 
   // transactionLineDisplayColumns()/lineGridRenderColumns() used to be
   // overridden here with a local copy of the MRP/Selling + GRN-linked
