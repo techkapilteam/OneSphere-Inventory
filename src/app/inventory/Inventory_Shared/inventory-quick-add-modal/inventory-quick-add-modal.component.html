@@ -523,7 +523,7 @@
               <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
                 [items]="['Text', 'Number', 'Date', 'Dropdown', 'Multi Select', 'Yes/No']"
                 [searchable]="true" [clearable]="false"
-                [ngModel]="host.formValues()['quickAttributeType'] || 'Text'"
+                [ngModel]="host.formValues()['quickAttributeType'] || 'Dropdown'"
                 (ngModelChange)="host.collectFormField('quickAttributeType', $event)"
                 placeholder="Select Attribute Type">
               </ng-select>
