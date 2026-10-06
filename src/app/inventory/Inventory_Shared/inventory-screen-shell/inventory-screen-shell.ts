@@ -5273,7 +5273,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         ...fv,
         quickAttributeType: 'Dropdown',
         quickAttributeValues: '',
-        quickAttributeMandatory: 'No',
+        quickAttributeMandatory: 'Yes',
         quickAttributeStatus: 'active'
       }));
     }
@@ -14805,6 +14805,21 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.lineRefItemIdMap.set({});
       this.lineSerialUnitsMap.set({});
     this.lineSerialWarrantyMap.set({});
+      this.applyDefaultLocationToCurrentTransaction(true);
+      return;
+    }
+
+    // Stock screens sit outside the Purchase/Sales/Manufacturing groups above,
+    // so without this the header cleared after Save Draft / Post (and Clear)
+    // but the previous document's line rows stayed in the grid.
+    if (['stockTransfer', 'stockAdjustment', 'openingStockEntry', 'cycleCount'].includes(this.config?.key || '')) {
+      this.entryLineRowsKey.set(this.config.key);
+      this.entryLineRows.set([this.blankLineRow()]);
+      this.lineAttrValueMap.set({});
+      this.lineSerialValueMap.set({});
+      this.lineRefItemIdMap.set({});
+      this.lineSerialUnitsMap.set({});
+      this.lineSerialWarrantyMap.set({});
       this.applyDefaultLocationToCurrentTransaction(true);
       return;
     }
