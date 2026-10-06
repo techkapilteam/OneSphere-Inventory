@@ -224,7 +224,7 @@
                                 <div class="inventory-attr-item">
                                   <span class="inventory-attr-label">{{ attr.name }}</span>
                                   @if (attr.isAuto) {
-                                    <span class="erp-badge badge-info">{{ attr.value || 'ï¿½' }}</span>
+                                    <span class="erp-badge badge-info">{{ attr.value || '' }}</span>
                                   } @else {
                                     <ng-select class="erp-ng-select inventory-ng-select inventory-grid-select inventory-attr-select" appendTo="body"
                                       [items]="attr.options" [searchable]="false" [clearable]="false"
@@ -236,7 +236,7 @@
                               }
                             </div>
                           } @else {
-                            <span class="inventory-grid-empty-hint">ï¿½</span>
+                            <span class="inventory-grid-empty-hint"></span>
                           }
                         } @else if (lineGridColumnIsGstValue(column)) {
                           <div class="inventory-gst-cell" [class.inventory-gst-cell--included]="lineGstIncluded(rowIndex)">
@@ -299,7 +299,7 @@
                           @for (attr of rowView?.attrSelections || []; track attr.name) {
                             <div class="inventory-line-subcell">
                               @if (attr.isAuto) {
-                                <small class="inventory-grid-subtitle">{{ attr.name }}: {{ attr.value || 'â€”' }}</small>
+                                <small class="inventory-grid-subtitle">{{ attr.name }}: {{ attr.value || '' }}</small>
                               } @else {
                                 <ng-select class="erp-ng-select inventory-ng-select inventory-grid-select inventory-grid-select-sm inventory-attr-select" appendTo="body"
                                   [items]="attr.options" [searchable]="false" [clearable]="false"

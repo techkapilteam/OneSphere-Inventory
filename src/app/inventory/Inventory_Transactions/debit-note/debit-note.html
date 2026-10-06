@@ -409,7 +409,7 @@
                             @for (item of noteItems; track $index; let i = $index) {
                               <tr>
                                 @for (column of noteColumns; track column.key) {
-                                  <td>{{ grnExpandedCell(item, column, i) || 'ï¿½' }}</td>
+                                  <td>{{ grnExpandedCell(item, column, i) || '' }}</td>
                                 }
                               </tr>
                             }
