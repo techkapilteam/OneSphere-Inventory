@@ -1231,14 +1231,14 @@ export const productServiceMasterConfig: InventoryScreenConfig = {
     { key: 'saleUom', label: 'Saleable / Billable UOM', type: 'select', options: INVENTORY_OPTIONS.uoms, addMaster: 'UOM' },
     { key: 'behavior', label: 'Transaction Behavior', type: 'select', options: INVENTORY_OPTIONS.behavior }
   ],
-  columns: ['Product Code', 'SKU', 'Name', 'Product Category', 'Base UOM', 'Variants', 'Mapped UOMs', 'Valuation', 'HSN/SAC', 'GST %', 'Status'],
+  columns: ['Product Code', 'SKU', 'Name', 'Product Category', 'Product Nature', 'Base UOM', 'Variants', 'Mapped UOMs', 'Valuation', 'HSN/SAC', 'GST %', 'Status'],
   rows: [
-    ['ITM-1001', 'LED Display', 'LED Display', 'Computers & Devices', 'Nos', '', '', 'FIFO', '8471', '18', 'Active'],
-    ['SRV-2090', 'AMC Support', 'AMC Support', 'IT Services', 'Month', '', '', 'Weighted Average', '998313', '18', 'Active'],
-    ['UNT-A1204', 'Flat A-1204', 'Flat A-1204', 'Real Estate Units', 'Unit', '', '', 'Specific Identification', '9954', '18', 'Active'],
-    ['FOD-1001', 'Basmati Rice', 'Basmati Rice', 'Raw Ingredients', 'KG', '', 'Bag x 25 (Purchase)', 'FIFO', '1006', '5', 'Active'],
-    ['MENU-204', 'Paneer Tikka', 'Paneer Tikka', 'Menu Items', 'Plate', '', '', 'Recipe Cost', '996331', '5', 'Active'],
-    ['ROOM-304', 'Deluxe Room 304', 'Deluxe Room 304', 'Rooms', 'Room-Night', '', '', 'Specific Identification', '996332', '12', 'Active']
+    ['ITM-1001', 'LED Display', 'LED Display', 'Computers & Devices', '', 'Nos', '', '', 'FIFO', '8471', '18', 'Active'],
+    ['SRV-2090', 'AMC Support', 'AMC Support', 'IT Services', '', 'Month', '', '', 'Weighted Average', '998313', '18', 'Active'],
+    ['UNT-A1204', 'Flat A-1204', 'Flat A-1204', 'Real Estate Units', '', 'Unit', '', '', 'Specific Identification', '9954', '18', 'Active'],
+    ['FOD-1001', 'Basmati Rice', 'Basmati Rice', 'Raw Ingredients', '', 'KG', '', 'Bag x 25 (Purchase)', 'FIFO', '1006', '5', 'Active'],
+    ['MENU-204', 'Paneer Tikka', 'Paneer Tikka', 'Menu Items', '', 'Plate', '', '', 'Recipe Cost', '996331', '5', 'Active'],
+    ['ROOM-304', 'Deluxe Room 304', 'Deluxe Room 304', 'Rooms', '', 'Room-Night', '', '', 'Specific Identification', '996332', '12', 'Active']
   ],
   lineTitle: 'Alternate UOM Conversion Mapping',
   lineColumns: ['Alternate UOM', 'Conversion Factor', 'Is Purchase', 'Is Sales', 'Active'],

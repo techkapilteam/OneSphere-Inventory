@@ -22763,6 +22763,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           r.sku || '',
           r.product_name || '',
           r.category_name || '',
+          r.product_nature_name || '',
           r.base_uom_symbol || r.base_uom_name || '',
           this.productVariantGridSummary(r),
           this.productUomMappingGridSummary(r),
