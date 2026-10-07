@@ -6012,6 +6012,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!name) { this.quickAddError.set('Vendor name is required.'); return; }
     const quickVendorPanError = this.panValidationMessage(this.formValues()['quickVendorPan']);
     if (quickVendorPanError) { this.quickAddError.set(quickVendorPanError); return; }
+    const quickVendorTaxIdError = this.quickVendorTaxIdValidationMessage();
+    if (quickVendorTaxIdError) { this.quickAddError.set(quickVendorTaxIdError); return; }
     if (this.isSavingQuickAdd()) return;
     const v = this.formValues();
     const code = this.quickAddCode().trim() || this.generateCodeFromName(name) || null;
@@ -6066,6 +6068,26 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         this.quickAddError.set(this.apiErrorMessage(err, 'Failed to save vendor.'));
       }
     });
+  }
+
+  // Quick-add Vendor only: PAN and at least one complete GSTIN / State row are
+  // mandatory. Each row needs a State and a valid 15-char GSTIN whose embedded
+  // PAN (chars 3-12) matches the PAN entered above.
+  private quickVendorTaxIdValidationMessage(): string {
+    const v = this.formValues();
+    const pan = String(v['quickVendorPan'] ?? '').trim().toUpperCase();
+    if (!pan) return 'PAN is required.';
+    const rows: any[] = Array.isArray(v['quickVendorGstins']) ? v['quickVendorGstins'] : [];
+    if (!rows.length) return 'Add at least one GSTIN / State.';
+    for (let i = 0; i < rows.length; i++) {
+      const rowNo = rows.length > 1 ? ` (row ${i + 1})` : '';
+      const gstin = String(rows[i]?.gstin ?? '').trim().toUpperCase();
+      if (!String(rows[i]?.stateName ?? '').trim()) return `Select State for GSTIN${rowNo}.`;
+      if (!gstin) return `GSTIN is required${rowNo}.`;
+      if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gstin)) return `Enter a valid 15-character GSTIN${rowNo}.`;
+      if (gstin.slice(2, 12) !== pan) return `GSTIN${rowNo} does not match the PAN entered.`;
+    }
+    return '';
   }
 
   saveQuickCustomer(): void {
@@ -6476,7 +6498,17 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       quickVendorEmail: contact?.email || '',
       quickVendorGstin: contact?.gstin || '',
       quickVendorPan: contact?.pan || '',
-      quickVendorAddress: contact?.address || ''
+      quickVendorAddress: contact?.address || '',
+      // GSTIN / State is mandatory on quick-add Vendor: seed the first row from
+      // the contact's GSTIN (user still picks the State) unless rows exist.
+      quickVendorGstins: (Array.isArray(fv['quickVendorGstins']) && fv['quickVendorGstins'].length) || !contact?.gstin
+        ? fv['quickVendorGstins']
+        : [{
+            stateName: '',
+            stateCode: /^[0-9]{2}/.test(contact.gstin) ? contact.gstin.slice(0, 2) : null,
+            gstin: String(contact.gstin).toUpperCase(),
+            isPrimary: true
+          }]
     }));
   }
 
@@ -6534,13 +6566,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const contactSource = payload['contact_source'];
     if (!Number.isFinite(contactId) || contactId <= 0 || !contactSource) return of(null);
     const name = payload['vendor_name'] || payload['customer_name'] || payload['partner_name'] || '';
+    // Vendor/Customer saves send a 'gstins' list, not a flat 'gstin' -- use
+    // the primary row (else the first) so the GSTIN reaches the contact too.
+    const gstinRows: any[] = Array.isArray(payload['gstins']) ? payload['gstins'] : [];
+    const primaryGstinRow = gstinRows.find(row => row?.isPrimary && row?.gstin) || gstinRows.find(row => row?.gstin);
+    const gstin = payload['gstin'] || primaryGstinRow?.gstin || null;
     if (contactSource === 'global_contact') {
       return this.inventoryConfigService.updateGlobalContact({
         name,
         mobile: payload['mobile'] || null,
         email: payload['email'] || null,
         pan: payload['pan'] || null,
-        gstin: payload['gstin'] || null,
+        gstin,
         address: payload['address'] || null,
         // Keyed off the payload shape (not config.key) so this stays correct
         // when the vendor save comes through the quick-add modal opened from
@@ -6548,7 +6585,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         mark_supplier: !!payload['vendor_name'],
         mark_customer: !!payload['customer_name'],
         mark_channel_partner: !!payload['partner_name']
-      }, contactId).pipe(catchError(() => of(null)));
+      }, contactId).pipe(
+        catchError(() => of(null)),
+        // Vendors also need a tbl_mst_supplier row to appear in Global
+        // Contacts' "Supplier / Vendor" tab (is_supplier_applicable alone
+        // isn't enough). Errors ignored -- usually "already registered".
+        concatMap(() => payload['vendor_name']
+          ? this.inventoryConfigService.markContactAsSupplier(contactId, payload['pan']).pipe(catchError(() => of(null)))
+          : of(null))
+      );
     }
     if (contactSource === 'inv_contacts') {
       return this.inventoryConfigService.saveContact({
@@ -6556,7 +6601,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         name,
         mobile: payload['mobile'] || null,
         email: payload['email'] || null,
-        gstin: payload['gstin'] || null,
+        gstin,
         pan: payload['pan'] || null,
         address: payload['address'] || null
       }, contactId).pipe(catchError(() => of(null)));

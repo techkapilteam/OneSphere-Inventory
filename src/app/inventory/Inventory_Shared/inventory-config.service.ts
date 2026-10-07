@@ -2109,6 +2109,23 @@ export class InventoryConfigService {
     ), item => this.normalizeContact(item));
   }
 
+  // Global Contacts' "Supplier / Vendor" tab lists only contacts with an active
+  // global.tbl_mst_supplier row (per company/branch). Reuses the Accounts
+  // Contacts screen's own endpoint so an Inventory vendor shows up there too.
+  // The SP rejects a contact already registered for this company/branch --
+  // callers treat that as success.
+  markContactAsSupplier(contactId: number, pan?: string | null): Observable<unknown> {
+    const params = new HttpParams()
+      .set('globalSchema', 'global')
+      .set('companyCode', sessionStorage.getItem('companyCode') ?? '')
+      .set('branchCode', sessionStorage.getItem('branchCode') ?? '');
+    return this.http.post(
+      `${this.base()}/ContactMore/SaveContactSupplier`,
+      { pContactId: String(contactId), pIsSupplier: true, pPanNumber: pan || null },
+      { headers: this.headers(), params }
+    );
+  }
+
   updateGlobalContact(payload: Record<string, any>, id: number): Observable<ApiResponse<ContactItem>> {
     const body = this.toApiValue(payload);
     return this.mapItem(

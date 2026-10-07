@@ -46,7 +46,7 @@
       }
 
       <!-- Previous: <div class="erp-form-group"><label class="erp-label">PAN</label><input class="erp-input" type="text" [ngModel]="host.formValues()[pfx('pan')] || ''" (ngModelChange)="host.collectFormField(pfx('pan'), $event)" placeholder="Auto bind from Global Contact, editable" /></div> -->
-      <div class="erp-form-group"><label class="erp-label">PAN</label><input class="erp-input" type="text" [ngModel]="host.formValues()[pfx('pan')] || ''" (ngModelChange)="host.collectFormField(pfx('pan'), $event)" [placeholder]="host.panPlaceholder(!!host.selectedPartyContact())" /></div>
+      <div class="erp-form-group"><label class="erp-label">PAN @if (taxIdsRequired) {<span class="text-danger">*</span>}</label><input class="erp-input" type="text" maxlength="10" [ngModel]="host.formValues()[pfx('pan')] || ''" (ngModelChange)="host.collectFormField(pfx('pan'), $event)" [placeholder]="host.panPlaceholder(!!host.selectedPartyContact())" /></div>
       @if (partyKind === 'channelPartner') {
         <div class="erp-form-group"><label class="erp-label">GSTIN</label><input class="erp-input" type="text" maxlength="15" [ngModel]="host.formValues()[pfx('gstin')] || ''" (ngModelChange)="host.collectFormField(pfx('gstin'), $event)" placeholder="Auto bind from Global Contact, editable" /></div>
       }
@@ -215,7 +215,7 @@
   </div>
 
   @if (partyKind !== 'channelPartner') {
-    <app-inventory-gstin-list [host]="host" [keyPrefix]="keyPrefix"></app-inventory-gstin-list>
+    <app-inventory-gstin-list [host]="host" [keyPrefix]="keyPrefix" [required]="taxIdsRequired"></app-inventory-gstin-list>
   }
 
   @if (partyKind !== 'channelPartner') {
