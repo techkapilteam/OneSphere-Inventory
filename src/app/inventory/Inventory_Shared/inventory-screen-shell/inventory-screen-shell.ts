@@ -8631,18 +8631,19 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // inactive -- resolveMergedLocation() already falls back to
     // findBranchBySelection() (unfiltered by status) for id resolution, so
     // this carve-out is purely about keeping the ng-select label visible.
-    const currentSelectionKey = this.normalizeKey(String(
-      this.formValues()['receivingLocation']
-      || this.formValues()['warehouse']
-      || this.formValues()['fromWarehouse']
-      || this.formValues()['toWarehouse']
-      || ''
-    ));
+    // Every location field's current value, not just the first non-empty one:
+    // Stock Transfer carries two (From and To), and an inactive To branch
+    // was dropped from the list on Edit because only From was kept.
+    const currentSelectionKeys = new Set(
+      ['receivingLocation', 'warehouse', 'fromWarehouse', 'toWarehouse']
+        .map(field => this.normalizeKey(String(this.formValues()[field] || '')))
+        .filter(Boolean)
+    );
 
     const branchEntries = this.branchOptions
       .filter(label => {
         const key = this.normalizeKey(label);
-        if (currentSelectionKey && key === currentSelectionKey) return true;
+        if (currentSelectionKeys.has(key)) return true;
         const match = branches.find(item =>
           this.normalizeKey(item.branch_name) === key
           || this.normalizeKey(item.branch_code) === key
@@ -17647,6 +17648,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       const records = this.segmentFilteredRecords(this.savedRecordObjects());
       return records.find(r => (r.return_number || r.returnNumber) === row[0]) || null;
     }
+    if (this.config?.key === 'stockTransfer') {
+      const records = this.segmentFilteredRecords(this.savedRecordObjects());
+      return records.find(r => (r.transfer_number || r.transferNumber) === row[0]) || null;
+    }
     if (this.config?.key !== 'goodsReceipt') return null;
     const records = this.segmentFilteredRecords(this.savedRecordObjects());
     return records.find(r => (r.grn_number || r.grnNumber) === row[0]) || null;
@@ -17688,6 +17693,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       { key: 'sno', label: '#' },
       { key: isDocumentNote ? 'description' : 'product', label: isDocumentNote ? 'Description' : 'Product' }
     ];
+
+    // Stock Transfer moves quantity only -- no rate/GST/amount on its lines.
+    if (this.config?.key === 'stockTransfer') {
+      columns.push({ key: 'uom', label: 'UOM' }, { key: 'qty', label: 'Qty' });
+      if (items.some(item => this.grnExpandedValue(item, 'batch_no', 'batchNo'))) {
+        columns.push({ key: 'batch_no', label: 'Batch No' });
+      }
+      for (const name of this.grnExpandedSerialNames(items)) {
+        columns.push({ key: `serial:${name}`, label: name });
+      }
+      return columns;
+    }
 
     if (isDocumentNote) {
       columns.push(
@@ -17949,6 +17966,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   grnExpandedTotalColspan(row: string[]): number {
     return Math.max(1, this.grnExpandedColumns(row).length - 1);
+  }
+
+  stockTransferExpandedQtyTotal(row: string[]): string {
+    const total = this.grnExpandedItems(row).reduce((sum, item) => sum + (Number(item?.qty) || 0), 0);
+    return String(total);
   }
 
   grnExpandedTotal(row: string[]): string {
@@ -18263,7 +18285,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private readonly draftLockTransactionKeys = new Set([
     'goodsReceipt', 'purchaseInvoice', 'purchaseReturn', 'debitNote', 'creditNote',
     'salesOrder', 'salesInvoice', 'salesReturn', 'deliveryChallan', 'estimation', 'proformaInvoice', 'salesQuotation',
-    'productionPlanning', 'materialIssueProduction', 'productionEntry', 'productionReturn'
+    'productionPlanning', 'materialIssueProduction', 'productionEntry', 'productionReturn',
+    'stockTransfer'
   ]);
 
   isDraftLockedScreen(): boolean {
@@ -18288,7 +18311,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!this.canEditOrDeleteRow(row)) return;
     const record = this.findRecordByRow(row);
     if (!record?.id) return;
-    const purchaseType = this.purchaseDocType();
+    // Stock Transfer: the purchase cancel endpoint routes 'STOCKTRANSFER' to
+    // inventory.sp_delete_stock_transfer (migration 248), which deletes a draft.
+    const purchaseType = this.config?.key === 'stockTransfer' ? 'STOCKTRANSFER' : this.purchaseDocType();
     const salesType = this.salesDocType();
     const obs$ = purchaseType
       ? this.txService.cancelDoc(purchaseType, Number(record.id), 'Deleted while in Draft from Inventory transaction screen')
@@ -18379,9 +18404,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           segment: record.segment_name || '',
           transferNo: record.transfer_number || record.transferNumber || '',
           transferDate: record.transfer_date || record.transferDate || '',
-          fromWarehouse: record.from_warehouse_name || record.fromWarehouseName || '',
+          // A transfer from/to a BRANCH is saved with from/to_warehouse_name
+          // NULL and the name in from/to_branch_name (buildStockTransferPayload),
+          // so reading only the warehouse name left both pickers blank on Edit.
+          fromWarehouse: record.from_warehouse_name || record.fromWarehouseName || record.from_branch_name || record.fromBranchName || '',
           fromWarehouseId: record.from_warehouse_id ?? record.fromWarehouseId ?? null,
-          toWarehouse: record.to_warehouse_name || record.toWarehouseName || '',
+          toWarehouse: record.to_warehouse_name || record.toWarehouseName || record.to_branch_name || record.toBranchName || '',
           toWarehouseId: record.to_warehouse_id ?? record.toWarehouseId ?? null,
           remarks: record.remarks || '',
           status: cap(record.status || 'draft')
@@ -22553,6 +22581,49 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           r.capacity || '',
           String(r.cost_per_hour ?? r.costPerHour ?? ''),
           cap(r.status || 'active')
+        ]);
+      // Stock Transfer / Stock Adjustment / Opening Stock / Cycle Count were
+      // API-wired (isApiWired) and reloaded after every save, but had no case
+      // here, so they fell through to `default: []` and the saved-records
+      // grid always rendered empty. Column 0 must stay the document number:
+      // findRecordByRow() matches on row[0].
+      case 'stockTransfer':
+        return records.map(r => [
+          r.transfer_number || r.transferNumber || '',
+          r.transfer_date || r.transferDate || '',
+          r.from_warehouse_name || r.fromWarehouseName || r.from_branch_name || r.fromBranchName || '',
+          r.to_warehouse_name || r.toWarehouseName || r.to_branch_name || r.toBranchName || '',
+          String((r.items || []).length || 0),
+          cap(r.status || 'draft')
+        ]);
+      case 'stockAdjustment':
+        return records.map(r => [
+          r.adjustment_number || r.adjustmentNumber || '',
+          r.adjustment_date || r.adjustmentDate || '',
+          r.warehouse_name || r.warehouseName || r.branch_name || r.branchName || '',
+          r.adjustment_type || r.adjustmentType || '',
+          r.reason || '',
+          String((r.items || []).length || 0),
+          cap(String(r.status || 'pending_approval').replace(/_/g, ' '))
+        ]);
+      case 'openingStockEntry':
+        return records.map(r => [
+          r.entry_number || r.entryNumber || '',
+          r.entry_date || r.entryDate || '',
+          r.warehouse_name || r.warehouseName || r.branch_name || r.branchName || '',
+          String((r.items || []).length || 0),
+          `Rs. ${Number(r.total_value ?? r.totalValue ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
+          cap(r.status || 'draft')
+        ]);
+      case 'cycleCount':
+        return records.map(r => [
+          r.verification_number || r.verificationNumber || '',
+          r.verification_date || r.verificationDate || '',
+          r.warehouse_name || r.warehouseName || '',
+          r.verified_by_name || r.verifiedByName || '',
+          String((r.items || []).length || r.total_items || 0),
+          String(r.variance_items ?? r.varianceItems ?? 0),
+          cap(String(r.status || 'pending_approval').replace(/_/g, ' '))
         ]);
       case 'purchaseRequisition':
         return records.map(r => [
