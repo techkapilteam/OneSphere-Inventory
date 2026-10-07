@@ -11,6 +11,7 @@ import { ApiResponse, AttributeItem, BomItem, BomLineItem, PriceListItem, WorkCe
 import { AvailableStock, InventoryTransactionsService, PurchaseRefDoc, ServiceBundleConsumption, TransportDetails } from '../inventory-transactions.service';
 import { applyInventoryTextCase, inventoryTextCaseForField, inventoryTextCaseForLineColumn, toInventoryTitleCase } from '../inventory-text-case.util';
 import { InventoryExportService } from '../inventory-export.service';
+import { InvoiceBankDetails, PaymentsService } from '../payments.service';
 import {
   INVENTORY_KPIS,
   INVENTORY_OPTIONS,
@@ -66,6 +67,9 @@ interface GridExportPayload {
   summary?: Array<[string, string]>;
   notes?: string;
   notesLabel?: string;
+  terms?: string[];
+  bankDetails?: Array<[string, string]>;
+  orientation?: 'portrait' | 'landscape';
   fileName?: string;
 }
 
@@ -194,6 +198,19 @@ interface PartySummaryData {
   recentTransactions: PartyRecentTransaction[];
 }
 
+// Fixed Terms & Conditions printed at the foot of every Sales Invoice
+// (Print / PDF / Excel), as on the earlier sale invoice report.
+const SALES_INVOICE_TERMS: string[] = [
+  'Goods once sold cannot be taken back.',
+  'If this payment is not made with in 7 days from the Invoice date Interest will be charged @ 24% p.a.',
+  'No warranty for power adapters, connectors and cables etc. is given.',
+  'Please keep Warrantee Card & purchase Invoice in a safe place for warranty claims purpose.',
+  'Warranty on all the equipment is as per manufacturers standard warranty policy and shall be directly provided by manufacturers.',
+  'General Manufacturer’s polices for warranty repairs / Replacement only if parts are in good physical condition. Products with Broken / Burnt, Pin bends, Pen/Pencil marks, Cracks, Missing / Tampered Components and Tampered Warranty stickers will be rejected and considered warranty void.',
+  'The customers understand, Accept and Agree that the warranties in a respect of equipment’s supplied here under is given by the manufacturer and thereof this trading firm Shall not be held liable or responsible in any matter what ever in respect thereof.',
+  'All disputes subject to Hyderabad Jurisdiction.'
+];
+
 const DC_ADDRESS_STATES = [
   'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
   'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka',
@@ -238,6 +255,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private readonly inventoryConfigService = inject(InventoryConfigService);
   protected readonly txService = inject(InventoryTransactionsService);
   private readonly exportService = inject(InventoryExportService);
+  private readonly paymentsService = inject(PaymentsService);
+  // Bank block on the Sales Invoice print — loaded once in ngOnInit because
+  // the export payload builders are synchronous.
+  private readonly invoiceBankDetails = signal<InvoiceBankDetails | null>(null);
   private readonly destroyRef = inject(DestroyRef);
   private readonly elementRef = inject(ElementRef<HTMLElement>);
   // Item 26: optional — dozens of existing specs instantiate InventoryScreenShell
@@ -1537,6 +1558,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         roles.some(role => String(role.roleType ?? '').toLowerCase() === 'company_admin'));
     } catch {
       this.isAdmin.set(false);
+    }
+    if (this.config?.key === 'salesInvoice') {
+      this.paymentsService.getInvoiceBankDetails()
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe(details => this.invoiceBankDetails.set(details));
     }
     // Item 26: must run before directEntryLineRows() below (and before the
     // rest of ngOnInit touches formValues/entryLineRows) — it restores a
@@ -7274,6 +7300,22 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     ]);
   }
 
+  // Full party address as entered in the master — the free-text address line
+  // plus its separate City / District / Pincode columns (State prints as its
+  // own field). A part the user already typed into the address line is not
+  // repeated.
+  private partyFullAddress(party: { address?: string; city?: string; district?: string; pincode?: string } | null): string {
+    const address = String(party?.address || '').trim().replace(/[,\s]+$/, '');
+    const lower = address.toLowerCase();
+    const parts = [party?.city, party?.district]
+      .map(part => String(part || '').trim())
+      .filter((part, index, all) => part && !lower.includes(part.toLowerCase())
+        && all.findIndex(other => other.toLowerCase() === part.toLowerCase()) === index);
+    const pincode = String(party?.pincode || '').trim();
+    const text = [address, ...parts].filter(Boolean).join(', ');
+    return pincode && !lower.includes(pincode) ? (text ? `${text} - ${pincode}` : pincode) : text;
+  }
+
   private salesInvoiceDocumentExportPayload(
     record: any,
     docNo: string,
@@ -7283,8 +7325,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   ): GridExportPayload {
     const customer = this.customerForRecord(record);
     const customerName = String(record.customer_name || record.customerName || customer?.customer_name || '');
-    const customerGstin = String(record.customer_gstin || record.customerGstin || this.partyPrimaryGstin(customer) || '');
+    const customerGstin = String(record.customer_gstin || record.customerGstin || this.partyPrimaryGstin(customer) || '').trim();
+    const customerState = String(customer?.state || this.partyPrimaryState(customer)
+      || record.place_of_supply || record.placeOfSupply || '').trim();
     const warehouseName = String(record.warehouse_name || record.warehouseName || '');
+    const bank = this.invoiceBankDetails();
     const columns = ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'];
     const rows = this.salesInvoiceDocumentRows(record);
     const exportColumns = rows.length ? columns : fallbackColumns;
@@ -7296,9 +7341,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['Invoice Date', this.gridDateDisplay(String(record.doc_date || record.docDate || ''))],
       ['Due Date', this.gridDateDisplay(String(record.due_date || record.dueDate || ''))],
       ['Customer', customerName],
-      ['GSTIN', customerGstin],
       ['Customer Phone', String(customer?.mobile || '')],
-      ['Customer Address', String(customer?.address || '')],
+      ['Customer Address', this.partyFullAddress(customer)],
+      ['State', customerState || '-'],
+      ['GSTIN No', customerGstin || '-'],
       ['Place of Supply', String(record.place_of_supply || record.placeOfSupply || '')],
       ['Warehouse', warehouseName],
       ['Vehicle No', String(record.vehicle_no || record.vehicleNo || '')],
@@ -7322,7 +7368,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       rows: exportRows,
       summary: [...summaryRows, ['Grand Total', this.formatCurrency(totals.total)]] as Array<[string, string]>,
       notes: String(record.customer_notes || record.customerNotes || ''),
-      notesLabel: 'Notes / Terms',
+      notesLabel: 'Notes',
+      terms: SALES_INVOICE_TERMS,
+      bankDetails: [
+        ['Bank Name', bank?.bankName || ''],
+        ['Branch Name', bank?.branchName || ''],
+        ['Account No', bank?.accountNo || ''],
+        ['IFSC CODE', bank?.ifscCode || '']
+      ],
+      // Portrait like the earlier invoice report, so the terms and the bank /
+      // signatory box fit on the same page as the items (landscape A4 is too
+      // short and pushed the box onto a second page).
+      orientation: 'portrait',
       fileName: `Sales_Invoice_${docNo || 'Selected_Record'}`
     };
   }
@@ -7399,6 +7456,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       summary: payload.summary,
       notes: payload.notes,
       notesLabel: payload.notesLabel,
+      terms: payload.terms,
+      bankDetails: payload.bankDetails,
+      orientation: payload.orientation,
       fileName: payload.fileName || payload.title
     };
   }
@@ -8682,18 +8742,19 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // inactive -- resolveMergedLocation() already falls back to
     // findBranchBySelection() (unfiltered by status) for id resolution, so
     // this carve-out is purely about keeping the ng-select label visible.
-    const currentSelectionKey = this.normalizeKey(String(
-      this.formValues()['receivingLocation']
-      || this.formValues()['warehouse']
-      || this.formValues()['fromWarehouse']
-      || this.formValues()['toWarehouse']
-      || ''
-    ));
+    // Every location field's current value, not just the first non-empty one:
+    // Stock Transfer carries two (From and To), and an inactive To branch
+    // was dropped from the list on Edit because only From was kept.
+    const currentSelectionKeys = new Set(
+      ['receivingLocation', 'warehouse', 'fromWarehouse', 'toWarehouse']
+        .map(field => this.normalizeKey(String(this.formValues()[field] || '')))
+        .filter(Boolean)
+    );
 
     const branchEntries = this.branchOptions
       .filter(label => {
         const key = this.normalizeKey(label);
-        if (currentSelectionKey && key === currentSelectionKey) return true;
+        if (currentSelectionKeys.has(key)) return true;
         const match = branches.find(item =>
           this.normalizeKey(item.branch_name) === key
           || this.normalizeKey(item.branch_code) === key
@@ -17755,6 +17816,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       const records = this.segmentFilteredRecords(this.savedRecordObjects());
       return records.find(r => (r.return_number || r.returnNumber) === row[0]) || null;
     }
+    if (this.config?.key === 'stockTransfer') {
+      const records = this.segmentFilteredRecords(this.savedRecordObjects());
+      return records.find(r => (r.transfer_number || r.transferNumber) === row[0]) || null;
+    }
     if (this.config?.key !== 'goodsReceipt') return null;
     const records = this.segmentFilteredRecords(this.savedRecordObjects());
     return records.find(r => (r.grn_number || r.grnNumber) === row[0]) || null;
@@ -17796,6 +17861,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       { key: 'sno', label: '#' },
       { key: isDocumentNote ? 'description' : 'product', label: isDocumentNote ? 'Description' : 'Product' }
     ];
+
+    // Stock Transfer moves quantity only -- no rate/GST/amount on its lines.
+    if (this.config?.key === 'stockTransfer') {
+      columns.push({ key: 'uom', label: 'UOM' }, { key: 'qty', label: 'Qty' });
+      if (items.some(item => this.grnExpandedValue(item, 'batch_no', 'batchNo'))) {
+        columns.push({ key: 'batch_no', label: 'Batch No' });
+      }
+      for (const name of this.grnExpandedSerialNames(items)) {
+        columns.push({ key: `serial:${name}`, label: name });
+      }
+      return columns;
+    }
 
     if (isDocumentNote) {
       columns.push(
@@ -18057,6 +18134,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   grnExpandedTotalColspan(row: string[]): number {
     return Math.max(1, this.grnExpandedColumns(row).length - 1);
+  }
+
+  stockTransferExpandedQtyTotal(row: string[]): string {
+    const total = this.grnExpandedItems(row).reduce((sum, item) => sum + (Number(item?.qty) || 0), 0);
+    return String(total);
   }
 
   grnExpandedTotal(row: string[]): string {
@@ -18371,7 +18453,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private readonly draftLockTransactionKeys = new Set([
     'goodsReceipt', 'purchaseInvoice', 'purchaseReturn', 'debitNote', 'creditNote',
     'salesOrder', 'salesInvoice', 'salesReturn', 'deliveryChallan', 'estimation', 'proformaInvoice', 'salesQuotation',
-    'productionPlanning', 'materialIssueProduction', 'productionEntry', 'productionReturn'
+    'productionPlanning', 'materialIssueProduction', 'productionEntry', 'productionReturn',
+    'stockTransfer'
   ]);
 
   isDraftLockedScreen(): boolean {
@@ -18396,7 +18479,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!this.canEditOrDeleteRow(row)) return;
     const record = this.findRecordByRow(row);
     if (!record?.id) return;
-    const purchaseType = this.purchaseDocType();
+    // Stock Transfer: the purchase cancel endpoint routes 'STOCKTRANSFER' to
+    // inventory.sp_delete_stock_transfer (migration 248), which deletes a draft.
+    const purchaseType = this.config?.key === 'stockTransfer' ? 'STOCKTRANSFER' : this.purchaseDocType();
     const salesType = this.salesDocType();
     const obs$ = purchaseType
       ? this.txService.cancelDoc(purchaseType, Number(record.id), 'Deleted while in Draft from Inventory transaction screen')
@@ -18487,9 +18572,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           segment: record.segment_name || '',
           transferNo: record.transfer_number || record.transferNumber || '',
           transferDate: record.transfer_date || record.transferDate || '',
-          fromWarehouse: record.from_warehouse_name || record.fromWarehouseName || '',
+          // A transfer from/to a BRANCH is saved with from/to_warehouse_name
+          // NULL and the name in from/to_branch_name (buildStockTransferPayload),
+          // so reading only the warehouse name left both pickers blank on Edit.
+          fromWarehouse: record.from_warehouse_name || record.fromWarehouseName || record.from_branch_name || record.fromBranchName || '',
           fromWarehouseId: record.from_warehouse_id ?? record.fromWarehouseId ?? null,
-          toWarehouse: record.to_warehouse_name || record.toWarehouseName || '',
+          toWarehouse: record.to_warehouse_name || record.toWarehouseName || record.to_branch_name || record.toBranchName || '',
           toWarehouseId: record.to_warehouse_id ?? record.toWarehouseId ?? null,
           remarks: record.remarks || '',
           status: cap(record.status || 'draft')
@@ -22669,6 +22757,49 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           r.capacity || '',
           String(r.cost_per_hour ?? r.costPerHour ?? ''),
           cap(r.status || 'active')
+        ]);
+      // Stock Transfer / Stock Adjustment / Opening Stock / Cycle Count were
+      // API-wired (isApiWired) and reloaded after every save, but had no case
+      // here, so they fell through to `default: []` and the saved-records
+      // grid always rendered empty. Column 0 must stay the document number:
+      // findRecordByRow() matches on row[0].
+      case 'stockTransfer':
+        return records.map(r => [
+          r.transfer_number || r.transferNumber || '',
+          r.transfer_date || r.transferDate || '',
+          r.from_warehouse_name || r.fromWarehouseName || r.from_branch_name || r.fromBranchName || '',
+          r.to_warehouse_name || r.toWarehouseName || r.to_branch_name || r.toBranchName || '',
+          String((r.items || []).length || 0),
+          cap(r.status || 'draft')
+        ]);
+      case 'stockAdjustment':
+        return records.map(r => [
+          r.adjustment_number || r.adjustmentNumber || '',
+          r.adjustment_date || r.adjustmentDate || '',
+          r.warehouse_name || r.warehouseName || r.branch_name || r.branchName || '',
+          r.adjustment_type || r.adjustmentType || '',
+          r.reason || '',
+          String((r.items || []).length || 0),
+          cap(String(r.status || 'pending_approval').replace(/_/g, ' '))
+        ]);
+      case 'openingStockEntry':
+        return records.map(r => [
+          r.entry_number || r.entryNumber || '',
+          r.entry_date || r.entryDate || '',
+          r.warehouse_name || r.warehouseName || r.branch_name || r.branchName || '',
+          String((r.items || []).length || 0),
+          `Rs. ${Number(r.total_value ?? r.totalValue ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
+          cap(r.status || 'draft')
+        ]);
+      case 'cycleCount':
+        return records.map(r => [
+          r.verification_number || r.verificationNumber || '',
+          r.verification_date || r.verificationDate || '',
+          r.warehouse_name || r.warehouseName || '',
+          r.verified_by_name || r.verifiedByName || '',
+          String((r.items || []).length || r.total_items || 0),
+          String(r.variance_items ?? r.varianceItems ?? 0),
+          cap(String(r.status || 'pending_approval').replace(/_/g, ' '))
         ]);
       case 'purchaseRequisition':
         return records.map(r => [

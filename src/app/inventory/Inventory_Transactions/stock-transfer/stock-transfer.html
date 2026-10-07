@@ -396,11 +396,11 @@
               <tr>
                 <td class="text-center">
                   <div class="inventory-row-actions">
-                    @if (isAdmin()) {
+                    <button type="button" class="erp-btn btn-white btn-icon btn-sm pr-expand-btn" title="Toggle Items" (click)="toggleExpandGrn(row)">
+                      <i class="pi" [class.pi-chevron-down]="isExpandedGrn(row)" [class.pi-chevron-right]="!isExpandedGrn(row)"></i>
+                    </button>
+                    @if (canEditOrDeleteRow(row)) {
                       <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
-                      @if (isStockTransferDraftRow(row)) {
-                        <button type="button" class="erp-btn btn-primary btn-icon btn-sm" title="Post" [disabled]="isSaving()" (click)="postStockTransferRecordByRow(row)"><i [class]="isSaving() ? 'pi pi-spin pi-spinner' : 'pi pi-check-circle'"></i></button>
-                      }
                       <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" (click)="cancelRecordByRow(row)"><i class="pi pi-trash"></i></button>
                     }
                   </div>
@@ -409,6 +409,68 @@
                   <td>{{ row[col.index] }}</td>
                 }
               </tr>
+              @if (isExpandedGrn(row)) {
+                <tr class="pr-expand-tr">
+                  <td [attr.colspan]="(visibleRecordColumns().length || 0) + 1">
+                    <div class="pr-expand-content">
+                      <div class="pr-expand-hdr">
+                        <i class="pi pi-list"></i>
+                        <span>Items in {{ row[0] }}</span>
+                      </div>
+                      @let stItems = grnExpandedItems(row);
+                      @let stColumns = grnExpandedColumns(row);
+                      @if (stItems.length) {
+                        <table class="pr-expand-items-table">
+                          <thead>
+                            <tr>
+                              @for (column of stColumns; track column.key) {
+                                <th>{{ column.label }}</th>
+                              }
+                            </tr>
+                          </thead>
+                          <tbody>
+                            @for (item of stItems; track $index; let i = $index) {
+                              <tr>
+                                @for (column of stColumns; track column.key) {
+                                  <td>
+                                    @if (column.key === 'product') {
+                                      <strong>{{ grnExpandedCell(item, column, i) || '' }}</strong>
+                                      @if (grnExpandedProductSubtitle(item); as subtitle) {
+                                        <br><small class="inventory-grid-subtitle">{{ subtitle }}</small>
+                                      }
+                                    } @else {
+                                      {{ grnExpandedCell(item, column, i) || '' }}
+                                    }
+                                  </td>
+                                }
+                              </tr>
+                            }
+                          </tbody>
+                          <tfoot>
+                            <tr class="grn-expand-total-row">
+                              <td colspan="3" class="text-right"><strong>Total Qty</strong></td>
+                              <td><strong>{{ stockTransferExpandedQtyTotal(row) }}</strong></td>
+                              @if (stColumns.length > 4) {
+                                <td [attr.colspan]="stColumns.length - 4"></td>
+                              }
+                            </tr>
+                          </tfoot>
+                        </table>
+                      } @else {
+                        <span class="inventory-field-hint">No items found.</span>
+                      }
+                      @if (isStockTransferDraftRow(row) && isAdmin()) {
+                        <div class="grn-expand-actions">
+                          <button type="button" class="erp-btn btn-primary btn-sm" [disabled]="isSaving()" (click)="postStockTransferRecordByRow(row)">
+                            <i [class]="isSaving() ? 'pi pi-spin pi-spinner' : 'pi pi-check-circle'"></i>
+                            {{ isSaving() ? 'Posting...' : 'Post Transfer' }}
+                          </button>
+                        </div>
+                      }
+                    </div>
+                  </td>
+                </tr>
+              }
             }
           </tbody>
         </table>
