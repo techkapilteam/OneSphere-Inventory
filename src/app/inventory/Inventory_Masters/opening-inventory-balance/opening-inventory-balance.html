@@ -1003,8 +1003,9 @@
                     class="erp-ng-select inventory-ng-select"
                     appendTo="body"
                     [items]="grnReceivingLocationGroups()" bindLabel="label" bindValue="label" groupBy="group"
-                    [searchable]="true"
-                    [clearable]="true"
+                    [searchable]="!isLoginBranchLockedField(field)"
+                    [clearable]="!isLoginBranchLockedField(field)"
+                    [readonly]="isLoginBranchLockedField(field)"
                     [ngModel]="formFieldValue(field)"
                     (ngModelChange)="collectFormField(field.key, $event)"
                     placeholder="Select Warehouse or Branch">

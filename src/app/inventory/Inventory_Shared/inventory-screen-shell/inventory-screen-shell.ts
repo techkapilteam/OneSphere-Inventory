@@ -3027,9 +3027,26 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     ]);
   }
 
+  // On a screen whose location is locked to the logged-in branch
+  // (noWarehouseFallback), a location value equal to that branch's name IS
+  // that branch — used by id, never resolved to a warehouse that happens to
+  // share the name (e.g. branch "central purchase" vs warehouse "Central
+  // Purchase"), which previously booked stock/saves against the warehouse.
+  private isLoginBranchLocationValue(value: any): boolean {
+    const capabilities = InventoryScreenShell.LOCATION_DEFAULT_CAPABILITIES[this.config?.key || ''] || [];
+    if (!capabilities.some(capability => !!capability.noWarehouseFallback)) return false;
+    const branch = this.sessionActiveBranch();
+    if (!branch) return false;
+    const key = this.normalizeKey(String(value ?? '').trim());
+    if (!key) return false;
+    return [branch.branch_name, branch.branch_code, this.branchDisplayName(branch)]
+      .some(name => !!name && this.normalizeKey(String(name)) === key);
+  }
+
   private findWarehouseBySelection(value: any): WarehouseItem | null {
     const raw = String(value ?? '').trim();
     if (!raw) return null;
+    if (this.isLoginBranchLocationValue(raw)) return null;
     const selectedKey = this.normalizeKey(raw);
     return this.loadedWarehouseObjects().find(item =>
       this.normalizeKey(item.warehouse_name) === selectedKey
@@ -3461,36 +3478,52 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     field: string;
     kind: 'merged' | 'branchOnly' | 'warehouseOnly';
     preferBranch?: boolean;
+    // Location is the logged-in branch: defaulted to it (preferBranch), locked
+    // to it (isLoginBranchLockedField) and resolved to it by id, never to a
+    // same-name warehouse (isLoginBranchLocationValue). Only when no logged-in
+    // branch resolves does the default fall back to the warehouse, as before.
+    noWarehouseFallback?: boolean;
   }>> = {
+    // Merged Warehouse/Branch fields below all default to the logged-in branch
+    // only (preferBranch + noWarehouseFallback) -- locations are branch-based.
+    // Previous (each merged entry): { field, kind: 'merged' } -- warehouse first, else branch.
     purchaseRequisition: [{ field: 'branch', kind: 'branchOnly' }],
-    goodsReceipt:        [{ field: 'receivingLocation', kind: 'merged' }],
-    purchaseInvoice:     [{ field: 'receivingLocation', kind: 'merged', preferBranch: true }],
-    purchaseReturn:      [{ field: 'warehouse', kind: 'merged' }],
-    deliveryChallan:     [{ field: 'fromWarehouse', kind: 'merged' }],
+    goodsReceipt:        [{ field: 'receivingLocation', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+    // Previous: purchaseInvoice: [{ field: 'receivingLocation', kind: 'merged', preferBranch: true }],
+    purchaseInvoice:     [{ field: 'receivingLocation', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+    purchaseReturn:      [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+    deliveryChallan:     [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
     // Sales Invoice's own merged Warehouse/Branch picker, plus its separate
     // Interbranch Sale Branch field -- two independent capabilities.
     // Previous: salesInvoice: [{ field: 'warehouse', kind: 'merged' }, { field: 'branch', kind: 'branchOnly' }],
-    salesInvoice:        [{ field: 'warehouse', kind: 'merged', preferBranch: true }, { field: 'branch', kind: 'branchOnly' }],
+    // Previous: salesInvoice: [{ field: 'warehouse', kind: 'merged', preferBranch: true }, { field: 'branch', kind: 'branchOnly' }],
+    salesInvoice:        [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }, { field: 'branch', kind: 'branchOnly' }],
     // Only fromWarehouse defaults -- toWarehouse is deliberately left blank
     // so the existing mutual-exclusivity logic isn't pre-violated.
     // Previous: stockTransfer: [{ field: 'fromWarehouse', kind: 'merged' }],
-    stockTransfer:       [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true }],
+    // Previous: stockTransfer: [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true }],
+    stockTransfer:       [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
     // Was 'warehouseOnly' — fn_post_sales_return_stock is now branch-aware
     // (migration 241), matching Purchase Return's merged picker.
+    // Kept as before (not branch-only): fn_post_sales_return_stock (migration
+    // 139) still posts by warehouse only — a branch-only return would post its
+    // stock to no location. Switch once that function is made branch-aware.
     salesReturn:         [{ field: 'returnToWarehouse', kind: 'merged' }],
     purchaseOrder:       [{ field: 'receivingWarehouse', kind: 'warehouseOnly' }],
     // Opening Inventory Balance and Opening Stock Entry were missed by the
     // original Full Warehouse/Branch Independence migration -- both used to
     // show Branch and Warehouse as two separate mandatory fields and are
     // folded into the same single merged 'warehouse' field as PR/SI now.
-    openingInventoryBalance: [{ field: 'warehouse', kind: 'merged' }],
+    openingInventoryBalance: [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+    // Kept as before (not branch-only): fn_post_opening_stock (migration 143)
+    // raises "Opening Stock Entry requires a Warehouse." for a branch-only entry.
     openingStockEntry:   [{ field: 'warehouse', kind: 'merged' }],
     // "in stock adjustment should add even branches too".
-    stockAdjustment:     [{ field: 'warehouse', kind: 'merged' }],
-    productionPlanning:  [{ field: 'warehouse', kind: 'merged' }],
-    materialIssueProduction: [{ field: 'fromWarehouse', kind: 'merged' }],
-    productionEntry:     [{ field: 'toWarehouse', kind: 'merged' }],
-    productionReturn:    [{ field: 'toWarehouse', kind: 'merged' }]
+    stockAdjustment:     [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+    productionPlanning:  [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+    materialIssueProduction: [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+    productionEntry:     [{ field: 'toWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+    productionReturn:    [{ field: 'toWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }]
   };
 
   private shouldDefaultLocationForCurrentScreen(): boolean {
@@ -3644,6 +3677,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             changed = true;
             continue;
           }
+          // No logged-in branch resolvable: fall through to the previous
+          // warehouse default below rather than leave a locked field empty.
         }
         const warehouse = this.sessionActiveWarehouse();
         if (warehouse?.warehouse_name) {
@@ -7778,6 +7813,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // _todayDateValue, just exposed for templates.
   readonly maxTransactionDate = this._todayDateValue;
 
+  // Back-dated entries are admin-only: bound to [minDate] on the same header
+  // transaction-date picker. A company admin (isAdmin) may pick any past date;
+  // everyone else is limited to today. Computed because isAdmin is only
+  // resolved from sessionStorage in ngOnInit.
+  readonly minTransactionDate = computed<Date | null>(() => this.isAdmin() ? null : this._todayDateValue);
+
   // A handful of body-level date fields represent a real-world event that
   // already happened by the time it's typed in (the vendor's own invoice
   // date on GRN/PI), so those also get capped at today. Forward-looking
@@ -8010,6 +8051,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // location the save is going to override.
   activeSessionLocationLocked(): boolean {
     return !!(this.sessionActiveWarehouse() || this.sessionActiveBranch());
+  }
+
+  // A Warehouse/Branch field that defaults to the logged-in branch only
+  // (noWarehouseFallback in LOCATION_DEFAULT_CAPABILITIES) is locked to it.
+  // Only while that branch actually resolves -- otherwise the field stays
+  // open so the user is never stuck with an empty, locked location.
+  isLoginBranchLockedField(field: InventoryField): boolean {
+    const capabilities = InventoryScreenShell.LOCATION_DEFAULT_CAPABILITIES[this.config?.key || ''] || [];
+    return capabilities.some(capability => capability.field === field.key && !!capability.noWarehouseFallback)
+      && !!this.sessionActiveBranch();
   }
 
   // GRN's counterpart to purchaseReturnLocationLocked() below.
@@ -8879,6 +8930,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const raw = String(value ?? '').trim();
     if (!raw) return { type: null, warehouse: null, branch: null };
 
+    // Logged-in branch on a branch-locked screen: use it directly, by id.
+    if (this.isLoginBranchLocationValue(raw)) {
+      const loginBranch = this.sessionActiveBranch();
+      if (loginBranch) return { type: 'branch', warehouse: null, branch: loginBranch };
+    }
+
     const key = this.normalizeKey(raw);
     const entry = this.mergedLocationEntries().find(item => this.normalizeKey(item.label) === key);
 
@@ -9638,6 +9695,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       }
       return next;
     });
+    // Keep each remaining row's reference link (dc_item_id / so_item_id /
+    // si_item_id) on the row it belongs to. Without this shift, removing a
+    // row from an SI built from a DC left the rows below it pointing at the
+    // wrong DC line — or none, which posted that line as a direct sale and
+    // decremented stock a second time.
+    this.lineRefItemIdMap.update(map => {
+      const next: typeof map = {};
+      for (const [key, val] of Object.entries(map)) {
+        const idx = Number(key);
+        if (idx < rowIndex) next[idx] = val;
+        else if (idx > rowIndex) next[idx - 1] = val;
+      }
+      return next;
+    });
     this.entryLineRows.update(rows => {
       const nextRows = rows.filter((_, index) => index !== rowIndex);
       return nextRows.length ? nextRows : [this.blankLineRow()];
@@ -9888,6 +9959,43 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
 
     return total.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+  }
+
+  // Footer summary under the line grid: Total Value (Qty x Rate, before
+  // discount), Total Discount and GST Total. Built from the same per-line
+  // breakup that fills the Amount column (transactionLineAmountPreview), so
+  // the footer always agrees with the lines, GST-inclusive rows included.
+  lineFooterTotals(): { value: string; discount: string; gst: string } {
+    let value = 0;
+    let discount = 0;
+    let gst = 0;
+    this.directEntryLineRows().forEach((row, rowIndex) => {
+      const preview = this.transactionLineAmountPreview(row, rowIndex);
+      if (!preview) return;
+      value += preview.qty * preview.rate;
+      discount += preview.discountAmount;
+      gst += preview.taxAmount;
+    });
+    const fmt = (n: number) => `Rs. ${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return { value: fmt(value), discount: fmt(discount), gst: fmt(gst) };
+  }
+
+  // One footer cell of the line grid's Total row, by column: Qty columns and
+  // Amount columns are summed as the existing Total rows do; on a priced grid
+  // (one with a Rate column) the Rate / Disc % / GST columns show Total
+  // Value / Total Discount / GST Total from lineFooterTotals().
+  lineFooterCellText(column: string): string {
+    const index = (this.config?.lineColumns || []).indexOf(column);
+    if (index < 0) return '';
+    if (this.isLineQuantityColumn(column)) return this.lineColumnTotal(index);
+    const rateIndex = this.findColumnIndex(['rate', 'price', 'cost']);
+    if (rateIndex >= 0) {
+      if (index === rateIndex) return this.lineFooterTotals().value;
+      if (index === this.findColumnIndex(['disc', 'discount'])) return this.lineFooterTotals().discount;
+      if (index === this.findColumnIndex(['gst', 'tax'])) return this.lineFooterTotals().gst;
+    }
+    if (this.isLineAmountColumn(column)) return this.lineColumnTotal(index);
+    return '';
   }
 
   visibleLineColumns(): string[] {
@@ -21197,16 +21305,24 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   private activeSalesLineRows(): string[][] {
+    return this.activeSalesLineEntries().map(entry => entry.row);
+  }
+
+  // Same rows as activeSalesLineRows(), each with its own position in
+  // entryLineRows(). lineRefItemIdMap is keyed by that position, so a blank
+  // row sitting above a referenced line must not shift which DC/SO item the
+  // line maps to. With no blank rows, entryIndex equals the filtered index.
+  private activeSalesLineEntries(): Array<{ row: string[]; entryIndex: number }> {
     this.directEntryLineRows();
     return this.entryLineRows()
-      .map(row => this.normalizeLineRow(row))
-      .filter(row => row.some(cell => String(cell ?? '').trim()))
-      .filter(row => !!this.lineValue(row, ['product', 'item', 'sku']));
+      .map((row, entryIndex) => ({ row: this.normalizeLineRow(row), entryIndex }))
+      .filter(({ row }) => row.some(cell => String(cell ?? '').trim()))
+      .filter(({ row }) => !!this.lineValue(row, ['product', 'item', 'sku']));
   }
 
   private salesLineItems(): any[] {
     const refMap = this.lineRefItemIdMap();
-    return this.activeSalesLineRows().map((row, index) => {
+    return this.activeSalesLineEntries().map(({ row, entryIndex }, index) => {
       const productName = this.lineValue(row, ['product', 'item', 'sku']);
       const product = this.findProductBySelection(productName);
       const variantText = this.lineValue(row, ['variant']);
@@ -21222,7 +21338,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // of what the backend expected, breaking attribute-scoped matching
       // for every downstream Sales Return/DC/SI on an attribute-tracked
       // product.
-      const salesRefAttr = refMap[index];
+      const salesRefAttr = refMap[entryIndex];
       const salesResolvedAttr = this.resolveLineAttribute(product, variantText, this.transactionLineAttributeText(row, index));
       const attribute_id = salesRefAttr?.attributeId !== undefined ? salesRefAttr.attributeId : salesResolvedAttr.attribute_id;
       const attribute_name = salesRefAttr?.attributeName !== undefined ? salesRefAttr.attributeName : salesResolvedAttr.attribute_name;
@@ -21275,7 +21391,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         // was forced read-only and always carried the same value as the
         // header field anyway, so this reads straight from the header now.
         base['warehouse_name'] = this.formValues()['warehouse'] || null;
-        const ref = refMap[index];
+        const ref = refMap[entryIndex];
         base['so_item_id'] = ref?.soItemId ?? null;
         base['dc_item_id'] = ref?.dcItemId ?? null;
         base['serial_numbers'] = ref?.dcItemId ? null : (this.lineSerialUnitsMap()[index] || null);

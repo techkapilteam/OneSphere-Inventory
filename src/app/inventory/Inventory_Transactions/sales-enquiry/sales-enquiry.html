@@ -39,6 +39,7 @@
             <div class="erp-form-group">
               <label class="erp-label">{{ numField.label }}</label>
               <input class="erp-input" type="text"
+                readonly
                 [ngModel]="transactionNumberValue(numField)"
                 (ngModelChange)="collectFormField(numField.key, $event)"
                 [placeholder]="transactionNumberPlaceholder(numField)" />
@@ -53,6 +54,7 @@
                   (ngModelChange)="collectFormField(dateField.key, $event)"
                   [ngModelOptions]="{ standalone: true }"
                   [maxDate]="maxTransactionDate"
+                  [minDate]="minTransactionDate()"
                   dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY"
                   [readonlyInput]="true" [showIcon]="false" appendTo="body"
                   styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100">
