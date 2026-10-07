@@ -114,6 +114,7 @@
                         [class.err]="allocExceeds(inv)"
                         [disabled]="!isSelected(inv)"
                         [ngModel]="allocFor(inv) ? allocFor(inv).toFixed(2) : ''"
+                        [ngModelOptions]="{ updateOn: 'blur' }"
                         (ngModelChange)="setAlloc(inv, $event)" />
                       @if (isSelected(inv)) {
                         <span class="pay-full-link" (click)="fullAlloc(inv)">pay full {{ fmt(inv.outstanding) }}</span>
@@ -169,6 +170,7 @@
                         [class.err]="noteApplyExceeds(note)"
                         [disabled]="!isNoteSelected(note)"
                         [ngModel]="noteApplyFor(note) ? noteApplyFor(note).toFixed(2) : ''"
+                        [ngModelOptions]="{ updateOn: 'blur' }"
                         (ngModelChange)="setNoteApply(note, $event)" />
                     </td>
                   </tr>
@@ -199,7 +201,7 @@
                 <div class="erp-form-group pay-mode-amount">
                   <label class="erp-label">Amount (₹)</label>
                   <input class="erp-input" type="text" inputmode="decimal" style="text-align:right;font-weight:600" placeholder="0.00"
-                    [ngModel]="row.amount ? row.amount.toFixed(2) : ''" (ngModelChange)="setModeAmount(idx, $event)" />
+                    [ngModel]="row.amount ? row.amount.toFixed(2) : ''" [ngModelOptions]="{ updateOn: 'blur' }" (ngModelChange)="setModeAmount(idx, $event)" />
                 </div>
                 <span class="pay-mode-summary">{{ row.details.summary }}</span>
                 <button type="button" class="erp-btn btn-white btn-icon btn-sm pay-mode-rm" title="Remove" (click)="removeMode(idx)"><i class="pi pi-trash"></i></button>
