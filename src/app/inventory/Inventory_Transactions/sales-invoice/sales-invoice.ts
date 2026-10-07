@@ -42,8 +42,8 @@ import { InventoryLineProductPickerComponent } from '../../Inventory_Shared/inve
     }
 
     :host ::ng-deep .sales-invoice-line-grid .erp-table.compact td.inventory-line-col-product {
-      padding: 4px !important;
-      vertical-align: middle;
+      padding: 5px 4px !important;
+      vertical-align: top;
     }
 
     :host ::ng-deep .sales-invoice-line-grid .inventory-line-product-trigger {

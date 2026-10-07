@@ -11445,7 +11445,7 @@ body .p-connected-overlay {
 // Accounts shell (only the host's global styles.scss applies at runtime) --
 // this rule is mirrored byte-for-byte in OneSphere-Accounts/src/styles.scss.
 .grn-grid-compact.inventory-line-items .erp-table.compact td.inventory-line-col-product {
-  vertical-align: middle;
+  vertical-align: top;
 }
 
 .grn-grid-compact.inventory-line-items .erp-table.compact th.inventory-line-col-qty,
