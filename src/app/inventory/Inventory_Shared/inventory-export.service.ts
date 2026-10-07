@@ -20,6 +20,11 @@ export interface InventoryExportDocument {
   summary?: Array<[string, string]>;
   notes?: string;
   notesLabel?: string;
+  /** "Terms & Conditions :" lines printed under the totals (Sales Invoice). */
+  terms?: string[];
+  /** Bank label/value pairs for the Bank Details | Certified / For <Company> |
+   *  Authorised Signatory box at the foot of the document (Sales Invoice). */
+  bankDetails?: Array<[string, string]>;
   /** Text printed on the left of the branch line (e.g. "Between: x And y"). */
   periodText?: string;
   /** Signature captions printed at the foot of a voucher, e.g. (Approved By). */
@@ -34,7 +39,10 @@ const HEADER_COLOR = '#0b4093';
 const L_MARGIN = 15;
 const R_MARGIN = 15;
 const CODE_HEADER = /\b(no\.?|number|code|phone|mobile|pin|gstin|pan|hsn|sac|id)\b/i;
-const NUMERIC_CELL = /^-?(rs\.?\s*|₹\s*)?-?[\d,]+(\.\d+)?\s*%?$/i;
+const TERMS_LINE_HEIGHT = 3.6;
+/** Rendered height (mm) of the Bank Details / Authorised Signatory box. */
+const BANK_BOX_HEIGHT = 46;
+const NUMERIC_CELL =/^-?(rs\.?\s*|₹\s*)?-?[\d,]+(\.\d+)?\s*%?$/i;
 
 @Injectable({ providedIn: 'root' })
 export class InventoryExportService {
@@ -196,6 +204,7 @@ export class InventoryExportService {
     const fields = this.filledFields(document);
     for (let i = 0; i < fields.length; i += 2) {
       const row = ws.addRow([]);
+      let lines = 1;
       const place = (pair: [string, string] | undefined, labelCol: number, lastCol: number) => {
         if (!pair) return;
         row.getCell(labelCol).value = `${pair[0]} :`;
@@ -203,9 +212,15 @@ export class InventoryExportService {
         row.getCell(labelCol + 1).value = pair[1];
         row.getCell(labelCol + 1).alignment = { wrapText: true, vertical: 'top' };
         mergeRow(row.number, labelCol + 1, lastCol);
+        // Excel never auto-grows a merged cell's row, so size it for the
+        // wrapped value (e.g. a full customer address) or it shows one line.
+        let width = 0;
+        for (let col = labelCol + 1; col <= lastCol; col++) width += ws.getColumn(col).width || 10;
+        lines = Math.max(lines, Math.ceil(String(pair[1] || '').length / Math.max(width - 2, 1)));
       };
       place(fields[i], 1, half);
       place(fields[i + 1], half + 1, numCols);
+      if (lines > 1) row.height = lines * 15;
     }
     if (fields.length) ws.addRow([]);
 
@@ -246,7 +261,55 @@ export class InventoryExportService {
       });
     }
 
-    // Notes and the "Printed on" footer are PDF-only; the Excel stops at the totals.
+    // Terms & Conditions, then the Bank Details | Certified / Authorised
+    // Signatory box — same order as the PDF.
+    const sheetWidth = (from: number, to: number) => {
+      let width = 0;
+      for (let col = from; col <= to; col++) width += ws.getColumn(col).width || 10;
+      return Math.max(width - 2, 1);
+    };
+    const terms = document.terms || [];
+    if (terms.length) {
+      ws.addRow([]);
+      ws.addRow(['Terms & Conditions :']).getCell(1).font = { bold: true };
+      terms.forEach(term => {
+        const row = ws.addRow([`.${term}`]);
+        mergeRow(row.number, 1, numCols);
+        row.getCell(1).alignment = { wrapText: true, vertical: 'top' };
+        row.getCell(1).font = { size: 9 };
+        const lines = Math.ceil((term.length + 1) / sheetWidth(1, numCols));
+        if (lines > 1) row.height = lines * 13;
+      });
+    }
+    if (document.bankDetails) {
+      ws.addRow([]);
+      const companyName = String(company?.companyName || '').trim();
+      const boxRows: Array<[string, string]> = [
+        ['Bank Details :', 'Certified that the particulars given above are true and correct'],
+        ...document.bankDetails.map(([label, value], index) =>
+          [`${label} : ${value}`, index === 0 && companyName ? `For  ${companyName}` : ''] as [string, string]),
+        ['', 'Authorised Signatory']
+      ];
+      const line: Partial<ExcelJS.Border> = { style: 'thin' };
+      boxRows.forEach(([left, right], index) => {
+        const row = ws.addRow([]);
+        const isFirst = index === 0;
+        const isLast = index === boxRows.length - 1;
+        row.getCell(1).value = left;
+        row.getCell(1).font = { bold: true, size: isFirst ? 11 : 10 };
+        row.getCell(1).border = { left: line, right: line, ...(isFirst ? { top: line } : {}), ...(isLast ? { bottom: line } : {}) };
+        mergeRow(row.number, 1, half);
+        row.getCell(half + 1).value = right;
+        row.getCell(half + 1).font = { bold: true, size: index === 1 ? 11 : isFirst ? 9 : 10 };
+        // Ruled under "Certified …" and around "Authorised Signatory".
+        row.getCell(half + 1).border = { left: line, right: line, ...(isFirst || isLast ? { top: line, bottom: line } : {}) };
+        row.getCell(half + 1).alignment = { wrapText: true, vertical: isLast ? 'bottom' : 'top', horizontal: isLast ? 'center' : 'left' };
+        mergeRow(row.number, half + 1, numCols);
+        if (isLast) row.height = 40;
+      });
+    }
+
+    // Notes and the "Printed on" footer are PDF-only.
     const signatures = document.signatures || [];
     if (signatures.length) {
       ws.addRow([]);
@@ -260,7 +323,7 @@ export class InventoryExportService {
       signatures.forEach((caption, index) => { capRow.getCell(slots[index]).value = caption; });
     }
 
-    ws.pageSetup = { orientation: columns.length > 7 ? 'landscape' : 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
+    ws.pageSetup = { orientation: document.orientation || (columns.length > 7 ? 'landscape' : 'portrait'), fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
     this.saveWorkbook(workbook, document);
   }
 
@@ -379,12 +442,14 @@ export class InventoryExportService {
 
     const summary = document.summary || [];
     const notes = String(document.notes || '').trim();
+    let blockEnd = y;
     if (summary.length || notes) {
       const blockHeight = Math.max(summary.length * 5 + 6, notes ? 14 : 0);
       if (y + blockHeight > pageHeight - 15) {
         doc.addPage();
         y = 15;
       }
+      blockEnd = y;
       const summaryWidth = 80;
       if (notes) {
         doc.setFont('helvetica', 'bold');
@@ -393,6 +458,7 @@ export class InventoryExportService {
         doc.setFont('helvetica', 'normal');
         const noteLines = doc.splitTextToSize(notes, pageWidth - L_MARGIN - R_MARGIN - summaryWidth - 10) as string[];
         doc.text(noteLines, L_MARGIN, y + 8);
+        blockEnd = Math.max(blockEnd, y + 8 + noteLines.length * 4);
       }
       if (summary.length) {
         autoTable(doc, {
@@ -410,7 +476,21 @@ export class InventoryExportService {
             }
           }
         });
+        blockEnd = Math.max(blockEnd, (doc as any).lastAutoTable.finalY);
       }
+    }
+
+    const terms = document.terms || [];
+    if (terms.length || document.bankDetails) {
+      y = blockEnd + 5;
+      // Terms and the bank box move to a new page together, never split.
+      const termsHeight = terms.length ? this.pdfTermsHeight(doc, terms) + 2 : 0;
+      if (y + termsHeight + (document.bankDetails ? BANK_BOX_HEIGHT : 0) > pageHeight - 15) {
+        doc.addPage();
+        y = 15;
+      }
+      if (terms.length) y = this.drawPdfTerms(doc, terms, y) + 2;
+      if (document.bankDetails) this.drawPdfBankBox(doc, document.bankDetails, y);
     }
 
     const signatures = document.signatures || [];
@@ -448,6 +528,88 @@ export class InventoryExportService {
       doc.text(`Page ${page} of ${totalPages}`, pageWidth - R_MARGIN, pageHeight - 5, { align: 'right' });
     }
     return doc;
+  }
+
+  // "Terms & Conditions :" heading + one dot-prefixed line per term, wrapped
+  // to the page width; returns the y below the last line.
+  private drawPdfTerms(doc: jsPDF, terms: string[], y: number): number {
+    const lines = this.pdfTermsLines(doc, terms);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text('Terms & Conditions :', L_MARGIN, y + 3);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    lines.forEach((line, index) => doc.text(line, L_MARGIN, y + 7 + index * TERMS_LINE_HEIGHT));
+    return y + this.pdfTermsHeight(doc, terms);
+  }
+
+  private pdfTermsHeight(doc: jsPDF, terms: string[]): number {
+    return 7 + this.pdfTermsLines(doc, terms).length * TERMS_LINE_HEIGHT;
+  }
+
+  private pdfTermsLines(doc: jsPDF, terms: string[]): string[] {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    return terms.flatMap(term => doc.splitTextToSize(`.${term}`, pageWidth - L_MARGIN - R_MARGIN) as string[]);
+  }
+
+  // Boxed footer as on the earlier sale invoice report: Bank Details on the
+  // left, a blank middle column, and "Certified …" / "For <Company>" /
+  // Authorised Signatory on the right.
+  private drawPdfBankBox(doc: jsPDF, bankDetails: Array<[string, string]>, y: number): void {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const width = pageWidth - L_MARGIN - R_MARGIN;
+    if (y + BANK_BOX_HEIGHT > pageHeight - 15) {
+      doc.addPage();
+      y = 15;
+    }
+    const company = String(this.companyDetails()?.companyName || '').trim();
+    const body = [
+      ['Bank Details :', '', 'Certified that the particulars given above are true and correct'],
+      ...bankDetails.map(([label, value], index) => [`${label} : ${value}`, '', index === 0 && company ? `For  ${company}` : '']),
+      ['', '', 'Authorised Signatory']
+    ];
+    const lastRow = body.length - 1;
+    const widths = [width * 0.36, width * 0.2, width * 0.44];
+    autoTable(doc, {
+      body,
+      theme: 'plain',
+      startY: y,
+      margin: { left: L_MARGIN, right: R_MARGIN, top: 15, bottom: 15 },
+      tableWidth: width,
+      pageBreak: 'avoid',
+      styles: { fontSize: 9, fontStyle: 'bold', cellPadding: { top: 1.5, bottom: 1.5, left: 2, right: 2 }, overflow: 'linebreak' },
+      columnStyles: { 0: { cellWidth: widths[0] }, 1: { cellWidth: widths[1] }, 2: { cellWidth: widths[2] } },
+      didParseCell: data => {
+        if (data.row.index === 0 && data.column.index === 0) data.cell.styles.fontSize = 10;
+        if (data.row.index === 0 && data.column.index === 2) data.cell.styles.fontSize = 8;
+        if (data.row.index === 1 && data.column.index === 2) data.cell.styles.fontSize = 11;
+        if (data.row.index === lastRow) {
+          data.cell.styles.minCellHeight = 14;
+          data.cell.styles.valign = 'bottom';
+          if (data.column.index === 2) {
+            data.cell.styles.halign = 'center';
+            data.cell.styles.fontSize = 10;
+          }
+        }
+      },
+      didDrawCell: data => {
+        const { x, y: cellY, width: cellWidth, height } = data.cell;
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(0.2);
+        // Rule under "Certified …" and above "Authorised Signatory".
+        if (data.row.index === 0 && data.column.index === 2) doc.line(x, cellY + height, x + cellWidth, cellY + height);
+        if (data.row.index === lastRow && data.column.index > 0) doc.line(x, cellY + height - 7, x + cellWidth, cellY + height - 7);
+      }
+    });
+    const end = (doc as any).lastAutoTable.finalY;
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.2);
+    doc.rect(L_MARGIN, y, width, end - y);
+    doc.line(L_MARGIN + widths[0], y, L_MARGIN + widths[0], end);
+    doc.line(L_MARGIN + widths[0] + widths[1], y, L_MARGIN + widths[0] + widths[1], end);
   }
 
   private printDoc(doc: jsPDF): void {
