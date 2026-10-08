@@ -8080,6 +8080,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return !!values['piId'] && reference !== '' && !reference.includes('directpurchasereturn');
   }
 
+  // Party / Vendor comes from the referenced PI (selectPurchaseReference), so
+  // once a PI is linked the vendor picker is read-only and never opens its
+  // list. A Direct Purchase Return keeps it editable.
+  purchaseReturnVendorLocked(): boolean {
+    if (this.config?.key !== 'purchaseReturn') return false;
+    const values = this.formValues();
+    const reference = this.normalizeKey(values['piReference'] || '');
+    return !!values['piId'] && reference !== '' && !reference.includes('directpurchasereturn');
+  }
+
   // Mirror of purchaseReturnLocationLocked() above -- Purchase Return greys
   // out its warehouse once a source PI is referenced, but Sales Return had
   // no equivalent and stayed editable indefinitely, which was one of the

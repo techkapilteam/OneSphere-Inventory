@@ -86,13 +86,15 @@
               <label class="erp-label">{{ vendorField.label }}</label>
               <div class="inventory-field-with-add">
                 <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+                  [class.inventory-control-readonly]="purchaseReturnVendorLocked()"
                   [items]="procurementVendorHeaderOptions(vendorField)"
-                  [searchable]="true" [clearable]="true"
+                  [searchable]="!purchaseReturnVendorLocked()" [clearable]="!purchaseReturnVendorLocked()"
+                  [readonly]="purchaseReturnVendorLocked()"
                   [ngModel]="formFieldValue(vendorField)"
                   (ngModelChange)="collectFormField(vendorField.key, $event); maybeAutoCode(vendorField.key, $event)"
                   [placeholder]="fieldTypingHint(vendorField)">
                 </ng-select>
-                @if (vendorField.addMaster) {
+                @if (vendorField.addMaster && !purchaseReturnVendorLocked()) {
                   <button type="button" class="erp-btn btn-white btn-icon"
                     [title]="'Add ' + vendorField.addMaster"
                     (click)="openAddMaster(vendorField.addMaster, vendorField.key)">
