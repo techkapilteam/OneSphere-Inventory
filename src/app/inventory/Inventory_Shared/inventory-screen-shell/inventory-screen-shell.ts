@@ -7790,6 +7790,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // wins, as long as it is not already taken.
     if (this.serverAssignsDocNumber() && this.editingId() === null) {
       // Only seen in the moment before the preview lands, or if it failed.
+      // Sales Invoice is financial-year numbered server-side (migration 249).
+      if (this.config?.key === 'salesInvoice') return `Auto (${this.transactionDocPrefix(field)}…/YY-YY) — assigned on save`;
       return `Auto (${this.transactionDocPrefix(field)}-YY-…) — assigned on save`;
     }
     if (this.financialYearDocSeries()) return `${this.transactionDocPrefix(field)}00001/YY-YY`;
