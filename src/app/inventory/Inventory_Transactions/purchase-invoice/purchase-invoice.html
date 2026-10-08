@@ -363,12 +363,19 @@
                 }
               </tbody>
               <tfoot>
+                @let footerTotals = lineFooterTotals();
                 <tr class="inventory-line-total-row">
                   <td class="text-center"></td>
                   @for (column of renderedColumns; track column) {
                     <td>
                       @if (column === 'Product') {
                         <strong>Total</strong>
+                      } @else if (column === 'Rate') {
+                        <strong [title]="'Total Value (Qty x Rate)'">{{ footerTotals.value }}</strong>
+                      } @else if (column === 'Disc %') {
+                        <strong [title]="'Total Discount'">{{ footerTotals.discount }}</strong>
+                      } @else if (column === 'GST') {
+                        <strong [title]="'GST Total'">{{ footerTotals.gst }}</strong>
                       } @else if (column === 'Accepted Qty' || column === 'Amount') {
                         <strong>{{ lineColumnTotalByColumn(column) }}</strong>
                       }

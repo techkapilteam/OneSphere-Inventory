@@ -1392,7 +1392,11 @@ export const purchaseInvoiceConfig = transaction(
     // actually references a posted GRN, where it displays (read-only) the
     // GRN's accepted quantity -- see item 5. Received Qty is intentionally
     // NOT a PI column: PI always bills on Accepted Qty when GRN-linked.
-    lineColumns: ['Product', 'Variant', 'Attribute', 'UOM', 'Qty', 'Accepted Qty', 'Rate', 'MRP', 'Selling Price', 'Disc %', 'GST', 'Batch No', 'Serial No', 'Expiry Date', 'Warranty Upto', 'Amount'],
+    // Previous: lineColumns: ['Product', 'Variant', 'Attribute', 'UOM', 'Qty', 'Accepted Qty', 'Rate', 'MRP', 'Selling Price', 'Disc %', 'GST', 'Batch No', 'Serial No', 'Expiry Date', 'Warranty Upto', 'Amount'],
+    // Warranty Upto column removed: warranty is entered per serial in the
+    // serial popup (saved on inv_serial_units), the only place the Sales
+    // Invoice reads it from.
+    lineColumns: ['Product', 'Variant', 'Attribute', 'UOM', 'Qty', 'Accepted Qty', 'Rate', 'MRP', 'Selling Price', 'Disc %', 'GST', 'Batch No', 'Serial No', 'Expiry Date', 'Amount'],
     lineRows: [],
     columns: ['PI No', 'PI Date', 'Vendor', 'Warehouse / Branch', 'GRN Ref', 'Amount', 'Due Date', 'Status'],
     rows: []
@@ -1453,7 +1457,9 @@ export const salesInvoiceConfig = transaction(
     // Warehouse column (line ~1290 above) is a real, independently-editable
     // per-line field and stays untouched -- this removal is Sales Invoice
     // only.
-    lineColumns: ['Item / SKU', 'Variant', 'Attribute', 'UOM', 'Qty', 'Rate', 'Disc %', 'GST', 'Batch No', 'Serial No', 'Expiry Date', 'Warranty Upto', 'Amount'],
+    // Previous: lineColumns: ['Item / SKU', 'Variant', 'Attribute', 'UOM', 'Qty', 'Rate', 'Disc %', 'GST', 'Batch No', 'Serial No', 'Expiry Date', 'Warranty Upto', 'Amount'],
+    // Warranty Upto column removed from the Sales Invoice grid.
+    lineColumns: ['Item / SKU', 'Variant', 'Attribute', 'UOM', 'Qty', 'Rate', 'Disc %', 'GST', 'Batch No', 'Serial No', 'Expiry Date', 'Amount'],
     lineRows: [
       ['LED Display 32 inch', '', '', 'Nos', '2', '24,500', '26,000', '24,500', '0', '18%', 'NA', 'SN-1042, SN-1043', 'NA', 'HYD Main WH', '57,820'],
       ['Agro Seed Premium', '', '', 'Bag', '10', '2,150', '2,300', '2,150', '1', '5%', 'LOT-AGRO-0526-A', 'NA', '18-Dec-2026', 'BLR Store', '22,349'],

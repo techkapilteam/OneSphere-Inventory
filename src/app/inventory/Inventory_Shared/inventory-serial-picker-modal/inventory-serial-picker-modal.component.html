@@ -201,8 +201,28 @@
                          it was received (migration 237) — read-only here,
                          never re-entered at the point of sale. -->
                     <span class="inventory-serial-chip-warranty inventory-serial-chip-warranty--readonly" title="Warranty already fixed on this unit at receipt">
-                      <i class="pi pi-shield"></i>Warranty upto {{ option.warranty_upto }}
+                      <i class="pi pi-shield"></i>Warranty upto {{ (option.warranty_upto || '').slice(0, 10) }}
                     </span>
+                  } @else if (picker.saleWarrantyApplicable && isChecked) {
+                    <!-- Warranty Applicable product, but this unit got no
+                         warranty at purchase: "+" lets the sale add one. It is
+                         stamped onto the serial unit when the invoice posts. -->
+                    @let saleWarranty = host.serialPickerSaleWarrantyValue(option.serial_no);
+                    @if (saleWarranty !== null) {
+                      <input class="erp-input erp-input-sm" type="date" title="Warranty Upto"
+                        [ngModel]="saleWarranty"
+                        (ngModelChange)="host.setSerialPickerSaleWarranty(option.serial_no, $event)"
+                        (click)="$event.stopPropagation()" />
+                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove warranty"
+                        (click)="$event.preventDefault(); $event.stopPropagation(); host.clearSerialPickerSaleWarranty(option.serial_no)">
+                        <i class="pi pi-times"></i>
+                      </button>
+                    } @else {
+                      <button type="button" class="erp-btn btn-white btn-sm" title="Add warranty for this unit"
+                        (click)="$event.preventDefault(); $event.stopPropagation(); host.startSerialPickerSaleWarranty(option.serial_no)">
+                        <i class="pi pi-plus"></i> Warranty
+                      </button>
+                    }
                   }
                 </label>
               } @empty {

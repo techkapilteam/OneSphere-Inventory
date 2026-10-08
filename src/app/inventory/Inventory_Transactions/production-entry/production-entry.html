@@ -249,6 +249,20 @@
                   </tr>
                 }
               </tbody>
+              <tfoot>
+                <tr class="inventory-line-total-row">
+                  <td class="text-center"></td>
+                  @for (column of renderedColumns; track column; let first = $first) {
+                    <td>
+                      @if (first) {
+                        <strong>Total</strong>
+                      } @else {
+                        <strong>{{ lineFooterCellText(column) }}</strong>
+                      }
+                    </td>
+                  }
+                </tr>
+              </tfoot>
             </table>
           </div>
         </div>
