@@ -309,6 +309,9 @@
                 [ngModel]="host.formValues()['quickContactPan']"
                 (ngModelChange)="host.collectFormField('quickContactPan', $event)"
                 placeholder="AAAAA0000A" />
+              @if (host.panValidationMessage(host.formValues()['quickContactPan']); as panError) {
+              <div class="erp-field-error"><i class="pi pi-exclamation-circle"></i> {{ panError }}</div>
+              }
             </div>
             <div class="erp-form-group span-2"><label class="erp-label">Address <span class="erp-label-hint">optional</span></label>
               <textarea class="erp-input" rows="2"

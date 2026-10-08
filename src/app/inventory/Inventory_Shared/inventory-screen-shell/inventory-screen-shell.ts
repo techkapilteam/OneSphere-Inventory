@@ -8910,16 +8910,45 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.stockTransferLocationOptionsExcluding('toWarehouse')
   );
 
+  // Previous: this.stockTransferLocationOptionsExcluding('fromWarehouse')
   private readonly stockTransferToWarehouseOptions = computed((): string[] =>
-    this.stockTransferLocationOptionsExcluding('fromWarehouse')
+    Array.from(new Set(this.stockTransferToEntries().map(entry => entry.label)))
   );
+
+  // To Warehouse / Branch lists Branches only. A saved transfer whose To is
+  // still a Warehouse keeps that one entry, so it shows and re-saves
+  // unchanged when opened for edit.
+  private stockTransferToEntries(): MergedLocationEntry[] {
+    const current = this.resolveStockTransferToLocation(this.formValues()['toWarehouse']);
+    const currentWarehouseId = current.type === 'warehouse' ? this.optionalNumber(current.warehouse?.id) : null;
+    return this.stockTransferLocationEntriesExcluding('fromWarehouse')
+      .filter(entry => entry.type === 'branch' || (currentWarehouseId !== null && entry.id === currentWarehouseId));
+  }
+
+  // To is branch-only, so a label shared by a Warehouse and a Branch resolves
+  // to the Branch here (resolveMergedLocation() lets the Warehouse win name
+  // ties). A value that names no Branch -- a saved transfer whose To is still
+  // a Warehouse -- resolves exactly as before.
+  private resolveStockTransferToLocation(value: any): MergedLocationResolution {
+    const resolved = this.resolveMergedLocation(value);
+    if (resolved.type !== 'warehouse') return resolved;
+    const key = this.normalizeKey(String(value ?? '').trim());
+    const branchEntry = this.mergedLocationEntries().find(item => item.type === 'branch' && this.normalizeKey(item.label) === key);
+    const branch = branchEntry && branchEntry.id !== null
+      ? this.loadedBranchObjects().find(item => this.branchResolvedId(item) === branchEntry.id)
+      : null;
+    return branch ? { type: 'branch', warehouse: null, branch } : resolved;
+  }
 
   private stockTransferLocationOptionsExcluding(otherFormKey: 'fromWarehouse' | 'toWarehouse'): string[] {
     return Array.from(new Set(this.stockTransferLocationEntriesExcluding(otherFormKey).map(entry => entry.label)));
   }
 
   private stockTransferLocationEntriesExcluding(otherFormKey: 'fromWarehouse' | 'toWarehouse'): MergedLocationEntry[] {
-    const otherResolved = this.resolveMergedLocation(this.formValues()[otherFormKey]);
+    // Previous: const otherResolved = this.resolveMergedLocation(this.formValues()[otherFormKey]);
+    const otherResolved = otherFormKey === 'toWarehouse'
+      ? this.resolveStockTransferToLocation(this.formValues()[otherFormKey])
+      : this.resolveMergedLocation(this.formValues()[otherFormKey]);
     const excludeType = otherResolved.type;
     const excludeId = excludeType === 'warehouse'
       ? this.optionalNumber(otherResolved.warehouse?.id)
@@ -8936,8 +8965,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.stockTransferLocationEntriesExcluding('toWarehouse').map(entry => this.mergedLocationGroupOption(entry))
   );
 
+  // Previous: this.stockTransferLocationEntriesExcluding('fromWarehouse').map(...)
   private readonly stockTransferToWarehouseGroups = computed((): MergedLocationOption[] =>
-    this.stockTransferLocationEntriesExcluding('fromWarehouse').map(entry => this.mergedLocationGroupOption(entry))
+    this.stockTransferToEntries().map(entry => this.mergedLocationGroupOption(entry))
   );
 
   // Same picker as above but grouped by master, so the dropdown visibly labels
@@ -11737,6 +11767,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private normalizeLineRow(row: string[]): string[] {
     const columnCount = this.config?.lineColumns?.length || row.length;
     return Array.from({ length: columnCount }, (_, index) => row[index] || '');
+  }
+
+  // Grid row used only by clearConfigForm() (Clear, and after Save Draft /
+  // Post / Update) on the sales, manufacturing and stock screens: every cell
+  // empty (Disc 0), so nothing appears pre-selected after a save and each
+  // cell is picked from its dropdown again. blankLineRow() is left as-is for
+  // every other use (first open, Add row, record loaders, scanner).
+  private clearedEntryLineRow(): string[] {
+    return (this.config?.lineColumns || []).map(column => column.toLowerCase().includes('disc') ? '0' : '');
   }
 
   private blankLineRow(): string[] {
@@ -15237,7 +15276,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
     if (this.isSalesTransactionKey()) {
       this.entryLineRowsKey.set(this.config.key);
-      this.entryLineRows.set([this.blankLineRow()]);
+      this.entryLineRows.set([this.clearedEntryLineRow()]);
       this.lineAttrValueMap.set({});
       this.lineSerialValueMap.set({});
       this.lineRefItemIdMap.set({});
@@ -15251,7 +15290,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
     if (this.isManufacturingTransactionKey()) {
       this.entryLineRowsKey.set(this.config.key);
-      this.entryLineRows.set([this.blankLineRow()]);
+      this.entryLineRows.set([this.clearedEntryLineRow()]);
       this.lineAttrValueMap.set({});
       this.lineSerialValueMap.set({});
       this.lineRefItemIdMap.set({});
@@ -15266,7 +15305,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // but the previous document's line rows stayed in the grid.
     if (['stockTransfer', 'stockAdjustment', 'openingStockEntry', 'cycleCount'].includes(this.config?.key || '')) {
       this.entryLineRowsKey.set(this.config.key);
-      this.entryLineRows.set([this.blankLineRow()]);
+      this.entryLineRows.set([this.clearedEntryLineRow()]);
       this.lineAttrValueMap.set({});
       this.lineSerialValueMap.set({});
       this.lineRefItemIdMap.set({});
@@ -20465,7 +20504,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const fromWarehouseId = fromWarehouse?.id ?? (fromBranch ? null : this.optionalNumber(v['fromWarehouseId']));
     const fromBranchId = (fromBranch && !fromWarehouse) ? this.branchResolvedId(fromBranch) : null;
 
-    const toPicked = this.resolveMergedLocation(v['toWarehouse']);
+    // Previous: const toPicked = this.resolveMergedLocation(v['toWarehouse']);
+    const toPicked = this.resolveStockTransferToLocation(v['toWarehouse']);
     const toBranch = !toPicked.warehouse ? toPicked.branch : null;
     const toWarehouse = toPicked.warehouse;
     const toWarehouseId = toWarehouse?.id ?? (toBranch ? null : this.optionalNumber(v['toWarehouseId']));
