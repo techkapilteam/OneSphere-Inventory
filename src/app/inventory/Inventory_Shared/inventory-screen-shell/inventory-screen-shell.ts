@@ -13133,11 +13133,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return field ? String(this.formValues()[field.key] || '').trim() : '';
   }
 
+  // Auto-open of the reference picker on screen open is disabled (client request
+  // 2026-10-08): Sales Invoice / Delivery Challan / Sales Return no longer pop the
+  // picker first; users open it from the screen's own button.
   private shouldAutoOpenPrimaryReferencePicker(): boolean {
-    const key = this.config?.key || '';
-    return (key === 'salesInvoice' || key === 'deliveryChallan' || key === 'salesReturn')
-      && !this.refPickerOpen()
-      && !this.refPickerLoading();
+    // const key = this.config?.key || '';
+    // return (key === 'salesInvoice' || key === 'deliveryChallan' || key === 'salesReturn')
+    //   && !this.refPickerOpen()
+    //   && !this.refPickerLoading();
+    return false;
   }
 
   private openPrimaryReferencePickerWithDocs(type: string, docs: PurchaseRefDoc[]): void {

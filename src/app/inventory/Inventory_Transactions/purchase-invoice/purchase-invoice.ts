@@ -194,17 +194,19 @@ export class InventoryPurchaseInvoiceComponent extends InventoryScreenShell impl
   // This used to fire on fixed 0/350/900ms timers; the 0ms one ran before the
   // segment list loaded, so its request had no segmentId and the tray listed
   // GRNs from every segment on first open.
-  private grnTrayAutoOpened = false;
-  private readonly autoOpenGrnTray = effect(() => {
-    if (this.grnTrayAutoOpened || !this.segmentScopeReady) return;
-    this.grnTrayAutoOpened = true;
-    untracked(() => {
-      const alreadyPicked = String(this.formValues()['grnReference'] || '').trim();
-      if (!this.editingId() && !alreadyPicked && !this.refPickerOpen()) {
-        this.openPurchaseReferencePicker();
-      }
-    });
-  });
+  // Disabled (client request 2026-10-08): the Posted GRNs tray no longer pops on
+  // screen open; users open it from the screen's own button.
+  // private grnTrayAutoOpened = false;
+  // private readonly autoOpenGrnTray = effect(() => {
+  //   if (this.grnTrayAutoOpened || !this.segmentScopeReady) return;
+  //   this.grnTrayAutoOpened = true;
+  //   untracked(() => {
+  //     const alreadyPicked = String(this.formValues()['grnReference'] || '').trim();
+  //     if (!this.editingId() && !alreadyPicked && !this.refPickerOpen()) {
+  //       this.openPurchaseReferencePicker();
+  //     }
+  //   });
+  // });
 
   // transactionLineDisplayColumns()/lineGridRenderColumns() used to be
   // overridden here with a local copy of the MRP/Selling + GRN-linked
