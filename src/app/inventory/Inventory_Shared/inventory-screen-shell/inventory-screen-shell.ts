@@ -7754,9 +7754,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       return;
     }
     const docType = this.config?.key || '';
-    if (!docType || this.previewDocNumberKey === docType) return;
+    // Keyed on the saved-record count too, so the preview refreshes once a
+    // save lands in the grid instead of showing the number just used.
+    const previewKey = `${docType}:${this.savedRecordObjects().length}`;
+    if (!docType || this.previewDocNumberKey === previewKey) return;
 
-    this.previewDocNumberKey = docType;
+    this.previewDocNumberKey = previewKey;
     this.txService.peekNextDocNumber(docType)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -7790,8 +7793,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // wins, as long as it is not already taken.
     if (this.serverAssignsDocNumber() && this.editingId() === null) {
       // Only seen in the moment before the preview lands, or if it failed.
-      // Sales Invoice is financial-year numbered server-side (migration 249).
-      if (this.config?.key === 'salesInvoice') return `Auto (${this.transactionDocPrefix(field)}…/YY-YY) — assigned on save`;
+      // Financial-year numbered server-side (migration 249).
+      const fyServerPrefix: Record<string, string> = { salesInvoice: 'INV', salesReturn: 'SRT' };
+      const fyPrefix = fyServerPrefix[this.config?.key || ''];
+      if (fyPrefix) return `Auto (${fyPrefix}…/YY-YY) — assigned on save`;
       return `Auto (${this.transactionDocPrefix(field)}-YY-…) — assigned on save`;
     }
     if (this.financialYearDocSeries()) return `${this.transactionDocPrefix(field)}00001/YY-YY`;
@@ -8391,7 +8396,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private financialYearDocSeries(): { dateKey: string; numberKey: string } | null {
     const series: Record<string, { dateKey: string; numberKey: string }> = {
       purchaseInvoice: { dateKey: 'piDate', numberKey: 'pi_number' },
-      purchaseReturn: { dateKey: 'returnDate', numberKey: 'return_number' }
+      purchaseReturn: { dateKey: 'returnDate', numberKey: 'return_number' },
+      // Display only: sp_save_stock_transfer assigns the real number (migration 250).
+      stockTransfer: { dateKey: 'transferDate', numberKey: 'transfer_number' }
     };
     return series[this.config?.key || ''] || null;
   }
@@ -15027,6 +15034,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.txDocId.set(null);
     this.txDocNumber.set('');
     this.txDocStatus.set('draft');
+    // Fetch a fresh server-side number preview for the next document.
+    this.previewDocNumber.set('');
+    this.previewDocNumberKey = '';
     this.txSaveError.set('');
     this.txSaveMsg.set('');
     this.bundleConsumptionOpen.set(false);
