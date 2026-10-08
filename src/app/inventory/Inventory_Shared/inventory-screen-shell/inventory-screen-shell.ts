@@ -7792,6 +7792,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Only seen in the moment before the preview lands, or if it failed.
       return `Auto (${this.transactionDocPrefix(field)}-YY-…) — assigned on save`;
     }
+    if (this.financialYearDocSeries()) return `${this.transactionDocPrefix(field)}00001/YY-YY`;
     return `${this.transactionDocPrefix(field)}-YY-00001`;
   }
 
@@ -8329,7 +8330,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       stockAdjustment: 'SA',
       purchaseRequisition: 'PR',
       requestForQuotation: 'RFQ',
-      purchaseReturn: 'PRR',
+      purchaseReturn: 'PRT',
       salesEnquiry: 'SE',
       salesQuotation: 'SQ',
       salesOrder: 'SO',
@@ -8362,6 +8363,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   private generateTransactionDocNumber(field?: InventoryField | null): string {
     const prefix = this.transactionDocPrefix(field);
+    const fySeries = this.financialYearDocSeries();
+    if (fySeries) return this.generateFinancialYearDocNumber(prefix, fySeries);
     const segmentCode = this.segmentCodedDocNumberKeys().includes(this.config?.key || '')
       ? `-${this.transactionSegmentDocCode()}`
       : '';
@@ -8369,6 +8372,36 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const count = Math.max(this.savedRecordObjects().length, this.liveRows().length, this.config?.rows?.length || 0);
     const seq = String(count + this.pendingRows().length + 1).padStart(5, '0');
     return `${prefix}${segmentCode}-${yy}-${seq}`;
+  }
+
+  // Screens numbered per financial year (PI00001/26-27, PRT00001/26-27):
+  // the form's date key and the saved record's number column.
+  private financialYearDocSeries(): { dateKey: string; numberKey: string } | null {
+    const series: Record<string, { dateKey: string; numberKey: string }> = {
+      purchaseInvoice: { dateKey: 'piDate', numberKey: 'pi_number' },
+      purchaseReturn: { dateKey: 'returnDate', numberKey: 'return_number' }
+    };
+    return series[this.config?.key || ''] || null;
+  }
+
+  // Financial-year numbering, e.g. PI00001/26-27. The FY (April–March) is
+  // taken from the document date so a back-dated document lands in its own
+  // year's series; the sequence restarts each FY and continues from the
+  // highest number already saved in that FY rather than a plain row count.
+  private generateFinancialYearDocNumber(prefix: string, series: { dateKey: string; numberKey: string }): string {
+    const { dateKey, numberKey } = series;
+    const camelKey = numberKey.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+    const picked: Date | null = this.datePickerValue(this.formValues()[dateKey]);
+    const date = picked && !isNaN(picked.getTime()) ? picked : new Date();
+    const startYear = date.getMonth() >= 3 ? date.getFullYear() : date.getFullYear() - 1;
+    const fy = `${String(startYear).slice(-2)}-${String(startYear + 1).slice(-2)}`;
+    const pattern = new RegExp(`^${prefix}(\\d+)/${fy}$`);
+    const used = [
+      ...this.savedRecordObjects().map(record => record?.[numberKey] ?? record?.[camelKey]),
+      ...this.pendingRows().map(row => row.payload?.[numberKey])
+    ].map(no => Number(pattern.exec(String(no ?? '').trim())?.[1] || 0));
+    const seq = String(Math.max(0, ...used) + 1).padStart(5, '0');
+    return `${prefix}${seq}/${fy}`;
   }
 
   private segmentCodedDocNumberKeys(): string[] {
