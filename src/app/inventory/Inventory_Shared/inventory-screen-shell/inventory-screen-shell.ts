@@ -548,7 +548,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // shows already-captured serials (e.g. a GRN-linked PI line) with no
   // add/remove affordances, distinct from 'inherited' (which is specifically
   // the DC/SI cross-reference flow with its own "reserved via ..." copy).
-  readonly activeSerialPicker = signal<{ rowIndex: number; mode: 'capture' | 'select' | 'inherited' | 'view'; qtyNeeded: number; productId: number | null; productName: string; warrantyApplicable: boolean } | null>(null);
+  readonly activeSerialPicker = signal<{ rowIndex: number; mode: 'capture' | 'select' | 'inherited' | 'view'; qtyNeeded: number; productId: number | null; productName: string; warrantyApplicable: boolean; saleWarrantyApplicable?: boolean } | null>(null);
+  // Sales Invoice serial popup: warranty dates added with "+" for units of a
+  // Warranty Applicable product that got no warranty at purchase, keyed by
+  // serial no. Saved on the SI line as serial_warranty (same shape as GRN/PI)
+  // and stamped onto the serial unit when the invoice posts.
+  readonly serialPickerSaleWarrantyEdits = signal<Record<string, string>>({});
   readonly serialPickerDraftValues = signal<string[]>([]);
   readonly serialPickerAvailableOptions = signal<{ id: number; serial_no: string; warranty_upto?: string | null; manufacturing_date?: string | null }[]>([]);
   // Per-line, per-serial warranty (capture mode only — GRN / Direct PI, the
@@ -1536,29 +1541,31 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   ngOnInit(): void {
-    // --- Previous code (kept for reference) ---
-    // const token = sessionStorage.getItem('token') || sessionStorage.getItem('jwt') || sessionStorage.getItem('access_token') || localStorage.getItem('token') || '';
-    // if (token) {
-    //   try {
-    //     const jwtPayload = JSON.parse(atob(token.split('.')[1]));
-    //     const role: any = jwtPayload?.role || jwtPayload?.roles || jwtPayload?.userRole || '';
-    //     const roleStr = Array.isArray(role) ? role.join(',') : String(role);
-    //     this.isAdmin.set(roleStr.toLowerCase().includes('admin'));
-    //   } catch { this.isAdmin.set(true); }
-    // } else {
-    //   this.isAdmin.set(true); // dev fallback — no token means dev mode
-    // }
-    // --- End previous code ---
-
-    // Same company-admin rule as inventory-report-page.ts / auth.service.ts.
-    try {
-      const user = JSON.parse(sessionStorage.getItem('authUser') || '{}') as { isSuperAdmin?: boolean };
-      const roles = JSON.parse(sessionStorage.getItem('authRoles') || '[]') as Array<{ roleType?: string }>;
-      this.isAdmin.set(user.isSuperAdmin === true ||
-        roles.some(role => String(role.roleType ?? '').toLowerCase() === 'company_admin'));
-    } catch {
-      this.isAdmin.set(false);
+    // Restored: admin detection as before 06-Oct (73d1ea4e), so Edit/Delete
+    // button access is the same as before.
+    const token = sessionStorage.getItem('token') || sessionStorage.getItem('jwt') || sessionStorage.getItem('access_token') || localStorage.getItem('token') || '';
+    if (token) {
+      try {
+        const jwtPayload = JSON.parse(atob(token.split('.')[1]));
+        const role: any = jwtPayload?.role || jwtPayload?.roles || jwtPayload?.userRole || '';
+        const roleStr = Array.isArray(role) ? role.join(',') : String(role);
+        this.isAdmin.set(roleStr.toLowerCase().includes('admin'));
+      } catch { this.isAdmin.set(true); }
+    } else {
+      this.isAdmin.set(true); // dev fallback — no token means dev mode
     }
+
+    // --- 06-Oct rule (73d1ea4e), kept for reference ---
+    // // Same company-admin rule as inventory-report-page.ts / auth.service.ts.
+    // try {
+    //   const user = JSON.parse(sessionStorage.getItem('authUser') || '{}') as { isSuperAdmin?: boolean };
+    //   const roles = JSON.parse(sessionStorage.getItem('authRoles') || '[]') as Array<{ roleType?: string }>;
+    //   this.isAdmin.set(user.isSuperAdmin === true ||
+    //     roles.some(role => String(role.roleType ?? '').toLowerCase() === 'company_admin'));
+    // } catch {
+    //   this.isAdmin.set(false);
+    // }
+    // --- End 06-Oct rule ---
     if (this.config?.key === 'salesInvoice') {
       this.paymentsService.getInvoiceBankDetails()
         .pipe(takeUntilDestroyed(this.destroyRef))
@@ -7825,7 +7832,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // transaction-date picker. A company admin (isAdmin) may pick any past date;
   // everyone else is limited to today. Computed because isAdmin is only
   // resolved from sessionStorage in ngOnInit.
-  readonly minTransactionDate = computed<Date | null>(() => this.isAdmin() ? null : this._todayDateValue);
+  // Previous: readonly minTransactionDate = computed<Date | null>(() => this.isAdmin() ? null : this._todayDateValue);
+  // Back dates blocked for everyone, admins included: with maxTransactionDate
+  // also today, the header transaction date can only be the current date.
+  readonly minTransactionDate = computed<Date | null>(() => this._todayDateValue);
 
   // A handful of body-level date fields represent a real-world event that
   // already happened by the time it's typed in (the vendor's own invoice
@@ -9595,8 +9605,86 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return this.lineColumnAppliesToRow(row, column);
   }
 
+  // ── Sales Invoice warranty, bound from purchase ──────────────────────────
+  // A sold serial unit already carries the warranty fixed when it was bought
+  // (inv_serial_units.warranty_upto, captured at GRN / Direct PI). Once a
+  // Sales Invoice row's serials are chosen, its "Warranty Upto" cell is filled
+  // from those units and locked; units with different dates show "Multiple"
+  // (each unit keeps its own date). Keyed by grid row: the value bound there.
+  readonly lineSalesWarrantyBoundMap = signal<Record<number, string>>({});
+  private readonly salesWarrantyMultipleText = 'Multiple';
+
+  private isSalesInvoiceWarrantyColumn(column: string): boolean {
+    return this.config?.key === 'salesInvoice' && this.normalizeKey(column) === 'warranty upto';
+  }
+
+  private salesInvoiceWarrantyIsBound(rowIndex: number, row: string[], column: string): boolean {
+    if (!this.isSalesInvoiceWarrantyColumn(column)) return false;
+    const bound = this.lineSalesWarrantyBoundMap()[rowIndex];
+    return !!bound
+      && !!this.lineSerialUnitsMap()[rowIndex]?.length
+      && String(this.lineCellValue(row, column) ?? '').trim() === bound;
+  }
+
+  // Product is Warranty Applicable but no purchase date was found for this
+  // row: the cell stays editable and shows this hint.
+  salesInvoiceWarrantyHint(rowIndex: number, row: string[], column: string): string {
+    if (!this.isSalesInvoiceWarrantyColumn(column)) return '';
+    if (this.salesInvoiceWarrantyIsBound(rowIndex, row, column)) return '';
+    if (!this.lineRowProduct(row)?.warranty_applicable) return '';
+    if (String(this.lineCellValue(row, column) ?? '').trim()) return '';
+    return 'Warranty applicable';
+  }
+
+  private bindSalesInvoiceWarrantyFromSerials(rowIndex: number, units: Array<{ warranty_upto?: string | null }>): void {
+    if (this.config?.key !== 'salesInvoice') return;
+    const columnIndex = this.lineColumnIndex('Warranty Upto');
+    if (columnIndex < 0) return;
+    const dates = [...new Set(units.map(unit => this.isoDateValue(unit?.warranty_upto)).filter((date): date is string => !!date))];
+    const previous = this.lineSalesWarrantyBoundMap()[rowIndex];
+    const value = dates.length > 1 ? this.salesWarrantyMultipleText : (dates[0] || '');
+    this.lineSalesWarrantyBoundMap.update(map => {
+      const next = { ...map };
+      if (value) next[rowIndex] = value; else delete next[rowIndex];
+      return next;
+    });
+    // No purchase date: only clear a value this binding put there earlier,
+    // never one the user typed in themselves.
+    if (!value && !previous) return;
+    this.entryLineRows.update(rows => rows.map((row, index) => {
+      if (index !== rowIndex) return row;
+      const next = this.normalizeLineRow(row);
+      if (value || String(next[columnIndex] ?? '').trim() === previous) next[columnIndex] = value;
+      return next;
+    }));
+  }
+
+  // Rows pulled in from a Delivery Challan inherit its reserved serials
+  // without the picker ever opening, so their warranty is looked up here.
+  private bindSalesInvoiceWarrantyFromDcItems(startIndex: number, items: any[]): void {
+    if (this.config?.key !== 'salesInvoice') return;
+    items.forEach((item, i) => {
+      const dcItemId = this.optionalNumber(item?.id);
+      if (!dcItemId || !this.serialNumbersFromRecordItem(item).length) return;
+      this.txService.getReservedSerialsForDcItem(dcItemId)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({ next: res => this.bindSalesInvoiceWarrantyFromSerials(startIndex + i, res.data || []), error: () => {} });
+    });
+  }
+
+  private salesInvoiceWarrantyDisplayText(value: string): string {
+    if (value === this.salesWarrantyMultipleText) return value;
+    const iso = this.isoDateValue(value);
+    if (!iso) return '';
+    const [year, month, day] = iso.split('-').map(Number);
+    return new Date(year, month - 1, day).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
+
   lineGridCellReadonly(rowIndex: number, row: string[], column: string): boolean {
     if ((this.config?.key === 'salesInvoice' || this.config?.key === 'deliveryChallan') && this.normalizeKey(column) === 'warehouse') {
+      return true;
+    }
+    if (this.salesInvoiceWarrantyIsBound(rowIndex, row, column)) {
       return true;
     }
     if ((this.config?.key === 'salesInvoice' || this.config?.key === 'salesOrder')
@@ -9676,6 +9764,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       const headerField = key === 'deliveryChallan' ? 'fromWarehouse' : 'warehouse';
       return String(this.formValues()[headerField] || '').trim();
     }
+    if (this.salesInvoiceWarrantyIsBound(rowIndex, row, column)) {
+      return this.salesInvoiceWarrantyDisplayText(String(this.lineCellValue(row, column) ?? '').trim());
+    }
     return String(cellView?.controlValue ?? this.lineCellValue(row, column) ?? '').trim();
   }
 
@@ -9754,6 +9845,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // decremented stock a second time.
     this.lineRefItemIdMap.update(map => {
       const next: typeof map = {};
+      for (const [key, val] of Object.entries(map)) {
+        const idx = Number(key);
+        if (idx < rowIndex) next[idx] = val;
+        else if (idx > rowIndex) next[idx - 1] = val;
+      }
+      return next;
+    });
+    this.lineSalesWarrantyBoundMap.update(map => {
+      const next: Record<number, string> = {};
       for (const [key, val] of Object.entries(map)) {
         const idx = Number(key);
         if (idx < rowIndex) next[idx] = val;
@@ -10041,7 +10141,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (index < 0) return '';
     if (this.isLineQuantityColumn(column)) return this.lineColumnTotal(index);
     const rateIndex = this.findColumnIndex(['rate', 'price', 'cost']);
-    if (rateIndex >= 0) {
+    // Priced grid = a Rate column AND an Amount/Value column (the line breakup
+    // needs both); otherwise e.g. Production Cost is just summed below.
+    if (rateIndex >= 0 && this.amountColumnIndex() >= 0) {
       if (index === rateIndex) return this.lineFooterTotals().value;
       if (index === this.findColumnIndex(['disc', 'discount'])) return this.lineFooterTotals().discount;
       if (index === this.findColumnIndex(['gst', 'tax'])) return this.lineFooterTotals().gst;
@@ -10112,19 +10214,25 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   private productSerialColumnLabels(product: ProductItem | null | undefined): string[] {
     if (!product?.serial_applicable) return [];
-    const policy = this.serialPolicyForProduct(product);
-    const format = String(policy?.serial_format || '').trim();
-    const policyName = String(policy?.policy_name || product.serial_policy_name || '').trim();
-    if (policyName) {
-      const label = this.serialLabelFromPolicyName(policyName);
-      return label ? [label] : ['Serial No'];
-    }
-    const source = this.serialFormatLooksLikeLabels(format) ? format : (format || 'Serial No');
-    const labels = source
-      .split(/\s*(?:,|\||;|\/|\+|&|\band\b)\s*/i)
-      .map(token => this.serialLabelFromToken(token))
-      .filter(Boolean);
-    return labels.length ? [...new Set(labels)] : ['Serial No'];
+    // The serial column keeps its own name: always "Serial No", never renamed
+    // from the product's Serial Number Policy name or format (e.g. "Sh").
+    // The policy still drives serial behaviour; only the header stays fixed.
+    return ['Serial No'];
+    // --- Previous code (kept for reference) ---
+    // const policy = this.serialPolicyForProduct(product);
+    // const format = String(policy?.serial_format || '').trim();
+    // const policyName = String(policy?.policy_name || product.serial_policy_name || '').trim();
+    // if (policyName) {
+    //   const label = this.serialLabelFromPolicyName(policyName);
+    //   return label ? [label] : ['Serial No'];
+    // }
+    // const source = this.serialFormatLooksLikeLabels(format) ? format : (format || 'Serial No');
+    // const labels = source
+    //   .split(/\s*(?:,|\||;|\/|\+|&|\band\b)\s*/i)
+    //   .map(token => this.serialLabelFromToken(token))
+    //   .filter(Boolean);
+    // return labels.length ? [...new Set(labels)] : ['Serial No'];
+    // --- End previous code ---
   }
 
   private lineGridSerialColumnNamesForRow(row: string[]): string[] {
@@ -13120,7 +13228,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.boundReferenceFields.set({});
     this.lineRefItemIdMap.set({});
     this.lineSerialUnitsMap.set({});
-    this.lineSerialWarrantyMap.set({});
+    this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
     this.entryLineRowsKey.set(key);
     this.entryLineRows.set([this.blankLineRow()]);
   }
@@ -13195,7 +13303,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.entryLineRows.set(rows);
     this.lineRefItemIdMap.set({});
     this.lineSerialUnitsMap.set({});
-    this.lineSerialWarrantyMap.set({});
+    this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
   }
 
   private manufacturingLineRefMapFromItems(
@@ -13395,7 +13503,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.entryLineRows.set(rows.length ? rows : [this.blankLineRow()]);
     this.lineRefItemIdMap.set(refMap);
     this.lineSerialUnitsMap.set({});
-    this.lineSerialWarrantyMap.set({});
+    this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
     this.boundReferenceLabels.set([doc.doc_number]);
     this.boundReferenceFields.set(patch);
     if (key === 'productionEntry') {
@@ -13747,6 +13855,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           } else {
             this.lineRefItemIdMap.set(nextMap);
           }
+          if (key === 'salesInvoice' && docType === 'DC') {
+            this.bindSalesInvoiceWarrantyFromDcItems(startIndex, doc.items || []);
+          }
         } else if (key === 'salesReturn') {
           // See lineRefItemIdMap's doc comment — carries the referenced
           // invoice item's attribute_id/attribute_value through directly
@@ -13964,6 +14075,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       });
       return next;
     });
+    this.bindSalesInvoiceWarrantyFromDcItems(startIndex, doc.items || []);
     const customerId = doc.vendor_id ?? null;
     this.formValues.update(values => ({
       ...values,
@@ -14638,7 +14750,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // configured to need it; 'select'/'inherited'/'view' rows are picking or
     // reading units already fixed at receipt time, never re-capturing.
     const warrantyApplicable = mode === 'capture' && !!product.warranty_applicable;
-    this.activeSerialPicker.set({ rowIndex, mode, qtyNeeded, productId: product.id, productName: product.product_name || productName, warrantyApplicable });
+    // Sales Invoice: a unit with no purchase warranty can get one added here.
+    const saleWarrantyApplicable = mode === 'select' && this.config?.key === 'salesInvoice' && !!product.warranty_applicable;
+    this.activeSerialPicker.set({ rowIndex, mode, qtyNeeded, productId: product.id, productName: product.product_name || productName, warrantyApplicable, saleWarrantyApplicable });
+    const savedSaleWarranty: Record<string, string> = {};
+    if (saleWarrantyApplicable) {
+      for (const [serial, entry] of Object.entries(this.lineSerialWarrantyMap()[rowIndex] || {})) {
+        if (entry?.warranty_upto) savedSaleWarranty[serial] = entry.warranty_upto;
+      }
+    }
+    this.serialPickerSaleWarrantyEdits.set(savedSaleWarranty);
     this.serialPickerDraftValues.set([...(this.lineSerialUnitsMap()[rowIndex] || [])]);
     this.serialPickerAvailableOptions.set([]);
     this.serialPickerSelectedIds.set(new Set());
@@ -14666,13 +14787,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           next: res => {
             this.serialPickerLoading.set(false);
             const options = (res.data || [])
-              .map((s, index) => ({ id: Number(s?.id) || -(index + 1), serial_no: String(s?.serial_no || '').trim() }))
-              .filter((s): s is { id: number; serial_no: string } => !!s.serial_no);
+              .map((s, index) => ({ id: Number(s?.id) || -(index + 1), serial_no: String(s?.serial_no || '').trim(), warranty_upto: s?.warranty_upto ?? null }))
+              .filter((s): s is { id: number; serial_no: string; warranty_upto: string | null } => !!s.serial_no);
             const existingSerials = this.lineSerialUnitsMap()[rowIndex] || this.serialPickerDraftValues();
             const serials = options.length ? options.map(s => s.serial_no) : existingSerials;
             this.serialPickerAvailableOptions.set(options);
             this.serialPickerDraftValues.set(serials);
             this.lineSerialUnitsMap.update(map => ({ ...map, [rowIndex]: serials }));
+            if (options.length) this.bindSalesInvoiceWarrantyFromSerials(rowIndex, options);
           },
           error: () => { this.serialPickerLoading.set(false); this.serialPickerError.set('Could not load reserved serials.'); }
         });
@@ -14776,6 +14898,25 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.serialPickerSelectedIds.set(next);
     const options = this.serialPickerAvailableOptions();
     this.serialPickerDraftValues.set(options.filter(o => next.has(o.id)).map(o => o.serial_no));
+  }
+
+  // Sales Invoice "+" warranty for a unit with no purchase warranty.
+  // null = not being added (shows "+"); '' or a date = date box shown.
+  serialPickerSaleWarrantyValue(serial: string): string | null {
+    const edits = this.serialPickerSaleWarrantyEdits();
+    return serial in edits ? edits[serial] : null;
+  }
+
+  startSerialPickerSaleWarranty(serial: string): void {
+    this.serialPickerSaleWarrantyEdits.update(map => (serial in map ? map : { ...map, [serial]: '' }));
+  }
+
+  setSerialPickerSaleWarranty(serial: string, value: string): void {
+    this.serialPickerSaleWarrantyEdits.update(map => ({ ...map, [serial]: value || '' }));
+  }
+
+  clearSerialPickerSaleWarranty(serial: string): void {
+    this.serialPickerSaleWarrantyEdits.update(map => { const next = { ...map }; delete next[serial]; return next; });
   }
 
   // Duplicate serial_no text in the current options list (allow_duplicate
@@ -14887,6 +15028,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const picker = this.activeSerialPicker();
     if (picker && save) {
       this.lineSerialUnitsMap.update(map => ({ ...map, [picker.rowIndex]: [...this.serialPickerDraftValues()] }));
+      if (picker.mode === 'select' || picker.mode === 'inherited') {
+        // Sales Invoice: Warranty Upto from the chosen units' purchase warranty.
+        const chosen = new Set(this.serialPickerDraftValues());
+        this.bindSalesInvoiceWarrantyFromSerials(picker.rowIndex,
+          this.serialPickerAvailableOptions().filter(option => chosen.has(option.serial_no)));
+      }
       if (picker.warrantyApplicable) {
         // Every captured serial gets an entry — the shared default for
         // anything not individually overridden, matching "same for all,
@@ -14898,10 +15045,24 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           resolved[serial] = overrides[serial] ?? fallback;
         }
         this.lineSerialWarrantyMap.update(map => ({ ...map, [picker.rowIndex]: resolved }));
+      } else if (picker.saleWarrantyApplicable) {
+        // Sales Invoice: keep only dates added for units actually chosen.
+        const chosen = new Set(this.serialPickerDraftValues());
+        const added: Record<string, SerialWarrantyEntry> = {};
+        for (const [serial, date] of Object.entries(this.serialPickerSaleWarrantyEdits())) {
+          if (!chosen.has(serial) || !date) continue;
+          added[serial] = { mode: 'straight', manufacturing_date: null, warranty_term_months: null, warranty_upto: date };
+        }
+        this.lineSerialWarrantyMap.update(map => {
+          const next = { ...map };
+          if (Object.keys(added).length) next[picker.rowIndex] = added; else delete next[picker.rowIndex];
+          return next;
+        });
       } else {
         this.lineSerialWarrantyMap.update(map => { const next = { ...map }; delete next[picker.rowIndex]; return next; });
       }
     }
+    this.serialPickerSaleWarrantyEdits.set({});
     this.activeSerialPicker.set(null);
     this.serialPickerDraftValues.set([]);
     this.serialPickerAvailableOptions.set([]);
@@ -15052,7 +15213,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.lineAttrValueMap.set({});
     this.lineSerialValueMap.set({});
     this.lineSerialUnitsMap.set({});
-    this.lineSerialWarrantyMap.set({});
+    this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
     this.categorySerialApplicable.set(false);
     this.categoryBatchApplicable.set(false);
     this.uomConversionRequired.set(false);
@@ -15105,7 +15266,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.lineSerialValueMap.set({});
       this.lineRefItemIdMap.set({});
       this.lineSerialUnitsMap.set({});
-    this.lineSerialWarrantyMap.set({});
+    this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
       this.applyDefaultLocationToCurrentTransaction(true);
       return;
     }
@@ -15120,7 +15281,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.lineSerialValueMap.set({});
       this.lineRefItemIdMap.set({});
       this.lineSerialUnitsMap.set({});
-      this.lineSerialWarrantyMap.set({});
+      this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
       this.applyDefaultLocationToCurrentTransaction(true);
       return;
     }
@@ -18569,8 +18730,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // is still Draft — once Posted (or Cancelled), the row is locked here too,
   // not just inside the opened form.
   canEditOrDeleteRow(row: string[]): boolean {
-    // Only a company admin may edit/delete saved records.
-    if (!this.isAdmin()) return false;
+    // Previous: only a company admin may edit/delete saved records.
+    // if (!this.isAdmin()) return false;
     if (!this.isDraftLockedScreen()) return true;
     return this.rowStatusKey(row) === 'draft';
   }
@@ -19131,7 +19292,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       const entries: Record<string, SerialWarrantyEntry> = {};
       for (const [serial, value] of Object.entries<any>(raw)) {
         entries[serial] = {
-          mode: value?.mode === 'straight' ? 'straight' : 'term',
+          // Saved GRN/PI drafts carry warranty_mode (API normalises the key).
+          mode: (value?.mode ?? value?.warranty_mode ?? value?.warrantyMode) === 'straight' ? 'straight' : 'term',
           manufacturing_date: value?.manufacturing_date ?? value?.manufacturingDate ?? null,
           warranty_term_months: value?.warranty_term_months ?? value?.warrantyTermMonths ?? null,
           warranty_upto: value?.warranty_upto ?? value?.warrantyUpto ?? null
@@ -21440,7 +21602,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         base['batch_no'] = this.lineValue(row, ['batch']) || null;
         base['serial_no'] = this.lineValue(row, ['serial']) || null;
         base['expiry_date'] = this.lineValue(row, ['expiry']) || null;
-        base['warranty_upto'] = this.isoDateValue(this.lineValue(row, ['warranty'])) || null;
+        // "Multiple" (serials with different purchase warranties) is a display
+        // marker, not a date -- each unit's own date stays on inv_serial_units.
+        const warrantyText = this.lineValue(row, ['warranty']);
+        base['warranty_upto'] = warrantyText === this.salesWarrantyMultipleText ? null : (this.isoDateValue(warrantyText) || null);
         // Workstream D: the grid's own per-line Warehouse column is gone
         // (inventory-screen.model.ts's salesInvoiceConfig.lineColumns) -- it
         // was forced read-only and always carried the same value as the
@@ -21450,6 +21615,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         base['so_item_id'] = ref?.soItemId ?? null;
         base['dc_item_id'] = ref?.dcItemId ?? null;
         base['serial_numbers'] = ref?.dcItemId ? null : (this.lineSerialUnitsMap()[index] || null);
+        // Warranty added with "+" in the serial popup for units that got none
+        // at purchase, keyed by serial no (same shape as GRN/PI). The API
+        // writes it onto inv_serial_units only when the invoice posts (only
+        // where empty); a draft keeps nothing.
+        base['serial_warranty'] = ref?.dcItemId ? null : (this.lineSerialWarrantyMap()[entryIndex] || null);
       } else if (this.config?.key === 'salesOrder') {
         base['batch_no'] = this.lineValue(row, ['batch']) || null;
         base['serial_no'] = this.lineValue(row, ['serial']) || null;

@@ -26,6 +26,7 @@
           <div class="inventory-date-wrap">
             <p-datepicker [ngModel]="voucherDateValue()" (ngModelChange)="onVoucherDateChange($event)" [ngModelOptions]="{ standalone: true }"
               [maxDate]="maxVoucherDate"
+              [minDate]="maxVoucherDate"
               dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY" [showIcon]="false" appendTo="body"
               styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100"></p-datepicker>
             <i class="pi pi-calendar inventory-date-icon"></i>

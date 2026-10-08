@@ -434,6 +434,11 @@
                             (ngModelChange)="setEntryLineCell(rowIndex, columnIndex, $event)"
                             [placeholder]="cellView?.placeholder || ''" />
                         }
+                        @if (cellApplies && salesInvoiceWarrantyHint(rowIndex, row, column); as warrantyHint) {
+                          <small class="inventory-stock-hint inventory-hint-info">
+                            <i class="pi pi-shield" style="font-size:9px"></i> {{ warrantyHint }}
+                          </small>
+                        }
                         @if (cellApplies && cellView?.stockHint; as stockHint) {
                           <small [class]="cellView?.stockHintClass">
                             <i class="pi pi-info-circle" style="font-size:9px"></i> {{ stockHint }}
