@@ -1758,14 +1758,16 @@ export const requestForQuotationConfig = transaction(
 export const purchaseReturnConfig = transaction(
   'purchaseReturn',
   'Purchase Return',
-  'Return rejected or excess goods to vendor against a posted PI or direct return',
+  // Previous: 'Return rejected or excess goods to vendor against a posted PI or direct return',
+  'Return rejected or excess goods to vendor against a posted PI',
   'pi pi-reply',
   [
     { name: 'Posted Purchase Invoice reference', status: 'Required' },
     { name: 'Vendor Master', status: 'Ready' },
     { name: 'Product Master', status: 'Ready' }
   ],
-  'Purchase return reduces stock when posted. It can be raised against a posted Purchase Invoice or entered directly when needed.',
+  // Previous: 'Purchase return reduces stock when posted. It can be raised against a posted Purchase Invoice or entered directly when needed.',
+  'Purchase return reduces stock when posted. It can only be raised against a posted Purchase Invoice.',
   {
     screenMode: 'Purchase return entry',
     fields: [

@@ -225,9 +225,11 @@
           <div class="inventory-line-title">
             <div>
               <strong>{{ config.lineTitle || 'Line Items' }}</strong>
-              <span>Add, edit or remove rows directly here before saving this document.</span>
+              <!-- Previous: <span>Add, edit or remove rows directly here before saving this document.</span> -->
+              <span>Rows come from the selected PI Reference. Edit Return Qty, or remove items you are not returning.</span>
             </div>
-            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" aria-label="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button>
+            <!-- Previous (Purchase Return is against a PI only, so no manual rows):
+            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" aria-label="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button> -->
           </div>
           <div class="tbl-wrap">
             @let renderedColumns = lineGridRenderColumns();
@@ -249,7 +251,8 @@
                   <tr>
                     <td class="text-center">
                       <div class="inventory-row-actions">
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button>
+                        <!-- Previous (Purchase Return is against a PI only, so no manual rows):
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button> -->
                         <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove row" (click)="removeEntryLineRow(rowIndex)"><i class="pi pi-trash"></i></button>
                       </div>
                     </td>
@@ -555,9 +558,10 @@
         <div class="inventory-modal-header">
           <h3>Posted Purchase Invoices</h3>
           <span style="display:flex; align-items:center; gap:8px;">
+            <!-- Previous (Purchase Return is against a PI only, so no direct return):
             <button type="button" class="erp-btn btn-white btn-sm" (click)="useDirectPurchaseReturn()">
               <i class="pi pi-file-plus"></i> Direct Return
-            </button>
+            </button> -->
             <button title="Close" type="button" class="erp-btn btn-white btn-icon btn-sm" (click)="closePurchaseReferencePicker()">
               <i class="pi pi-times"></i>
             </button>

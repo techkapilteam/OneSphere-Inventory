@@ -7929,8 +7929,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const docs = this.transactionReferenceDocsForField(field).map(doc => doc.doc_number).filter(Boolean);
     const options = this.config?.key === 'purchaseInvoice'
       ? ['Direct Purchase Invoice', ...docs]
+      // Previous: : this.config?.key === 'purchaseReturn'
+      //   ? ['Direct Purchase Return', ...docs]
+      // Purchase Return is raised against a posted PI only -- no direct option.
       : this.config?.key === 'purchaseReturn'
-        ? ['Direct Purchase Return', ...docs]
+        ? docs
       : this.config?.key === 'debitNote'
         ? ['Direct Debit Note', ...docs]
       : this.config?.key === 'creditNote'
@@ -8148,10 +8151,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   purchaseReturnLocationLocked(): boolean {
     if (this.config?.key !== 'purchaseReturn') return false;
-    if (this.activeSessionLocationLocked()) return true;
-    const values = this.formValues();
-    const reference = this.normalizeKey(values['piReference'] || '');
-    return !!values['piId'] && reference !== '' && !reference.includes('directpurchasereturn');
+    // Previous:
+    // if (this.activeSessionLocationLocked()) return true;
+    // const values = this.formValues();
+    // const reference = this.normalizeKey(values['piReference'] || '');
+    // return !!values['piId'] && reference !== '' && !reference.includes('directpurchasereturn');
+    // Purchase Return against a posted PI only: the location always comes from
+    // the picked PI, never by hand.
+    return true;
   }
 
   // Party / Vendor comes from the referenced PI (selectPurchaseReference), so
@@ -8159,9 +8166,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // list. A Direct Purchase Return keeps it editable.
   purchaseReturnVendorLocked(): boolean {
     if (this.config?.key !== 'purchaseReturn') return false;
-    const values = this.formValues();
-    const reference = this.normalizeKey(values['piReference'] || '');
-    return !!values['piId'] && reference !== '' && !reference.includes('directpurchasereturn');
+    // Previous:
+    // const values = this.formValues();
+    // const reference = this.normalizeKey(values['piReference'] || '');
+    // return !!values['piId'] && reference !== '' && !reference.includes('directpurchasereturn');
+    // Purchase Return against a posted PI only: the vendor always comes from
+    // the picked PI, never by hand.
+    return true;
   }
 
   // Mirror of purchaseReturnLocationLocked() above -- Purchase Return greys
@@ -8274,8 +8285,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.applyDirectPurchaseInvoiceReference(field);
       return true;
     }
+    // Previous:
+    // if (key === 'purchaseReturn') {
+    //   this.applyDirectPurchaseReturnReference(field);
+    //   return true;
+    // }
+    // Purchase Return against a posted PI only: with no PI to pick, stay empty
+    // and say so instead of switching to a direct return.
     if (key === 'purchaseReturn') {
-      this.applyDirectPurchaseReturnReference(field);
+      // saveError, not txSaveError: purchase-return.html only renders saveError.
+      this.saveError.set('No posted Purchase Invoices available to return.');
       return true;
     }
     if (key === 'debitNote') {
@@ -9784,6 +9803,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       && (this.normalizeKey(column) === 'mrp' || this.normalizeKey(column) === 'selling price')) {
       // MRP/Selling Price are set at procurement (GRN/Purchase Invoice) — sales
       // screens only ever display them, never let the user re-key them.
+      return true;
+    }
+    // Purchase Return against a posted PI only: until a PI is picked there is
+    // nothing to return, so the (blank) grid stays read-only.
+    if (this.config?.key === 'purchaseReturn' && !this.formValues()['piId']) {
       return true;
     }
     if ((this.config?.key === 'purchaseReturn' || this.config?.key === 'salesReturn') && this.lineRefItemIdMap()[rowIndex]) {
@@ -13685,6 +13709,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       patch['paymentTerms'] = paymentTerms;
       patch['dueDate'] = paymentTerms ? this.purchaseInvoiceDueDate(piDate, paymentTerms) : null;
     } else if (key === 'purchaseReturn') {
+      // A PI is now picked: drop the "Select a PI Reference..." /
+      // "No posted Purchase Invoices..." message shown under the grid.
+      this.saveError.set('');
       patch['piId'] = doc.id;
       patch['piReference'] = doc.doc_number;
       // The referenced PI's own grn_id, when it's a GRN-linked PI — the
@@ -22885,6 +22912,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         }
       }
       if (this.config?.key === 'purchaseReturn') {
+        // Purchase Return against a posted PI only.
+        if (!hasValue(payload['pi_id'])) return 'Select a PI Reference. Purchase Return can only be raised against a Purchase Invoice.';
         if (!hasValue(payload['vendor_name'])) return 'Vendor is required for Purchase Return.';
         if (!hasValue(payload['branch_id']) && !hasValue(payload['branch_name']) && !hasValue(payload['warehouse_id']) && !hasValue(payload['warehouse_name'])) {
           return 'Warehouse / Branch is required for Purchase Return.';
