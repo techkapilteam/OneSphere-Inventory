@@ -40,8 +40,6 @@ export class RemoteContactAddHostComponent implements OnInit, OnDestroy {
         this.componentRef = this.anchor.createComponent(m.ContactAddComponent);
         this.componentRef.setInput('contact', null);
         this.componentRef.setInput('activeTab', 'Contacts');
-        // Tells the Global contact form it was opened from Inventory, so its fields are not mandatory
-        this.componentRef.setInput('source', 'inventory');
         this.componentRef.instance.onSave.subscribe((saved: any) => this.saved.emit(saved));
         this.componentRef.instance.onClose.subscribe(() => this.cancelled.emit());
       })
