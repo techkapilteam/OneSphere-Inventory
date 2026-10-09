@@ -131,6 +131,27 @@
               </div>
             </div>
           }
+          <!-- Lead By: Global Contacts holding the "Lead By" role (Contacts
+               screen tab after Freelancer). "+" opens the contact form and
+               marks the new contact Lead By. -->
+          @if (referralBusinessEnabled() && bodyFieldByKey('leadBy'); as field) {
+            <div class="erp-form-group inventory-header-col-6">
+              <label class="erp-label">{{ field.label }}</label>
+              <div class="inventory-field-with-add">
+                <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+                  [items]="field.options || []" [searchable]="true" [clearable]="true"
+                  [ngModel]="formFieldValue(field)"
+                  (ngModelChange)="collectFormField(field.key, $event)"
+                  placeholder="Select Lead By">
+                </ng-select>
+                <button type="button" class="erp-btn btn-white btn-icon"
+                  title="Add Lead By Contact"
+                  (click)="openFieldAddMaster(field)">
+                  <i class="pi pi-plus"></i>
+                </button>
+              </div>
+            </div>
+          }
           @if (transactionReferenceField(); as refField) {
             <div class="erp-form-group">
               <label class="erp-label">{{ refField.label }}</label>

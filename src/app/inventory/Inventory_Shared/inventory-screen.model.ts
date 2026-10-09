@@ -1427,6 +1427,10 @@ export const salesInvoiceConfig = transaction(
       { key: 'referenceNo', label: 'Reference' },
       { key: 'customer', label: 'Party / Customer', type: 'select', options: INVENTORY_OPTIONS.customers, addMaster: 'Customer' },
       { key: 'channelPartner', label: 'Channel Partner', type: 'select', options: [], addMaster: 'Channel Partner' },
+      // Global Contacts holding the "Lead By" role (Contacts screen tab after
+      // Freelancer). "+" opens Add Global Contact and marks the new contact
+      // Lead By.
+      { key: 'leadBy', label: 'Lead By', type: 'select', options: [], addMaster: 'Contact Person' },
       { key: 'placeOfSupply', label: 'Place of Supply', type: 'select', options: ['Telangana', 'Karnataka', 'Andhra Pradesh', 'Maharashtra'] },
       // Full Warehouse/Branch Independence: the same merged Warehouse/Branch
       // picker GRN/PI/DC/Purchase Return use -- a branch pick posts stock

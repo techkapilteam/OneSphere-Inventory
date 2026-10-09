@@ -608,6 +608,7 @@ export interface ContactItem {
   is_supplier?: boolean;
   is_customer?: boolean;
   is_channel_partner?: boolean;
+  is_lead_by?: boolean;
   vendor_exists?: boolean;
   customer_exists?: boolean;
   channel_partner_exists?: boolean;
@@ -1665,6 +1666,7 @@ export class InventoryConfigService {
       is_supplier: this.value(item, 'is_supplier', 'isSupplier', false),
       is_customer: this.value(item, 'is_customer', 'isCustomer', false),
       is_channel_partner: this.value(item, 'is_channel_partner', 'isChannelPartner', false),
+      is_lead_by: this.value(item, 'is_lead_by', 'isLeadBy', false),
       vendor_exists: this.value(item, 'vendor_exists', 'vendorExists', false),
       customer_exists: this.value(item, 'customer_exists', 'customerExists', false),
       channel_partner_exists: this.value(item, 'channel_partner_exists', 'channelPartnerExists', false),
@@ -2122,6 +2124,21 @@ export class InventoryConfigService {
     return this.http.post(
       `${this.base()}/ContactMore/SaveContactSupplier`,
       { pContactId: String(contactId), pIsSupplier: true, pPanNumber: pan || null },
+      { headers: this.headers(), params }
+    );
+  }
+
+  // Global Contacts' "Lead By" tab (after Freelancer) lists contacts with an
+  // active global.tbl_mst_lead_by row. Same endpoint shape as the Supplier
+  // role above; an already-registered contact is likewise treated as success.
+  markContactAsLeadBy(contactId: number, pan?: string | null): Observable<unknown> {
+    const params = new HttpParams()
+      .set('globalSchema', 'global')
+      .set('companyCode', sessionStorage.getItem('companyCode') ?? '')
+      .set('branchCode', sessionStorage.getItem('branchCode') ?? '');
+    return this.http.post(
+      `${this.base()}/ContactMore/SaveContactLeadBy`,
+      { pContactId: String(contactId), pIsLeadBy: true, pPanNumber: pan || null },
       { headers: this.headers(), params }
     );
   }

@@ -1820,6 +1820,9 @@ export class InventoryTransactionsService {
       customer_gstin: r?.customerGstin || r?.customer_gstin,
       channel_partner_id: r?.channelPartnerId ?? r?.channel_partner_id,
       channel_partner_name: r?.channelPartnerName || r?.channel_partner_name,
+      // Lead By (Sales Invoice, migration 253).
+      lead_by_contact_id: r?.leadByContactId ?? r?.lead_by_contact_id,
+      lead_by_name: r?.leadByName || r?.lead_by_name,
       place_of_supply: r?.placeOfSupply || r?.place_of_supply,
       warehouse_id: r?.warehouseId ?? r?.warehouse_id,
       warehouse_name: r?.warehouseName || r?.warehouse_name, payment_terms: r?.paymentTerms || r?.payment_terms,

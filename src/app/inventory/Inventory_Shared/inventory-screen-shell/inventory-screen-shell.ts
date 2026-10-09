@@ -1423,6 +1423,24 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       });
   }
 
+  // Sales Invoice "Lead By": Global Contacts holding the Lead By role
+  // (global.tbl_mst_lead_by), plus the saved name on a reopened invoice so an
+  // old pick still shows if the role was later removed.
+  readonly leadByOptions = computed(() => {
+    const names = this.loadedGlobalMstContacts()
+      .filter(c => !!c.is_lead_by && String(c.status || 'active').toLowerCase() !== 'inactive')
+      .map(c => String(c.name || '').trim())
+      .filter(Boolean);
+    const saved = String(this.formValues()['leadBy'] || '').trim();
+    return this.mergeOptions(saved ? [saved] : [], names);
+  });
+
+  private findLeadByContact(name: any): ContactItem | null {
+    const key = this.normalizeKey(String(name ?? '').trim());
+    if (!key) return null;
+    return this.loadedGlobalMstContacts().find(c => !!c.is_lead_by && this.normalizeKey(String(c.name || '')) === key) ?? null;
+  }
+
   private loadGlobalMstContacts(): void {
     this.inventoryConfigService.getGlobalContacts()
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -5944,6 +5962,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         if (res.success && res.data) {
           const saved = res.data;
           this.loadedGlobalMstContacts.update(list => [...list, saved]);
+          // Fallback popup (remote contact form failed to load) for Lead By's "+".
+          if (this.addMasterSourceFieldKey() === 'leadBy') {
+            this.applyNewLeadByContact(saved);
+            return;
+          }
           const contactOption: GlobalContactOption = {
             id: saved.id,
             name: saved.name,
@@ -6002,6 +6025,37 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // re-fetch the authoritative Global Contacts list and match the new
   // contact by name, then route it through the same destinations
   // saveQuickContact() already uses.
+  // The full Accounts contact form (remote) is used for the party masters'
+  // primary "+" and for Sales Invoice "Lead By"'s "+"; everything else gets
+  // the in-app quick-add popup.
+  usesRemoteContactForm(): boolean {
+    const source = this.addMasterSourceFieldKey();
+    return this.activeAddMaster() === 'Contact Person'
+      && (source === 'partyIdentity' || source === 'leadBy')
+      && !this.remoteContactFormFailed();
+  }
+
+  // A contact created from Sales Invoice "Lead By"'s "+": register it in the
+  // Lead By role (global.tbl_mst_lead_by), then select it on the invoice.
+  // Already-registered is not an error, so the role call's failure never
+  // blocks the pick.
+  private applyNewLeadByContact(contact: { id?: number; name?: string; pan?: string } | null): void {
+    this.restoreParentModal();
+    const name = String(contact?.name || '').trim();
+    if (!contact?.id || !name) return;
+    const id = contact.id;
+    const markLocal = () => this.loadedGlobalMstContacts.update(list =>
+      list.some(c => c.id === id)
+        ? list.map(c => c.id === id ? { ...c, is_lead_by: true } : c)
+        : [...list, { id, name, pan: contact.pan, is_lead_by: true } as ContactItem]
+    );
+    this.inventoryConfigService.markContactAsLeadBy(id, contact.pan || null)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({ next: markLocal, error: markLocal });
+    markLocal();
+    this.formValues.update(v => ({ ...v, leadBy: name, leadById: id }));
+  }
+
   onRemoteContactSaved(saved: any): void {
     this.inventoryConfigService.getGlobalContacts()
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -6010,6 +6064,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const list = res.data ?? [];
           this.loadedGlobalMstContacts.set(list);
           const matched = list.find((c: ContactItem) => c.name === saved?.name);
+          if (this.addMasterSourceFieldKey() === 'leadBy') {
+            this.applyNewLeadByContact(matched ?? null);
+            return;
+          }
           const contactOption: GlobalContactOption | null = matched ? {
             id: matched.id,
             name: matched.name,
@@ -7557,7 +7615,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       && field.key !== referenceKey
       && field.key !== procurementVendorKey
       && !(this.config?.key === 'salesOrder' && (field.key === 'customer' || field.key === 'creditSale' || field.key === 'paymentTerms' || field.key === 'dueDate' || field.key === 'deliveryDate' || field.key === 'deliveryAddress'))
-      && !(this.config?.key === 'salesInvoice' && (field.key === 'customer' || field.key === 'channelPartner' || field.key === 'referenceNo' || field.key === 'paymentTerms' || field.key === 'dueDate' || field.key === 'placeOfSupply' || field.key === 'warehouse' || field.key === 'interbranchSale' || field.key === 'branch' || field.key === 'transportMode' || field.key === 'vehicleNo' || field.key === 'deliveryAddress' || field.key === 'customerNotes' || field.key === 'internalNotes'))
+      // Previous: && !(this.config?.key === 'salesInvoice' && (field.key === 'customer' || field.key === 'channelPartner' || field.key === 'referenceNo' || field.key === 'paymentTerms' || field.key === 'dueDate' || field.key === 'placeOfSupply' || field.key === 'warehouse' || field.key === 'interbranchSale' || field.key === 'branch' || field.key === 'transportMode' || field.key === 'vehicleNo' || field.key === 'deliveryAddress' || field.key === 'customerNotes' || field.key === 'internalNotes'))
+      && !(this.config?.key === 'salesInvoice' && (field.key === 'customer' || field.key === 'channelPartner' || field.key === 'leadBy' || field.key === 'referenceNo' || field.key === 'paymentTerms' || field.key === 'dueDate' || field.key === 'placeOfSupply' || field.key === 'warehouse' || field.key === 'interbranchSale' || field.key === 'branch' || field.key === 'transportMode' || field.key === 'vehicleNo' || field.key === 'deliveryAddress' || field.key === 'customerNotes' || field.key === 'internalNotes'))
       && !(this.config?.key === 'purchaseInvoice' && field.key === 'grnReference')
       && !(this.config?.key === 'purchaseInvoice' && field.key === 'status')
       && !(this.config?.key === 'goodsReceipt' && field.key === 'status')
@@ -8669,6 +8728,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
     if (key === 'channelpartner' || label.includes('channel partner') || addMaster === 'channel partner') {
       return this.optionFallback(this.channelPartnerOptions, field.options);
+    }
+
+    if (key === 'leadby') {
+      return this.optionFallback(this.leadByOptions(), field.options);
     }
 
     if (this.config?.key === 'purchaseRequisition' && key === 'requestedby') {
@@ -15529,7 +15592,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.formValues.update(values => ({
       ...values,
       referralBusiness: enabled ? 'Yes' : 'No',
-      ...(enabled ? {} : { channelPartner: '', channelPartnerId: null })
+      // Previous: ...(enabled ? {} : { channelPartner: '', channelPartnerId: null })
+      ...(enabled ? {} : { channelPartner: '', channelPartnerId: null, leadBy: '', leadById: null })
     }));
   }
 
@@ -19828,6 +19892,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         customer: record.customer_name || '',
         channelPartnerId: record.channel_partner_id ?? null,
         channelPartner: record.channel_partner_name || '',
+        leadById: record.lead_by_contact_id ?? null,
+        leadBy: record.lead_by_name || '',
+        // Not stored: a saved Channel Partner / Lead By is what makes it
+        // referral business, so the switch reopens on and both stay visible.
+        referralBusiness: (record.channel_partner_name || record.lead_by_name) ? 'Yes' : 'No',
         placeOfSupply: record.place_of_supply || '',
         warehouseId: record.warehouse_id ?? null,
         // Bug fix (2026-09-20): a Branch pick on this merged Warehouse/Branch
@@ -21101,6 +21170,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         customer_gstin: customerGstin,
         channel_partner_id: channelPartnerId,
         channel_partner_name: channelPartnerName,
+        lead_by_contact_id: String(v['leadBy'] || '').trim()
+          ? (this.findLeadByContact(v['leadBy'])?.id ?? this.optionalNumber(v['leadById']))
+          : null,
+        lead_by_name: String(v['leadBy'] || '').trim() || null,
         place_of_supply: v['placeOfSupply'] || null,
         branch_id: siBranchId,
         // See the analogous PI comment above: the raw unresolved location
