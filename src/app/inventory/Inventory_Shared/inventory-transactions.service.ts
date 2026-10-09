@@ -1826,6 +1826,12 @@ export class InventoryTransactionsService {
       place_of_supply: r?.placeOfSupply || r?.place_of_supply,
       warehouse_id: r?.warehouseId ?? r?.warehouse_id,
       warehouse_name: r?.warehouseName || r?.warehouse_name, payment_terms: r?.paymentTerms || r?.payment_terms,
+      // Branch (migration 161): a Branch pick on the merged Warehouse/Branch
+      // field saves here with warehouse_* NULL. Without these the edit form's
+      // `warehouse_name || branch_name` fallback reopened the field empty and
+      // the next save wrote both location ids back out as NULL.
+      branch_id: r?.branchId ?? r?.branch_id,
+      branch_name: r?.branchName || r?.branch_name,
       remarks: r?.remarks, status: r?.status || 'draft', created_at: r?.createdAt || r?.created_at,
       items: (r?.items || []).map((i: any) => ({
         ...this.normSalesItem(i),
