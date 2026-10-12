@@ -7339,6 +7339,21 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     ]);
   }
 
+  // MRP / Selling Price print only when at least one line actually carries a
+  // value — a column the user never filled no longer prints as 0.00.
+  private withoutEmptyPriceColumns(items: any[], columns: string[], rows: string[][]): { columns: string[]; rows: string[][] } {
+    const hasValue = (keys: string[]) => (items || []).some(item => keys.some(key => Number(item?.[key] ?? 0) > 0));
+    const drop = new Set<number>();
+    if (!hasValue(['mrp', 'Mrp'])) drop.add(columns.indexOf('MRP'));
+    if (!hasValue(['selling_price', 'sellingPrice'])) drop.add(columns.indexOf('Selling Price'));
+    drop.delete(-1);
+    if (!drop.size) return { columns, rows };
+    return {
+      columns: columns.filter((_, i) => !drop.has(i)),
+      rows: rows.map(row => row.filter((_, i) => !drop.has(i)))
+    };
+  }
+
   private purchaseInvoiceDocumentExportPayload(
     record: any,
     docNo: string,
@@ -7352,8 +7367,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const branchName = String(record.branch_name || record.branchName || this.branchNameFromRecord(record) || '');
     const warehouseName = String(record.warehouse_name || record.warehouseName || '');
     const locationName = warehouseName || branchName;
-    const columns = ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'];
-    const rows = this.purchaseInvoiceDocumentRows(record);
+    // Previous: const columns = ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'];
+    // Previous: const rows = this.purchaseInvoiceDocumentRows(record);
+    const { columns, rows } = this.withoutEmptyPriceColumns(
+      record?.items || [],
+      ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
+      this.purchaseInvoiceDocumentRows(record)
+    );
     const exportColumns = rows.length ? columns : fallbackColumns;
     const exportRows = rows.length ? rows : fallbackRows;
     const totals = this.purchaseInvoiceFinancials(record);
@@ -7442,8 +7462,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const deliveryAddress = String(record.delivery_address || record.deliveryAddress || '').trim()
       || this.partyFullAddress(customer);
     const bank = this.invoiceBankDetails();
-    const columns = ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'];
-    const rows = this.salesInvoiceDocumentRows(record);
+    // Previous: const columns = ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'];
+    // Previous: const rows = this.salesInvoiceDocumentRows(record);
+    const { columns, rows } = this.withoutEmptyPriceColumns(
+      record?.items || [],
+      ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
+      this.salesInvoiceDocumentRows(record)
+    );
     const exportColumns = rows.length ? columns : fallbackColumns;
     const exportRows = rows.length ? rows : fallbackRows;
     const totals = this.salesInvoiceFinancials(record);
@@ -10592,8 +10617,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     } else if (this.config?.key === 'salesOrder' || this.config?.key === 'purchaseInvoice') {
       const mrp = this.productSalesPriceForLineUom(product, row, this.productMrp(product));
       const selling = this.productSalesPriceForLineUom(product, row, this.productSellingPrice(product, row));
-      this.setLineColumnDefault(row, ['mrp'], mrp, true);
-      this.setLineColumnDefault(row, ['selling'], selling, true);
+      // Previous: MRP / Selling Price were always defaulted from the product,
+      // so on Purchase Invoice (columns hidden by default) they were saved and
+      // printed although the user never entered them. PI now defaults them only
+      // while the column is switched on.
+      const isPi = this.config?.key === 'purchaseInvoice';
+      if (!isPi || this.showPurchaseInvoiceMrpColumn()) this.setLineColumnDefault(row, ['mrp'], mrp, true);
+      if (!isPi || this.showPurchaseInvoiceSellingPriceColumn()) this.setLineColumnDefault(row, ['selling'], selling, true);
     }
     if (this.config?.key === 'salesOrder') {
       this.setLineColumnDefault(row, ['rate'], this.productSalesPriceForLineUom(product, row, this.productSellingPrice(product, row)), true);
@@ -19819,6 +19849,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.entryLineRows.set((record.items || []).map((item: any) => this.purchaseInvoiceItemToLineRow(item))
         .concat((record.items || []).length ? [] : [this.blankLineRow()]));
       this.restoreLineGstModes(record.items || []);
+      // A saved MRP / Selling Price reopens with its column switched on, so the
+      // value stays visible and is not dropped on re-save (save only sends a
+      // visible column).
+      const piItems: any[] = record.items || [];
+      if (piItems.some(item => Number(item?.mrp ?? item?.Mrp ?? 0) > 0)) this.showPurchaseInvoiceMrpColumn.set(true);
+      if (piItems.some(item => Number(item?.selling_price ?? item?.sellingPrice ?? 0) > 0)) this.showPurchaseInvoiceSellingPriceColumn.set(true);
     }
 
     if (this.config?.key === 'purchaseReturn') {
@@ -21776,13 +21812,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         // reference figures captured at Purchase Invoice. Still recorded on the
         // invoice line, read from the product, so the document keeps a record
         // of what the prices were at the time of sale.
-        {
-          const priceProduct = this.lineRowProduct(row);
-          base['mrp'] = this.lineNumber(row, ['mrp'])
-            || this.productSalesPriceForLineUom(priceProduct, row, this.productMrp(priceProduct));
-          base['selling_price'] = this.lineNumber(row, ['selling price'])
-            || this.productSalesPriceForLineUom(priceProduct, row, this.productSellingPrice(priceProduct, row));
-        }
+        // Previous: fell back to the product master's MRP / Selling Price, so
+        // every Sales Invoice saved and printed them although the user never
+        // entered them. Only a value actually on the line is saved now.
+        // {
+        //   const priceProduct = this.lineRowProduct(row);
+        //   base['mrp'] = this.lineNumber(row, ['mrp'])
+        //     || this.productSalesPriceForLineUom(priceProduct, row, this.productMrp(priceProduct));
+        //   base['selling_price'] = this.lineNumber(row, ['selling price'])
+        //     || this.productSalesPriceForLineUom(priceProduct, row, this.productSellingPrice(priceProduct, row));
+        // }
+        base['mrp'] = this.lineNumber(row, ['mrp']);
+        base['selling_price'] = this.lineNumber(row, ['selling price']);
         base['batch_no'] = this.lineValue(row, ['batch']) || null;
         base['serial_no'] = this.lineValue(row, ['serial']) || null;
         base['expiry_date'] = this.lineValue(row, ['expiry']) || null;
@@ -22256,8 +22297,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       const attribute_value = piRefAttr?.attributeValue !== undefined ? piRefAttr.attributeValue : piResolvedAttr.attribute_value;
       const qty = this.purchaseInvoiceQtyForRow(row);
       const rate = this.lineNumber(row, ['rate']);
-      const mrp = this.lineNumber(row, ['mrp']);
-      const sellingPrice = this.lineNumber(row, ['selling price']);
+      // Previous: mrp / selling_price were read from the row even while their
+      // columns were hidden (cells pre-filled from the product / GRN), and a
+      // blank Selling Price fell back to MRP. Only a column the user has
+      // switched on is saved now; 0 is stored as NULL by sp_save_purchase_invoice
+      // and leaves the product master untouched.
+      const mrp = this.showPurchaseInvoiceMrpColumn() ? this.lineNumber(row, ['mrp']) : 0;
+      const sellingPrice = this.showPurchaseInvoiceSellingPriceColumn() ? this.lineNumber(row, ['selling price']) : 0;
       const discountPct = this.lineNumber(row, ['disc', 'discount']);
       const gstRate = this.transactionLineGstPercent(row);
       const taxPayload = this.transactionLineTaxPayload(row, index, qty, rate, discountPct, gstRate);
@@ -22276,7 +22322,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         qty,
         rate,
         mrp,
-        selling_price: sellingPrice || mrp,
+        // Previous: selling_price: sellingPrice || mrp,
+        selling_price: sellingPrice,
         discount_pct: discountPct,
         gst_rate: gstRate,
         gst_inclusive: taxPayload.gst_inclusive,
