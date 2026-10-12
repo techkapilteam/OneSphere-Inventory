@@ -1686,6 +1686,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const target = event.target as HTMLElement | null;
     const button = target?.closest('button') as HTMLButtonElement | null;
     if (!button || button.closest('.inventory-modal')) return;
+    // A click on the <i> icon inside a disabled button can still bubble up
+    // here, so locked Edit/Delete (saved master records) must stop now.
+    if (button.disabled) return;
 
     const text = (button.textContent || '').trim().replace(/\s+/g, ' ');
     const title = button.getAttribute('title') || '';
@@ -3195,7 +3198,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private readonly postedStockLocationMessages: Record<string, string> = {
     deliveryChallan: 'Select the From Warehouse / Branch — a posted Delivery Challan has to dispatch the stock from a real location.',
     salesInvoice: 'Select the Warehouse this invoice ships from — a posted Sales Invoice has to draw stock from a real location.',
-    salesReturn: 'Select the Return To Warehouse — a posted Sales Return has to put the stock back somewhere real.',
+    // Previous: salesReturn: 'Select the Return To Warehouse — a posted Sales Return has to put the stock back somewhere real.',
+    salesReturn: 'Select the Return To Branch — a posted Sales Return has to put the stock back somewhere real.',
     openingStockEntry: 'Select the Warehouse / Branch — a posted Opening Stock Entry has to seed a real location.',
     productionPlanning: 'Select the Production Warehouse / Branch before posting the Production Plan.',
     materialIssueProduction: 'Select the From Warehouse / Branch before posting Material Issue for Production.',
@@ -9067,6 +9071,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.mergedLocationEntries().map(entry => this.mergedLocationGroupOption(entry))
   );
 
+  // Sales Return "Return To Branch": branches only, no warehouses. A computed
+  // (not a method) so ng-select gets a stable array reference.
+  readonly salesReturnBranchOptions = computed((): MergedLocationOption[] =>
+    this.grnReceivingLocationGroups().filter(option => option.type !== 'warehouse')
+  );
+
   locationGroupsForField(field: InventoryField): MergedLocationOption[] {
     if (this.config?.key !== 'stockTransfer') return this.grnReceivingLocationGroups();
     const key = field.key.toLowerCase();
@@ -10085,6 +10095,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
               if (!currentVariant || !variantOptions.some(option => this.optionEquals(option, currentVariant))) {
                 nextRow[variantIdx] = variantOptions.length === 1 ? variantOptions[0] : '';
               }
+            }
+            // New rows now start with Qty empty (blankLineRow), so give it the
+            // old default of 1 once an item is picked. Purchase screens keep
+            // their own blank-Qty behavior.
+            if (!this.isPurchaseTransactionKey(this.config?.key || '')) {
+              (this.config?.lineColumns || []).forEach((qtyCol, qtyIdx) => {
+                if (qtyCol.toLowerCase().includes('qty') && !nextRow[qtyIdx]) nextRow[qtyIdx] = '1';
+              });
             }
             if (this.config?.key === 'productionPlanning') {
               const batchReqIdx = (this.config?.lineColumns || []).findIndex(c => this.normalizeKey(c) === 'batch req');
@@ -11892,12 +11910,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       const options = this.lineColumnOptions(column);
       const key = column.toLowerCase();
       if (this.config?.key === 'variantMaster') return '';
+      // Transaction item grids: Qty and UOM stay empty until an item is
+      // picked — setEntryLineCell fills UOM from the product and Qty as 1.
+      if (this.config?.kind === 'transaction' && (key.includes('qty') || key === 'uom')) return '';
       if (key.includes('qty')) return '1';
       if (key.includes('disc')) return '0';
       if (key.includes('gst') || key.includes('tax')) return '18%';
       if (key.includes('rate') || key.includes('amount')) return '0';
       if (key.includes('warehouse')) return this.locationOptions[0] || '';
       if (key.includes('remark')) return '';
+      // Transaction item grids: a new row (the + button / first row) must not
+      // pre-select the first product — that looked like the item auto-binding
+      // on Direct entry. The user picks the item; other defaults stay.
+      const itemColumns = ['item / sku', 'product', 'raw material', 'finished product', 'material'];
+      if (this.config?.kind === 'transaction' && itemColumns.includes(key)) return '';
       return options[0] || '';
     });
   }
@@ -18845,29 +18871,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     });
   }
 
-  private readonly draftLockTransactionKeys = new Set([
-    'goodsReceipt', 'purchaseInvoice', 'purchaseReturn', 'debitNote', 'creditNote',
-    'salesOrder', 'salesInvoice', 'salesReturn', 'deliveryChallan', 'estimation', 'proformaInvoice', 'salesQuotation',
-    'productionPlanning', 'materialIssueProduction', 'productionEntry', 'productionReturn',
-    'stockTransfer'
-  ]);
-
-  isDraftLockedScreen(): boolean {
-    return this.draftLockTransactionKeys.has(this.config?.key || '');
-  }
-
-  rowStatusKey(row: string[]): string {
-    return this.normalizeKey(this.findRecordByRow(row)?.status || 'draft');
-  }
-
-  // Edit/Delete in the records grid are only usable while a transaction row
-  // is still Draft — once Posted (or Cancelled), the row is locked here too,
-  // not just inside the opened form.
-  canEditOrDeleteRow(row: string[]): boolean {
+  // Saved transaction records cannot be edited or deleted from the records grid.
+  canEditOrDeleteRow(_row: string[]): boolean {
     // Previous: only a company admin may edit/delete saved records.
     // if (!this.isAdmin()) return false;
-    if (!this.isDraftLockedScreen()) return true;
-    return this.rowStatusKey(row) === 'draft';
+    return this.config?.kind !== 'transaction';
   }
 
   cancelRecordByRow(row: string[]): void {
@@ -22900,8 +22908,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       }
       if (this.config?.key === 'purchaseInvoice') {
         if (!hasValue(payload['vendor_name'])) return 'Vendor is required for Purchase Invoice.';
-        if (!hasValue(payload['pi_number'])) return 'Invoice no. is required for Purchase Invoice.';
-        if (!hasValue(payload['pi_date'])) return 'Invoice date is required for Purchase Invoice.';
+        // Previous: PI Number / PI Date were mandatory. PI Number is system-filled
+        // (read-only); Vendor Invoice No / Date below are the mandatory pair now.
+        // if (!hasValue(payload['pi_number'])) return 'Invoice no. is required for Purchase Invoice.';
+        // if (!hasValue(payload['pi_date'])) return 'Invoice date is required for Purchase Invoice.';
         // Required even when the PI references a GRN — a GRN can be receipted
         // before the vendor's own invoice arrives, but the PI itself always
         // represents that vendor invoice and must record its real number/date.
@@ -22933,6 +22943,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!hasValue(payload['base_uom_name']) && !hasValue(payload['base_uom_id'])) return 'Base UOM is mandatory.';
     if (!hasValue(payload['hsn_sac_code']) && !hasValue(payload['hsn_sac_id'])) return 'HSN/SAC tax classification is mandatory.';
     if (payload['gst_rate'] === null || payload['gst_rate'] === undefined || payload['gst_rate'] === '') return 'GST Rate is mandatory.';
+    // Tax Details: Tax Category is mandatory too (HSN/SAC and GST Rate above).
+    if (!hasValue(payload['tax_category'])) return 'Tax Category is mandatory.';
     if (this.categoryRequiresBatchPolicy() && !hasValue(payload['batch_policy_name'])) return 'Selected category requires Batch / Lot Policy.';
     if (this.categoryRequiresSerialPolicy() && !hasValue(payload['serial_policy_name'])) return 'Selected category requires Serial Number Policy.';
     const variantRows = payload['applicable_variants'] || [];

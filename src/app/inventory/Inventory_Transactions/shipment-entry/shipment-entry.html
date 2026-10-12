@@ -365,8 +365,8 @@
                 <td class="text-center">
                   <div class="inventory-row-actions">
                     @if (isAdmin()) {
-                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
-                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete"><i class="pi pi-trash"></i></button>
+                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" [disabled]="!canEditOrDeleteRow(row)" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
+                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" [disabled]="!canEditOrDeleteRow(row)"><i class="pi pi-trash"></i></button>
                     }
                   </div>
                 </td>

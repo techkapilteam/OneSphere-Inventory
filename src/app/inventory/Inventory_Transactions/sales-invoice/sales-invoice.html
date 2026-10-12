@@ -764,10 +764,9 @@
                         <i class="pi pi-box"></i>
                       </button>
                     }
-                    @if (canEditOrDeleteRow(row)) {
-                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
-                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" (click)="cancelRecordByRow(row)"><i class="pi pi-trash"></i></button>
-                    }
+                    <!-- Saved Sales Invoices cannot be edited or deleted from the grid. -->
+                    <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" [disabled]="!canEditOrDeleteRow(row)" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
+                    <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" [disabled]="!canEditOrDeleteRow(row)" (click)="cancelRecordByRow(row)"><i class="pi pi-trash"></i></button>
                   </div>
                 </td>
                 @for (col of visibleRecordColumns(); track col.index) {

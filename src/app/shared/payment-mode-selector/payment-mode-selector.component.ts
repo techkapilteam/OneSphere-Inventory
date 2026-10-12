@@ -236,7 +236,23 @@ export class PaymentModeSelectorComponent {
   private readonly forceShowErrors = signal(false);
 
   readonly showUpi = computed(() => this.bankSubType() === 'ONLINE' && (this.typeOfPayment() || '').toUpperCase() === 'UPI');
-  readonly refDateObj = computed(() => (this.refDate() ? new Date(this.refDate()!) : null));
+  // Previous date-only parsing used `new Date('YYYY-MM-DD')`, which parses as
+  // UTC and can display the previous day in local time:
+  // readonly refDateObj = computed(() => (this.refDate() ? new Date(this.refDate()!) : null));
+  readonly refDateObj = computed(() => {
+    const value = this.refDate();
+    if (!value) return null;
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) return new Date(value);
+
+    const year = Number(match[1]);
+    const month = Number(match[2]) - 1;
+    const day = Number(match[3]);
+    const date = new Date(year, month, day);
+    return date.getFullYear() === year && date.getMonth() === month && date.getDate() === day
+      ? date
+      : null;
+  });
   readonly selectedDepositBank = computed(() => this.depositBanks.find(b => this.sameId(b.id, this.depositBankId())) ?? null);
   readonly chequeNoLabel = computed(() => (this.bankSubType() === 'CHEQUE' ? 'Cheque No.' : 'Reference No.'));
 
@@ -553,8 +569,26 @@ export class PaymentModeSelectorComponent {
     } : null;
   }
   private toIsoDate(d: Date | string): string {
+    // Previous conversion used UTC, which could serialize a local picker date
+    // as the previous calendar day:
+    // const date = typeof d === 'string' ? new Date(d) : d;
+    // if (isNaN(date.getTime())) return '';
+    // return date.toISOString().slice(0, 10);
+    if (typeof d === 'string') {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
+      if (match) {
+        const year = Number(match[1]);
+        const month = Number(match[2]);
+        const day = Number(match[3]);
+        const date = new Date(year, month - 1, day);
+        return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
+          ? `${match[1]}-${match[2]}-${match[3]}`
+          : '';
+      }
+    }
+
     const date = typeof d === 'string' ? new Date(d) : d;
     if (isNaN(date.getTime())) return '';
-    return date.toISOString().slice(0, 10);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   }
 }

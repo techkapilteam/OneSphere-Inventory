@@ -101,6 +101,30 @@ describe('InventoryScreenShell — server-assigned document numbers', () => {
   });
 
   describe('Validation', () => {
+    // Previous: PI Number / PI Date were the mandatory pair.
+    // it('requires a PI Number and PI Date', async () => {
+    //   await create(cfg('purchaseInvoice', 'Purchase Invoice'));
+    //   const validate = (component as any).validatePayload.bind(component);
+    //   const basePayload = { vendor_name: 'Acme Vendor', branch_id: 1, status: 'draft' };
+    //
+    //   expect(validate(basePayload)).toBe('Invoice no. is required for Purchase Invoice.');
+    //   expect(validate({ ...basePayload, pi_number: 'PI-00001' }))
+    //     .toBe('Invoice date is required for Purchase Invoice.');
+    // });
+    it('requires Vendor Invoice No and Date, not PI Number / PI Date', async () => {
+      await create(cfg('purchaseInvoice', 'Purchase Invoice'));
+      const validate = (component as any).validatePayload.bind(component);
+      // One item line: the "add at least one line" check runs before the header checks.
+      const basePayload = {
+        vendor_name: 'Acme Vendor', branch_id: 1, status: 'draft',
+        items: [{ product_name: 'X', qty: 1, rate: 1 }]
+      };
+
+      expect(validate(basePayload)).toBe('Vendor Invoice No. is required for Purchase Invoice.');
+      expect(validate({ ...basePayload, vendor_invoice_no: 'VINV-1' }))
+        .toBe('Vendor Invoice Date is required for Purchase Invoice.');
+    });
+
     it('no longer blocks a new Sales Invoice for a blank number', async () => {
       await create(cfg('salesInvoice', 'Sales Invoice'));
       // The number is the server's job now; demanding one here blocked every save.
