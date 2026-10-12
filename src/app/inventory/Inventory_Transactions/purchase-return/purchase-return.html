@@ -226,7 +226,9 @@
             <div>
               <strong>{{ config.lineTitle || 'Line Items' }}</strong>
               <!-- Previous: <span>Add, edit or remove rows directly here before saving this document.</span> -->
-              <span>Rows come from the selected PI Reference. Edit Return Qty, or remove items you are not returning.</span>
+              <!-- <span>Rows come from the selected PI Reference. Edit Return Qty, or remove items you are not returning.</span> -->
+              <!-- Previous: <span>Rows come from the selected PI Reference. Edit Return Qty, or remove items you are not returning.</span> -->
+              <span>The complete invoice is returned: every item with its full quantity and serial numbers.</span>
             </div>
             <!-- Previous (Purchase Return is against a PI only, so no manual rows):
             <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" aria-label="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button> -->
@@ -253,7 +255,8 @@
                       <div class="inventory-row-actions">
                         <!-- Previous (Purchase Return is against a PI only, so no manual rows):
                         <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button> -->
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove row" (click)="removeEntryLineRow(rowIndex)"><i class="pi pi-trash"></i></button>
+                        <!-- <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove row" (click)="removeEntryLineRow(rowIndex)"><i class="pi pi-trash"></i></button> -->
+                        <!-- 258: Purchase Return is the whole invoice - rows cannot be removed. -->
                       </div>
                     </td>
                     @let rowView = rowViews[rowIndex];
@@ -266,10 +269,16 @@
                             <span class="inventory-grid-na">-</span>
                           } @else if (lineGridCellReadonly(rowIndex, row, column)) {
                             <span class="inventory-grid-static-value">{{ lineGridReadonlyCellText(rowIndex, row, column, cellView, rowView) || '' }}</span>
-                          } @else if (lineGridColumnIsSerialPicker(column) && isSerialApplicableRow(row)) {
+                          <!-- } @else if (lineGridColumnIsSerialPicker(column) && isSerialApplicableRow(row)) {
                             <button type="button" class="erp-btn btn-white btn-sm inventory-serial-trigger" (click)="openSerialPicker(rowIndex, row)">
                               {{ serialPickerSummaryForRow(rowIndex, row) }}
-                            </button>
+                            </button> -->
+                            } @else if (lineGridColumnIsSerialPicker(column) && isSerialApplicableRow(row)) {
+                            <!-- 258: whole-invoice return - every serial of the invoice goes back,
+                                 bound automatically, so it is shown read-only (no picker). -->
+                            <span class="inventory-grid-static-value" [title]="purchaseReturnRowSerialsText(rowIndex)">
+                              {{ serialPickerSummaryForRow(rowIndex, row) }}
+                            </span>
                           } @else if (lineGridColumnIsGstValue(column)) {
                             <div class="inventory-gst-cell" [class.inventory-gst-cell--included]="lineGstIncluded(rowIndex)">
                               <span class="inventory-gst-rate-pill">{{ lineGridGstPercentText(row, column) }}</span>
@@ -571,7 +580,8 @@
           @if (refPickerLoading()) {
             <p>Loading posted purchase invoices...</p>
           } @else if (!refPickerAvailableDocs().length) {
-            <p>No posted purchase invoices found. Close this tray to continue with a direct return.</p>
+            <!-- <p>No posted purchase invoices found. Close this tray to continue with a direct return.</p> -->
+            <p>No invoices can be returned. Only unpaid invoices with nothing sold and all items back at this branch are listed.</p>
           } @else {
             <div class="erp-form-group" style="margin-bottom:10px;">
               <input class="erp-input" type="text" placeholder="Search PI no, vendor or date"
@@ -579,9 +589,12 @@
             </div>
             <div class="tbl-wrap">
               <table class="erp-table compact">
-                <thead>
+                <!-- <thead>
                   <tr><th class="text-center">Items</th><th>PI No</th><th>Date</th><th>Vendor</th><th>Status</th><th></th></tr>
-                </thead>
+                </thead> -->
+                  <thead>
+                    <tr><th class="text-center">Items</th><th>PI No</th><th>Date</th><th>Vendor</th><th>Invoice Total</th><th>Status</th><th></th></tr>
+                  </thead>
                 <tbody>
                   @for (doc of refPickerDisplayDocs(); track doc.id) {
                     <tr>
@@ -592,7 +605,10 @@
                       </td>
                       <td>{{ doc.doc_number }}</td>
                       <td>{{ gridDateDisplay(doc.doc_date) }}</td>
+                      <!-- <td>{{ doc.party_name }}</td>
+                      <td>{{ doc.status }}</td> -->
                       <td>{{ doc.party_name }}</td>
+                      <td>Rs. {{ refPickerDocTotal(doc) | number:'1.2-2' }}</td>
                       <td>{{ doc.status }}</td>
                       <td>
                         <button type="button" class="erp-btn btn-white btn-sm" (click)="selectPrimaryReference(doc)">
@@ -602,10 +618,10 @@
                     </tr>
                     @if (isRefPickerExpanded(doc.id)) {
                       <tr class="pr-expand-tr">
-                        <td colspan="6">
+                        <td colspan="7">
                           <div class="pr-expand-content">
                             @if ((doc.items || []).length) {
-                              <table class="pr-expand-items-table">
+                              <!-- <table class="pr-expand-items-table">
                                 <thead>
                                   <tr>
                                     <th>Product</th>
@@ -631,6 +647,31 @@
                                           <strong>{{ refPickerItemAvailableQty(item) }}</strong>
                                         }
                                       </td>
+                                    </tr>
+                                  }
+                                </tbody>
+                              </table> -->
+                              
+                                                            <table class="pr-expand-items-table">
+                                <thead>
+                                  <tr>
+                                    <th>Product</th>
+                                    <th>Variant / Attribute</th>
+                                    <th>UOM</th>
+                                    <th>Qty to Return</th>
+                                    <th>Amount</th>
+                                    <th>Serial Numbers</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  @for (item of doc.items; track $index) {
+                                    <tr>
+                                      <td>{{ item.product_name }}</td>
+                                      <td>{{ refPickerItemVariantText(item) }}</td>
+                                      <td>{{ item.uom_name || '-' }}</td>
+                                      <td><strong>{{ item.qty }}</strong></td>
+                                      <td>Rs. {{ item.amount | number:'1.2-2' }}</td>
+                                      <td>{{ refPickerItemSerialsText(item) }}</td>
                                     </tr>
                                   }
                                 </tbody>
