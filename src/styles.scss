@@ -9122,8 +9122,20 @@ body .p-connected-overlay {
   }
 
   &.inventory-generic-report-page .inventory-report-header-top-filters {
-    grid-template-columns: minmax(178px, max-content) minmax(258px, max-content);
+    // Previous: grid-template-columns: minmax(178px, max-content) minmax(258px, max-content);
+    // Two more columns: the date filter(s) moved up next to Branch / Warehouse.
+    grid-template-columns: minmax(178px, max-content) minmax(258px, max-content) repeat(2, max-content);
     justify-content: flex-start;
+  }
+
+  // Date filters in the top row keep their own widths: range box 230px,
+  // Stock Summary's single From / To pickers 154px each.
+  .inventory-report-header-top-filters .inventory-report-filter.inventory-report-filter--date {
+    width: 230px;
+  }
+
+  .inventory-report-header-top-filters .inventory-report-filter--date.inventory-report-filter--date-single {
+    width: 154px;
   }
 
   .inventory-report-header-top-filters .inventory-report-filter,

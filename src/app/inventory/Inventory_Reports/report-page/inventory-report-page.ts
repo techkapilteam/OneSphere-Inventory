@@ -293,6 +293,9 @@ export class InventoryReportPageComponent implements OnInit {
   // the single range picker; both still write the same fromDate/toDate filters.
   readonly separateFromToDates = computed(() => this.report().key === 'stockSummary');
 
+  // Stock Summary's location filter is "Branch" only — no warehouses listed.
+  readonly branchOnlyLocation = computed(() => this.report().key === 'stockSummary');
+
   // Upper limit for the To Date picker (no future dates).
   readonly todayDate = new Date();
 
@@ -317,14 +320,18 @@ export class InventoryReportPageComponent implements OnInit {
 
   readonly branchWarehouseLocked = computed(() => !this.reportLocationScope().isCompanyAdmin && !!this.activeLocationOption());
   readonly branchWarehousePlaceholder = computed(() =>
-    this.branchWarehouseLocked() ? 'Current branch / warehouse' : 'All branches / warehouses'
+    // Previous: this.branchWarehouseLocked() ? 'Current branch / warehouse' : 'All branches / warehouses'
+    this.branchOnlyLocation()
+      ? (this.branchWarehouseLocked() ? 'Current branch' : 'All branches')
+      : (this.branchWarehouseLocked() ? 'Current branch / warehouse' : 'All branches / warehouses')
   );
 
   readonly branchWarehouseCaption = computed(() => {
     const active = this.activeLocationOption();
     if (this.branchWarehouseLocked() && active) return `${active.group}: ${active.label}`;
     const selected = this.branchWarehouseSelected().length;
-    return selected ? `${selected} selected` : 'All branches and warehouses';
+    // Previous: return selected ? `${selected} selected` : 'All branches and warehouses';
+    return selected ? `${selected} selected` : (this.branchOnlyLocation() ? 'All branches' : 'All branches and warehouses');
   });
 
   // Branch and Warehouse are both "where" filters, so they're offered as one
@@ -334,9 +341,12 @@ export class InventoryReportPageComponent implements OnInit {
     const dynamic = this.masterOptions();
     const branches = (dynamic.branchId ?? []).map(label => ({ label, key: 'branchId' as const, group: 'Branch' }));
     const warehouses = (dynamic.warehouseId ?? []).map(label => ({ label, key: 'warehouseId' as const, group: 'Warehouse' }));
-    const options = [...branches, ...warehouses];
+    // Previous: const options = [...branches, ...warehouses];
+    const options = this.branchOnlyLocation() ? branches : [...branches, ...warehouses];
     const active = this.activeLocationOption();
-    if (active && !options.some(option => option.key === active.key && option.label === active.label)) {
+    // Previous: if (active && !options.some(option => option.key === active.key && option.label === active.label)) {
+    if (active && !(this.branchOnlyLocation() && active.key === 'warehouseId')
+        && !options.some(option => option.key === active.key && option.label === active.label)) {
       return [active, ...options];
     }
     return options;
