@@ -9861,6 +9861,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   lineGridCellReadonly(rowIndex: number, row: string[], column: string): boolean {
+        // 258: Purchase Return is the whole invoice - once a PI is picked,
+    // Return Qty is fixed to the invoice quantity and cannot be edited.
+    if (this.config?.key === 'purchaseReturn' && this.formValues()['piId']) {
+      const returnKey = this.normalizeKey(column);
+      if (returnKey.includes('return') && (returnKey.includes('qty') || returnKey.includes('quantity'))) {
+        return true;
+      }
+    }
     if ((this.config?.key === 'salesInvoice' || this.config?.key === 'deliveryChallan') && this.normalizeKey(column) === 'warehouse') {
       return true;
     }
@@ -13328,6 +13336,51 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return (amt === undefined || amt === null || amt === '') ? '-' : String(amt);
   }
 
+    // ── 257: Purchase Return → PI Reference popup — where the rest of a PI line went ──
+  // sp_get_purchase_docs_for_ref('PI') returns each item with the database field
+  // names (sold_qty, transferred_out_qty, ...); camelCase is accepted too.
+  // Serial products: exact split. Others: only not_at_location_qty is known.
+
+  private refPickerBreakdownQty(value: unknown): number {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.round(n * 10000) / 10000 : 0;
+  }
+
+  refPickerItemSerialTracked(item: any): boolean {
+    return (item?.serial_tracked ?? item?.serialTracked) === true;
+  }
+
+  refPickerItemSoldQty(item: any): number {
+    return this.refPickerBreakdownQty(item?.sold_qty ?? item?.soldQty);
+  }
+
+  refPickerItemTransferredQty(item: any): number {
+    return this.refPickerBreakdownQty(item?.transferred_out_qty ?? item?.transferredOutQty);
+  }
+
+  refPickerItemOtherQty(item: any): number {
+    return this.refPickerBreakdownQty(item?.other_out_qty ?? item?.otherOutQty);
+  }
+
+  refPickerItemNotHereQty(item: any): number {
+    return this.refPickerBreakdownQty(item?.not_at_location_qty ?? item?.notAtLocationQty);
+  }
+    // 258: PI Reference popup (Purchase Return - whole invoice)
+  refPickerDocTotal(doc: any): number {
+    const total = (doc?.items || []).reduce((sum: number, item: any) => sum + (Number(item?.amount) || 0), 0);
+    return Math.round(total * 100) / 100;
+  }
+
+  refPickerItemSerialsText(item: any): string {
+    const serials = item?.returnable_serial_numbers ?? item?.returnableSerialNumbers ?? [];
+    return Array.isArray(serials) && serials.length ? serials.join(', ') : '-';
+  }
+    // 258: Purchase Return - the serials bound to a row, for the read-only cell's tooltip
+    // 258: Purchase Return - the serials bound to a row (tooltip of the read-only cell)
+  purchaseReturnRowSerialsText(rowIndex: number): string {
+    return (this.lineSerialUnitsMap()[rowIndex] || []).join(', ');
+  }
+
   // Reopens the reference-picker tray, pre-filtered (via the tray's own
   // search box) to the document already referenced on this record -- the
   // "drill into what I already picked" entry point requested for SO/DC/SI/
@@ -13875,11 +13928,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // surfaced as "Serial number X is not available" at Post (or the
       // openSerialPicker self-heal notice on reopen). The user must pick
       // from openSerialPicker's live, source-scoped, in-stock list instead.
-      const applyRows = () => {
+            const applyRows = () => {
         this.entryLineRowsKey.set(key);
         this.entryLineRows.set(rows);
         if (key === 'purchaseReturn' || key === 'goodsReceipt') {
           this.lineRefItemIdMap.set(this.attributeRefMapFromItems(doc.items || []));
+        }
+        if (key === 'purchaseReturn') {
+          // 258: bind the exact serials that go back
+          this.lineSerialUnitsMap.set(this.lineSerialMapFromItems(
+            (doc.items || []).map((item: any) => ({
+              ...item,
+              serial_numbers: item.returnable_serial_numbers ?? []
+            }))
+          ));
         }
       };
       if (closeBeforeRows) setTimeout(applyRows, 0);
@@ -14488,7 +14550,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       const invoiceQty = String(originalInvoiceQty || '');
       const variant = this.referenceItemVariantText(item);
       const attribute = this.referenceItemAttributeText(item);
-      const row = this.normalizeLineRow([product, variant, attribute, uom, invoiceQty, '', rate, gst, '', '']);
+      // const row = this.normalizeLineRow([product, variant, attribute, uom, invoiceQty, '', rate, gst, '', '']);
+      // this.recalculateLineRow(row);
+      // return row;
+      const row = this.normalizeLineRow([product, variant, attribute, uom, invoiceQty, invoiceQty, rate, gst, '', '']);
       this.recalculateLineRow(row);
       return row;
     }
