@@ -44,12 +44,13 @@
                     <i [class]="transactionReferenceLoading() ? 'pi pi-spin pi-spinner' : 'pi pi-list'"></i>
                   </button>
                 }
+                <!-- Previous: eye (view referenced invoice items) button -- removed on Sales Return.
                 @if (formFieldValue(refField)) {
                   <button type="button" class="erp-btn btn-white btn-icon inventory-reference-picker-btn"
                     title="View referenced document's items" (click)="viewReferenceDetails(refField)">
                     <i class="pi pi-eye"></i>
                   </button>
-                }
+                } -->
               </div>
             </div>
           }
@@ -91,14 +92,23 @@
             <div class="erp-form-group procurement-vendor-col">
               <label class="erp-label">{{ customerField.label }}</label>
               <div class="inventory-field-with-add">
-                <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
-                  [items]="procurementVendorHeaderOptions(customerField)"
-                  [searchable]="true" [clearable]="true"
-                  [ngModel]="formFieldValue(customerField)"
-                  (ngModelChange)="collectFormField(customerField.key, $event); maybeAutoCode(customerField.key, $event)"
-                  [placeholder]="fieldTypingHint(customerField)">
-                </ng-select>
-                @if (customerField.addMaster) {
+                <!-- Previous: editable ng-select dropdown with + Add Customer.
+                     Customer is bound from the picked Invoice Reference, so it is
+                     shown as a plain read-only box -- no dropdown. -->
+                @if (salesReturnCustomerLocked()) {
+                  <div class="erp-input inventory-readonly-label" [class.inventory-readonly-label--empty]="!formFieldValue(customerField)">
+                    {{ formFieldValue(customerField) || '' }}
+                  </div>
+                } @else {
+                  <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+                    [items]="procurementVendorHeaderOptions(customerField)"
+                    [searchable]="true" [clearable]="true"
+                    [ngModel]="formFieldValue(customerField)"
+                    (ngModelChange)="collectFormField(customerField.key, $event); maybeAutoCode(customerField.key, $event)"
+                    [placeholder]="fieldTypingHint(customerField)">
+                  </ng-select>
+                }
+                @if (customerField.addMaster && !salesReturnCustomerLocked()) {
                   <button type="button" class="erp-btn btn-white btn-icon"
                     [title]="'Add ' + customerField.addMaster"
                     (click)="openAddMaster(customerField.addMaster, customerField.key)">
@@ -111,6 +121,8 @@
           @if (transactionReferenceField(); as refField) {
             <div class="erp-form-group">
               <label class="erp-label">{{ refField.label }}</label>
+              <!-- Same as Purchase Return's PI Reference: list + Pick button for posted Sales Invoices. -->
+              <div class="inventory-reference-picker-field">
               @if (transactionReferenceUsesSelect(refField)) {
                 <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
                   [items]="transactionReferenceOptions(refField)"
@@ -125,6 +137,12 @@
                   (ngModelChange)="collectFormField(refField.key, $event)"
                   [placeholder]="fieldTypingHint(refField)" />
               }
+                <button type="button" class="erp-btn btn-white btn-icon inventory-reference-picker-btn"
+                  title="View posted sales invoices" [disabled]="transactionReferenceLoading()"
+                  (click)="openPurchaseReferencePicker()">
+                  <i [class]="transactionReferenceLoading() ? 'pi pi-spin pi-spinner' : 'pi pi-list'"></i>
+                </button>
+              </div>
             </div>
           }
         </div>
@@ -553,9 +571,10 @@
         <div class="inventory-modal-header">
           <h3>Posted Sales Invoices</h3>
           <span style="display:flex; align-items:center; gap:8px;">
+            <!-- Previous (Sales Return is against a Sales Invoice only, so no direct return):
             <button type="button" class="erp-btn btn-white btn-sm" (click)="useDirectReferenceEntry()">
               <i class="pi pi-file-plus"></i> {{ directReferenceActionLabel() || 'Direct Return' }}
-            </button>
+            </button> -->
             <button title="Close" type="button" class="erp-btn btn-white btn-icon btn-sm" (click)="closePurchaseReferencePicker()">
               <i class="pi pi-times"></i>
             </button>

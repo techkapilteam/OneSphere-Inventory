@@ -8001,6 +8001,19 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.clearPurchaseReturnReference(field);
       return;
     }
+    // Customer is read-only on Sales Return (bound from the invoice), so
+    // clearing the invoice must clear the customer it brought in too.
+    if (this.config?.key === 'salesReturn' && !selected) {
+      this.formValues.update(values => ({
+        ...values,
+        [field.key]: '',
+        invoiceId: null,
+        invoiceReference: '',
+        customerId: null,
+        customer: ''
+      }));
+      return;
+    }
     if ((this.config?.key === 'debitNote' || this.config?.key === 'creditNote') && !selected) {
       this.clearDocumentNoteReference(field);
       return;
@@ -8221,6 +8234,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return !!values['invoiceId'] && reference !== '' && !reference.includes('directsalesreturn');
   }
 
+  // Mirror of purchaseReturnVendorLocked() above -- Sales Return against a
+  // posted Sales Invoice only: Party / Customer always comes from the picked
+  // invoice (selectPurchaseReference), never by hand.
+  salesReturnCustomerLocked(): boolean {
+    return this.config?.key === 'salesReturn';
+  }
+
   private clearDocumentNoteReference(field: InventoryField): void {
     const key = this.config?.key || '';
     this.formValues.update(values => ({
@@ -8330,6 +8350,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (key === 'purchaseReturn') {
       // saveError, not txSaveError: purchase-return.html only renders saveError.
       this.saveError.set('No posted Purchase Invoices available to return.');
+      return true;
+    }
+    // Sales Return against a posted Sales Invoice only, same as Purchase
+    // Return above (Previous: fell through to the generic 'Direct Sales
+    // Return' patch below).
+    if (key === 'salesReturn') {
+      this.saveError.set('No posted Sales Invoices available to return.');
       return true;
     }
     if (key === 'debitNote') {
