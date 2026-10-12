@@ -20,4 +20,8 @@ import { NgSelectModule } from '@ng-select/ng-select';
 })
 export class InventoryDeliveryAddressComponent {
   @Input({ required: true }) host!: any;
+  // Sales Invoice only: "Ship Address same as Full Delivery Address" switch
+  // (host.shipSameAsDelivery()/toggleShipSameAsDelivery(), formValues
+  // 'shipAddress') shown inside this section.
+  @Input() showShipAddress = false;
 }

@@ -404,14 +404,14 @@
               <div class="inventory-fieldset-title">Category Default Policies</div>
               <div class="inventory-form-grid inventory-config-grid">
                 <div class="erp-form-group">
-                  <label class="erp-label">Serial No. Policy Applicable</label>
+                  <label class="erp-label">Serial No. Policy Applicable <span class="text-danger">*</span></label>
                   <label class="inventory-labeled-switch yes-no">
                     <input type="checkbox" [checked]="categorySerialApplicable()" (change)="setCategorySerialApplicable($any($event.target).checked)" />
                     <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
                   </label>
                   @if (categorySerialApplicable()) {
                     <div class="inventory-switch-reveal">
-                      <label class="erp-label">Default Serial Number Policy</label>
+                      <label class="erp-label">Default Serial Number Policy <span class="text-danger">*</span></label>
                       <div class="inventory-field-with-add">
                         <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
                           [items]="serialPolicyOptions" [searchable]="true" [clearable]="true"
@@ -1245,6 +1245,12 @@
 
         @if (config.key !== 'warehouseMaster' || warehouseRequired()) {
         <div class="inventory-form-actions">
+          @if (saveMsg()) {
+            <span class="inventory-save-tooltip save-ok"><i class="pi pi-check-circle"></i> {{ saveMsg() }}</span>
+          }
+          @if (saveError()) {
+            <span class="inventory-save-tooltip save-err"><i class="pi pi-times-circle"></i> {{ saveError() }}</span>
+          }
           <button type="button" class="erp-btn btn-white"><i class="pi pi-times"></i> Clear</button>
           @if (isPosView()) {
             <button type="button" class="erp-btn btn-white"><i class="pi pi-pause-circle"></i> Hold Bill</button>
@@ -1299,6 +1305,12 @@
               </table>
             </div>
             <div class="inventory-form-actions inventory-final-actions">
+              @if (saveMsg()) {
+                <span class="inventory-save-tooltip save-ok"><i class="pi pi-check-circle"></i> {{ saveMsg() }}</span>
+              }
+              @if (saveError()) {
+                <span class="inventory-save-tooltip save-err"><i class="pi pi-times-circle"></i> {{ saveError() }}</span>
+              }
               <button type="button" class="erp-btn btn-white"><i class="pi pi-times"></i> Cancel</button>
               <button type="button" class="erp-btn btn-primary"><i class="pi pi-check"></i> Save</button>
             </div>
@@ -1357,8 +1369,11 @@
                   <td class="text-center">
                     <div class="inventory-row-actions">
                       @if (isAdmin()) {
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit"><i class="pi pi-pencil"></i></button>
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete"><i class="pi pi-trash"></i></button>
+                        <!-- Previous: <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit"><i class="pi pi-pencil"></i></button> -->
+                        <!-- Previous: <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete"><i class="pi pi-trash"></i></button> -->
+                        <!-- Saved master records are locked: Edit/Delete always disabled. -->
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" disabled><i class="pi pi-pencil"></i></button>
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" disabled><i class="pi pi-trash"></i></button>
                       }
                     </div>
                   </td>

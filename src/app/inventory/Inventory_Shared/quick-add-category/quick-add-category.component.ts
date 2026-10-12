@@ -413,6 +413,10 @@ export class QuickAddCategoryComponent implements OnInit {
     }
     const serialPolicy = this.serialApplicable() ? (this.serialPolicyName()?.trim() || null) : null;
     const batchPolicy = this.batchApplicable() ? (this.batchPolicyName()?.trim() || null) : null;
+    if (!this.serialApplicable()) {
+      this.error.set('Serial No. Policy is mandatory. Set Serial No. Policy Applicable to Yes and select a policy.');
+      return;
+    }
     if (this.serialApplicable() && !serialPolicy) {
       this.error.set('Select or add a Serial Number Policy.');
       return;

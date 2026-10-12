@@ -15,15 +15,30 @@
           }
           @if (showBranchWarehouseField()) {
             <div class="inventory-report-filter inventory-report-filter--branch">
-              <label title="Branch / Warehouse"><i class="pi pi-building"></i> Branch / Warehouse</label>
+              <!-- Previous: <label title="Branch / Warehouse"><i class="pi pi-building"></i> Branch / Warehouse</label> -->
+              <label [title]="branchOnlyLocation() ? 'Branch' : 'Branch / Warehouse'"><i class="pi pi-building"></i> {{ branchOnlyLocation() ? 'Branch' : 'Branch / Warehouse' }}</label>
               <ng-select class="erp-ng-select inventory-ng-select" appendTo="body" [items]="branchWarehouseOptions()" groupBy="group" bindLabel="label" [multiple]="true" [searchable]="true" [clearable]="!branchWarehouseLocked()" [disabled]="branchWarehouseLocked()" [closeOnSelect]="false" [placeholder]="branchWarehousePlaceholder()" [ngModel]="branchWarehouseSelected()" (ngModelChange)="updateBranchWarehouse($event)"></ng-select>
               <div class="inventory-report-filter-caption" [class.is-locked]="branchWarehouseLocked()">{{ branchWarehouseCaption() }}</div>
             </div>
           }
-        </div>
-
-        <div class="inventory-report-header-controls">
-          @if (showDateRangeField()) {
+          <!-- Dates moved up from the second row (controls) to keep that row from overflowing. -->
+          @if (showDateRangeField() && separateFromToDates()) {
+            <!-- Stock Summary: separate From Date / To Date pickers. -->
+            <div class="inventory-report-filter inventory-report-filter--date inventory-report-filter--date-single">
+              <label title="From Date"><i [class]="filterIcon('fromDate')"></i> From Date</label>
+              <div class="inventory-date-wrap">
+                <p-datepicker [ngModel]="filterDateValue('fromDate')" (ngModelChange)="updateFilter('fromDate', $event)" [ngModelOptions]="{ standalone: true }" [maxDate]="filterDateValue('toDate') || todayDate" dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY" [readonlyInput]="true" [showIcon]="false" appendTo="body" styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100"></p-datepicker>
+                <i class="pi pi-calendar inventory-date-icon"></i>
+              </div>
+            </div>
+            <div class="inventory-report-filter inventory-report-filter--date inventory-report-filter--date-single">
+              <label title="To Date"><i [class]="filterIcon('toDate')"></i> To Date</label>
+              <div class="inventory-date-wrap">
+                <p-datepicker [ngModel]="filterDateValue('toDate')" (ngModelChange)="updateFilter('toDate', $event)" [ngModelOptions]="{ standalone: true }" [minDate]="filterDateValue('fromDate')" [maxDate]="todayDate" dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY" [readonlyInput]="true" [showIcon]="false" appendTo="body" styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100"></p-datepicker>
+                <i class="pi pi-calendar inventory-date-icon"></i>
+              </div>
+            </div>
+          } @else if (showDateRangeField()) {
             <div class="inventory-report-filter inventory-report-filter--date">
               <label title="Date Range"><i class="pi pi-calendar"></i> Date Range</label>
               <div class="inventory-date-wrap">
@@ -33,13 +48,45 @@
               <div class="inventory-date-caption">{{ dateRangeSummary() }}</div>
             </div>
           }
+        </div>
+
+        <div class="inventory-report-header-controls">
+          <!-- Previous: the date block below lived here, at the start of the second row.
+          @if (showDateRangeField() && separateFromToDates()) {
+            <div class="inventory-report-filter inventory-report-filter--date inventory-report-filter--date-single">
+              <label title="From Date"><i [class]="filterIcon('fromDate')"></i> From Date</label>
+              <div class="inventory-date-wrap">
+                <p-datepicker [ngModel]="filterDateValue('fromDate')" (ngModelChange)="updateFilter('fromDate', $event)" [ngModelOptions]="{ standalone: true }" [maxDate]="filterDateValue('toDate') || todayDate" dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY" [readonlyInput]="true" [showIcon]="false" appendTo="body" styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100"></p-datepicker>
+                <i class="pi pi-calendar inventory-date-icon"></i>
+              </div>
+            </div>
+            <div class="inventory-report-filter inventory-report-filter--date inventory-report-filter--date-single">
+              <label title="To Date"><i [class]="filterIcon('toDate')"></i> To Date</label>
+              <div class="inventory-date-wrap">
+                <p-datepicker [ngModel]="filterDateValue('toDate')" (ngModelChange)="updateFilter('toDate', $event)" [ngModelOptions]="{ standalone: true }" [minDate]="filterDateValue('fromDate')" [maxDate]="todayDate" dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY" [readonlyInput]="true" [showIcon]="false" appendTo="body" styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100"></p-datepicker>
+                <i class="pi pi-calendar inventory-date-icon"></i>
+              </div>
+            </div>
+          } @else if (showDateRangeField()) {
+            <div class="inventory-report-filter inventory-report-filter--date">
+              <label title="Date Range"><i class="pi pi-calendar"></i> Date Range</label>
+              <div class="inventory-date-wrap">
+                <p-datepicker selectionMode="range" [ngModel]="dateRangeValue()" (ngModelChange)="updateDateRange($event)" [ngModelOptions]="{ standalone: true }" dateFormat="dd-M-yy" placeholder="From - To" [readonlyInput]="true" [showIcon]="false" appendTo="body" styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100"></p-datepicker>
+                <i class="pi pi-calendar inventory-date-icon"></i>
+              </div>
+              <div class="inventory-date-caption">{{ dateRangeSummary() }}</div>
+            </div>
+          }
+          -->
           @for (filter of inlineFilterDefinitionsAfterSegment(); track filterTrack($index, filter)) {
             <div class="inventory-report-filter">
               <label [title]="filter.label"><i [class]="filterIcon(filter.key)"></i> {{ filter.label }}</label>
               @if (filter.type === 'multiselect') {
                 <ng-select class="erp-ng-select inventory-ng-select" appendTo="body" [items]="filter.options ?? []" [multiple]="true" [searchable]="true" [clearable]="true" [closeOnSelect]="false" [placeholder]="filterPlaceholder(filter)" [ngModel]="filterMultiValues()[filter.key]" (ngModelChange)="updateFilter(filter.key, $event)"></ng-select>
               } @else if (filter.type === 'select') {
-                <ng-select class="erp-ng-select inventory-ng-select" appendTo="body" [items]="filter.options ?? []" [searchable]="true" [clearable]="true" [placeholder]="filterPlaceholder(filter)" [ngModel]="filterTextValue(filter.key)" (ngModelChange)="updateFilter(filter.key, $event)"></ng-select>
+                <!-- Previous: <ng-select ... [searchable]="true" ...> (Financial Year showed a typing cursor) -->
+                <!-- Financial Year is pick-only: no search box / typing cursor. -->
+                <ng-select class="erp-ng-select inventory-ng-select" appendTo="body" [items]="filter.options ?? []" [searchable]="filter.key !== 'financialYear'" [clearable]="true" [placeholder]="filterPlaceholder(filter)" [ngModel]="filterTextValue(filter.key)" (ngModelChange)="updateFilter(filter.key, $event)"></ng-select>
               } @else if (filter.type === 'date') {
                 <div class="inventory-date-wrap">
                   <p-datepicker [ngModel]="filterDateValue(filter.key)" (ngModelChange)="updateFilter(filter.key, $event)" [ngModelOptions]="{ standalone: true }" dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY" [readonlyInput]="true" [showIcon]="false" appendTo="body" styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100"></p-datepicker>

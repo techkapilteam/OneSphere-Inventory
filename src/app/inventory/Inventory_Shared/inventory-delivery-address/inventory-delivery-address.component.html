@@ -64,6 +64,29 @@
           (ngModelChange)="host.collectFormField('deliveryAddress', $event)"
           placeholder="Auto-filled from address details or enter manually"></textarea>
       </div>
+      @if (showShipAddress) {
+        <div class="erp-form-group span-2">
+          <div class="inventory-fieldset-title-row">
+            <label class="erp-label">Ship Address same as Full Delivery Address</label>
+            <label class="inventory-labeled-switch yes-no" title="Ship to the same address as the Full Delivery Address?">
+              <input type="checkbox" [checked]="host.shipSameAsDelivery()" (change)="host.toggleShipSameAsDelivery($any($event.target).checked)" />
+              <span class="inventory-switch-track">
+                <span class="switch-text switch-on">Yes</span>
+                <span class="switch-text switch-off">No</span>
+              </span>
+            </label>
+          </div>
+        </div>
+        @if (!host.shipSameAsDelivery()) {
+          <div class="erp-form-group span-2">
+            <label class="erp-label">Ship Address</label>
+            <textarea class="erp-input" rows="2"
+              [ngModel]="host.formValues()['shipAddress'] || ''"
+              (ngModelChange)="host.collectFormField('shipAddress', $event)"
+              placeholder="Enter the address the goods ship to"></textarea>
+          </div>
+        }
+      }
     </div>
   }
 </section>

@@ -1971,7 +1971,8 @@ export const salesReturnConfig = transaction(
       { key: 'returnDate', label: 'Return Date', type: 'date' },
       { key: 'customer', label: 'Party / Customer', type: 'select', options: INVENTORY_OPTIONS.customers, addMaster: 'Customer' },
       { key: 'invoiceReference', label: 'Invoice Reference', type: 'select', options: [] },
-      { key: 'returnToWarehouse', label: 'Return To Warehouse', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
+      // Previous: { key: 'returnToWarehouse', label: 'Return To Warehouse', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
+      { key: 'returnToWarehouse', label: 'Return To Branch', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
       { key: 'returnReason', label: 'Return Reason', type: 'select', options: ['Wrong Product Delivered', 'Damaged in Delivery', 'Customer Cancelled', 'Quality Issue', 'Excess Quantity'] },
       { key: 'remarks', label: 'Remarks', type: 'textarea' }
     ],

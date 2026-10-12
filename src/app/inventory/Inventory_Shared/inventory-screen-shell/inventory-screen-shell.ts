@@ -1686,6 +1686,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const target = event.target as HTMLElement | null;
     const button = target?.closest('button') as HTMLButtonElement | null;
     if (!button || button.closest('.inventory-modal')) return;
+    // A click on the <i> icon inside a disabled button can still bubble up
+    // here, so locked Edit/Delete (saved master records) must stop now.
+    if (button.disabled) return;
 
     const text = (button.textContent || '').trim().replace(/\s+/g, ' ');
     const title = button.getAttribute('title') || '';
@@ -3195,7 +3198,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private readonly postedStockLocationMessages: Record<string, string> = {
     deliveryChallan: 'Select the From Warehouse / Branch — a posted Delivery Challan has to dispatch the stock from a real location.',
     salesInvoice: 'Select the Warehouse this invoice ships from — a posted Sales Invoice has to draw stock from a real location.',
-    salesReturn: 'Select the Return To Warehouse — a posted Sales Return has to put the stock back somewhere real.',
+    // Previous: salesReturn: 'Select the Return To Warehouse — a posted Sales Return has to put the stock back somewhere real.',
+    salesReturn: 'Select the Return To Branch — a posted Sales Return has to put the stock back somewhere real.',
     openingStockEntry: 'Select the Warehouse / Branch — a posted Opening Stock Entry has to seed a real location.',
     productionPlanning: 'Select the Production Warehouse / Branch before posting the Production Plan.',
     materialIssueProduction: 'Select the From Warehouse / Branch before posting Material Issue for Production.',
@@ -7339,6 +7343,21 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     ]);
   }
 
+  // MRP / Selling Price print only when at least one line actually carries a
+  // value — a column the user never filled no longer prints as 0.00.
+  private withoutEmptyPriceColumns(items: any[], columns: string[], rows: string[][]): { columns: string[]; rows: string[][] } {
+    const hasValue = (keys: string[]) => (items || []).some(item => keys.some(key => Number(item?.[key] ?? 0) > 0));
+    const drop = new Set<number>();
+    if (!hasValue(['mrp', 'Mrp'])) drop.add(columns.indexOf('MRP'));
+    if (!hasValue(['selling_price', 'sellingPrice'])) drop.add(columns.indexOf('Selling Price'));
+    drop.delete(-1);
+    if (!drop.size) return { columns, rows };
+    return {
+      columns: columns.filter((_, i) => !drop.has(i)),
+      rows: rows.map(row => row.filter((_, i) => !drop.has(i)))
+    };
+  }
+
   private purchaseInvoiceDocumentExportPayload(
     record: any,
     docNo: string,
@@ -7352,8 +7371,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const branchName = String(record.branch_name || record.branchName || this.branchNameFromRecord(record) || '');
     const warehouseName = String(record.warehouse_name || record.warehouseName || '');
     const locationName = warehouseName || branchName;
-    const columns = ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'];
-    const rows = this.purchaseInvoiceDocumentRows(record);
+    // Previous: const columns = ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'];
+    // Previous: const rows = this.purchaseInvoiceDocumentRows(record);
+    const { columns, rows } = this.withoutEmptyPriceColumns(
+      record?.items || [],
+      ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
+      this.purchaseInvoiceDocumentRows(record)
+    );
     const exportColumns = rows.length ? columns : fallbackColumns;
     const exportRows = rows.length ? rows : fallbackRows;
     const totals = this.purchaseInvoiceFinancials(record);
@@ -7439,9 +7463,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const customerState = String(customer?.state || this.partyPrimaryState(customer)
       || record.place_of_supply || record.placeOfSupply || '').trim();
     const warehouseName = String(record.warehouse_name || record.warehouseName || '');
+    const deliveryAddress = String(record.delivery_address || record.deliveryAddress || '').trim()
+      || this.partyFullAddress(customer);
     const bank = this.invoiceBankDetails();
-    const columns = ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'];
-    const rows = this.salesInvoiceDocumentRows(record);
+    // Previous: const columns = ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'];
+    // Previous: const rows = this.salesInvoiceDocumentRows(record);
+    const { columns, rows } = this.withoutEmptyPriceColumns(
+      record?.items || [],
+      ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
+      this.salesInvoiceDocumentRows(record)
+    );
     const exportColumns = rows.length ? columns : fallbackColumns;
     const exportRows = rows.length ? rows : fallbackRows;
     const totals = this.salesInvoiceFinancials(record);
@@ -7452,7 +7483,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['Due Date', this.gridDateDisplay(String(record.due_date || record.dueDate || ''))],
       ['Customer', customerName],
       ['Customer Phone', String(customer?.mobile || '')],
-      ['Customer Address', this.partyFullAddress(customer)],
+      // Previous: ['Customer Address', this.partyFullAddress(customer)],
+      // Delivery Address entered on the invoice (customer master address when
+      // none was entered); Ship Address falls back to the delivery address.
+      ['Delivery Address', deliveryAddress || '-'],
+      ['Ship Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
       ['State', customerState || '-'],
       ['GSTIN No', customerGstin || '-'],
       ['Place of Supply', String(record.place_of_supply || record.placeOfSupply || '')],
@@ -7966,6 +8001,19 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.clearPurchaseReturnReference(field);
       return;
     }
+    // Customer is read-only on Sales Return (bound from the invoice), so
+    // clearing the invoice must clear the customer it brought in too.
+    if (this.config?.key === 'salesReturn' && !selected) {
+      this.formValues.update(values => ({
+        ...values,
+        [field.key]: '',
+        invoiceId: null,
+        invoiceReference: '',
+        customerId: null,
+        customer: ''
+      }));
+      return;
+    }
     if ((this.config?.key === 'debitNote' || this.config?.key === 'creditNote') && !selected) {
       this.clearDocumentNoteReference(field);
       return;
@@ -8186,6 +8234,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return !!values['invoiceId'] && reference !== '' && !reference.includes('directsalesreturn');
   }
 
+  // Mirror of purchaseReturnVendorLocked() above -- Sales Return against a
+  // posted Sales Invoice only: Party / Customer always comes from the picked
+  // invoice (selectPurchaseReference), never by hand.
+  salesReturnCustomerLocked(): boolean {
+    return this.config?.key === 'salesReturn';
+  }
+
   private clearDocumentNoteReference(field: InventoryField): void {
     const key = this.config?.key || '';
     this.formValues.update(values => ({
@@ -8295,6 +8350,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (key === 'purchaseReturn') {
       // saveError, not txSaveError: purchase-return.html only renders saveError.
       this.saveError.set('No posted Purchase Invoices available to return.');
+      return true;
+    }
+    // Sales Return against a posted Sales Invoice only, same as Purchase
+    // Return above (Previous: fell through to the generic 'Direct Sales
+    // Return' patch below).
+    if (key === 'salesReturn') {
+      this.saveError.set('No posted Sales Invoices available to return.');
       return true;
     }
     if (key === 'debitNote') {
@@ -9065,6 +9127,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // both point at 'label') and exist so resolution can be tag-driven.
   readonly grnReceivingLocationGroups = computed((): MergedLocationOption[] =>
     this.mergedLocationEntries().map(entry => this.mergedLocationGroupOption(entry))
+  );
+
+  // Sales Return "Return To Branch": branches only, no warehouses. A computed
+  // (not a method) so ng-select gets a stable array reference.
+  readonly salesReturnBranchOptions = computed((): MergedLocationOption[] =>
+    this.grnReceivingLocationGroups().filter(option => option.type !== 'warehouse')
   );
 
   locationGroupsForField(field: InventoryField): MergedLocationOption[] {
@@ -10094,6 +10162,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
                 nextRow[variantIdx] = variantOptions.length === 1 ? variantOptions[0] : '';
               }
             }
+            // New rows now start with Qty empty (blankLineRow), so give it the
+            // old default of 1 once an item is picked. Purchase screens keep
+            // their own blank-Qty behavior.
+            if (!this.isPurchaseTransactionKey(this.config?.key || '')) {
+              (this.config?.lineColumns || []).forEach((qtyCol, qtyIdx) => {
+                if (qtyCol.toLowerCase().includes('qty') && !nextRow[qtyIdx]) nextRow[qtyIdx] = '1';
+              });
+            }
             if (this.config?.key === 'productionPlanning') {
               const batchReqIdx = (this.config?.lineColumns || []).findIndex(c => this.normalizeKey(c) === 'batch req');
               if (batchReqIdx >= 0) nextRow[batchReqIdx] = product.batch_applicable ? 'Yes' : 'No';
@@ -10594,8 +10670,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     } else if (this.config?.key === 'salesOrder' || this.config?.key === 'purchaseInvoice') {
       const mrp = this.productSalesPriceForLineUom(product, row, this.productMrp(product));
       const selling = this.productSalesPriceForLineUom(product, row, this.productSellingPrice(product, row));
-      this.setLineColumnDefault(row, ['mrp'], mrp, true);
-      this.setLineColumnDefault(row, ['selling'], selling, true);
+      // Previous: MRP / Selling Price were always defaulted from the product,
+      // so on Purchase Invoice (columns hidden by default) they were saved and
+      // printed although the user never entered them. PI now defaults them only
+      // while the column is switched on.
+      const isPi = this.config?.key === 'purchaseInvoice';
+      if (!isPi || this.showPurchaseInvoiceMrpColumn()) this.setLineColumnDefault(row, ['mrp'], mrp, true);
+      if (!isPi || this.showPurchaseInvoiceSellingPriceColumn()) this.setLineColumnDefault(row, ['selling'], selling, true);
     }
     if (this.config?.key === 'salesOrder') {
       this.setLineColumnDefault(row, ['rate'], this.productSalesPriceForLineUom(product, row, this.productSellingPrice(product, row)), true);
@@ -11900,12 +11981,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       const options = this.lineColumnOptions(column);
       const key = column.toLowerCase();
       if (this.config?.key === 'variantMaster') return '';
+      // Transaction item grids: Qty and UOM stay empty until an item is
+      // picked — setEntryLineCell fills UOM from the product and Qty as 1.
+      if (this.config?.kind === 'transaction' && (key.includes('qty') || key === 'uom')) return '';
       if (key.includes('qty')) return '1';
       if (key.includes('disc')) return '0';
       if (key.includes('gst') || key.includes('tax')) return '18%';
       if (key.includes('rate') || key.includes('amount')) return '0';
       if (key.includes('warehouse')) return this.locationOptions[0] || '';
       if (key.includes('remark')) return '';
+      // Transaction item grids: a new row (the + button / first row) must not
+      // pre-select the first product — that looked like the item auto-binding
+      // on Direct entry. The user picks the item; other defaults stay.
+      const itemColumns = ['item / sku', 'product', 'raw material', 'finished product', 'material'];
+      if (this.config?.kind === 'transaction' && itemColumns.includes(key)) return '';
       return options[0] || '';
     });
   }
@@ -15858,9 +15947,33 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.formValues.update(v => ({
         ...v,
         deliveryHouseNo: '', deliveryStreet: '', deliveryState: '',
-        deliveryDistrict: '', deliveryCity: '', deliveryPincode: '', deliveryAddress: ''
+        deliveryDistrict: '', deliveryCity: '', deliveryPincode: '', deliveryAddress: '',
+        shipSameAsDelivery: 'Yes', shipAddress: ''
       }));
     }
+  }
+
+  // Sales Invoice: "Ship Address same as Full Delivery Address" switch inside
+  // the Delivery Address section. Yes (the default) ships to the delivery
+  // address; No shows a separate Ship Address box.
+  shipSameAsDelivery(): boolean {
+    return this.formValues()['shipSameAsDelivery'] !== 'No';
+  }
+
+  toggleShipSameAsDelivery(checked: boolean): void {
+    this.formValues.update(v => ({
+      ...v,
+      shipSameAsDelivery: checked ? 'Yes' : 'No',
+      shipAddress: checked ? '' : (v['shipAddress'] || '')
+    }));
+  }
+
+  // Ship address to save/print: the typed Ship Address when the switch is No,
+  // otherwise the delivery address.
+  private resolvedShipAddress(v: Record<string, any> = this.formValues()): string {
+    const delivery = String(v['deliveryAddress'] || this.composeDcDeliveryAddress(v) || '').trim();
+    if (v['shipSameAsDelivery'] === 'No') return String(v['shipAddress'] || '').trim() || delivery;
+    return delivery;
   }
 
   // ── Transport Details (shared across every goods-moving transaction screen) ──
@@ -18910,29 +19023,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     });
   }
 
-  private readonly draftLockTransactionKeys = new Set([
-    'goodsReceipt', 'purchaseInvoice', 'purchaseReturn', 'debitNote', 'creditNote',
-    'salesOrder', 'salesInvoice', 'salesReturn', 'deliveryChallan', 'estimation', 'proformaInvoice', 'salesQuotation',
-    'productionPlanning', 'materialIssueProduction', 'productionEntry', 'productionReturn',
-    'stockTransfer'
-  ]);
-
-  isDraftLockedScreen(): boolean {
-    return this.draftLockTransactionKeys.has(this.config?.key || '');
-  }
-
-  rowStatusKey(row: string[]): string {
-    return this.normalizeKey(this.findRecordByRow(row)?.status || 'draft');
-  }
-
-  // Edit/Delete in the records grid are only usable while a transaction row
-  // is still Draft — once Posted (or Cancelled), the row is locked here too,
-  // not just inside the opened form.
-  canEditOrDeleteRow(row: string[]): boolean {
+  // Saved transaction records cannot be edited or deleted from the records grid.
+  canEditOrDeleteRow(_row: string[]): boolean {
     // Previous: only a company admin may edit/delete saved records.
     // if (!this.isAdmin()) return false;
-    if (!this.isDraftLockedScreen()) return true;
-    return this.rowStatusKey(row) === 'draft';
+    return this.config?.kind !== 'transaction';
   }
 
   cancelRecordByRow(row: string[]): void {
@@ -19854,6 +19949,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.entryLineRows.set((record.items || []).map((item: any) => this.purchaseInvoiceItemToLineRow(item))
         .concat((record.items || []).length ? [] : [this.blankLineRow()]));
       this.restoreLineGstModes(record.items || []);
+      // A saved MRP / Selling Price reopens with its column switched on, so the
+      // value stays visible and is not dropped on re-save (save only sends a
+      // visible column).
+      const piItems: any[] = record.items || [];
+      if (piItems.some(item => Number(item?.mrp ?? item?.Mrp ?? 0) > 0)) this.showPurchaseInvoiceMrpColumn.set(true);
+      if (piItems.some(item => Number(item?.selling_price ?? item?.sellingPrice ?? 0) > 0)) this.showPurchaseInvoiceSellingPriceColumn.set(true);
     }
 
     if (this.config?.key === 'purchaseReturn') {
@@ -19946,6 +20047,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.txDocStatus.set(record.status || 'draft');
     this.txDocNumber.set(record.doc_number || '');
     this.hydrateLineSerialUnitsFromRecord(record);
+    // Sales Invoice draft: reload "+ Warranty" per serial (migration 258),
+    // same helper GRN/PI drafts use. Other sales documents don't carry it.
+    if (this.config?.key === 'salesInvoice') this.hydrateLineSerialWarrantyFromRecord(record);
 
     if (this.config?.key === 'estimation' || this.config?.key === 'proformaInvoice') {
       this.formValues.set({
@@ -19973,6 +20077,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
 
     if (this.config?.key === 'salesInvoice') {
+      const siShipAddress = String(record.ship_address || '').trim();
+      const siShipDiffers = !!siShipAddress && siShipAddress !== String(record.delivery_address || '').trim();
       this.formValues.set({
         invoiceNo: record.doc_number || '',
         invoiceDate: record.doc_date || null,
@@ -20013,6 +20119,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         paymentTerms: record.payment_terms || '',
         customerNotes: record.customer_notes || '',
         internalNotes: record.internal_notes || '',
+        // Delivery / Ship address (migration 257). A ship address that differs
+        // from the delivery address reopens with the switch on No.
+        deliveryAddress: record.delivery_address || '',
+        shipSameAsDelivery: siShipDiffers ? 'No' : 'Yes',
+        shipAddress: siShipDiffers ? siShipAddress : '',
         status: cap(record.status || 'draft')
       });
       this.entryLineRowsKey.set(this.config.key);
@@ -21280,6 +21391,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         payment_terms: v['paymentTerms'] || null,
         customer_notes: v['customerNotes'] || null,
         internal_notes: v['internalNotes'] || null,
+        // Delivery / Ship address (migration 257).
+        delivery_address: v['deliveryAddress'] || this.composeDcDeliveryAddress(v) || null,
+        ship_address: this.resolvedShipAddress(v) || null,
         status: status(v['status'], 'draft'),
         items
       };
@@ -21801,13 +21915,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         // reference figures captured at Purchase Invoice. Still recorded on the
         // invoice line, read from the product, so the document keeps a record
         // of what the prices were at the time of sale.
-        {
-          const priceProduct = this.lineRowProduct(row);
-          base['mrp'] = this.lineNumber(row, ['mrp'])
-            || this.productSalesPriceForLineUom(priceProduct, row, this.productMrp(priceProduct));
-          base['selling_price'] = this.lineNumber(row, ['selling price'])
-            || this.productSalesPriceForLineUom(priceProduct, row, this.productSellingPrice(priceProduct, row));
-        }
+        // Previous: fell back to the product master's MRP / Selling Price, so
+        // every Sales Invoice saved and printed them although the user never
+        // entered them. Only a value actually on the line is saved now.
+        // {
+        //   const priceProduct = this.lineRowProduct(row);
+        //   base['mrp'] = this.lineNumber(row, ['mrp'])
+        //     || this.productSalesPriceForLineUom(priceProduct, row, this.productMrp(priceProduct));
+        //   base['selling_price'] = this.lineNumber(row, ['selling price'])
+        //     || this.productSalesPriceForLineUom(priceProduct, row, this.productSellingPrice(priceProduct, row));
+        // }
+        base['mrp'] = this.lineNumber(row, ['mrp']);
+        base['selling_price'] = this.lineNumber(row, ['selling price']);
         base['batch_no'] = this.lineValue(row, ['batch']) || null;
         base['serial_no'] = this.lineValue(row, ['serial']) || null;
         base['expiry_date'] = this.lineValue(row, ['expiry']) || null;
@@ -22281,8 +22400,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       const attribute_value = piRefAttr?.attributeValue !== undefined ? piRefAttr.attributeValue : piResolvedAttr.attribute_value;
       const qty = this.purchaseInvoiceQtyForRow(row);
       const rate = this.lineNumber(row, ['rate']);
-      const mrp = this.lineNumber(row, ['mrp']);
-      const sellingPrice = this.lineNumber(row, ['selling price']);
+      // Previous: mrp / selling_price were read from the row even while their
+      // columns were hidden (cells pre-filled from the product / GRN), and a
+      // blank Selling Price fell back to MRP. Only a column the user has
+      // switched on is saved now; 0 is stored as NULL by sp_save_purchase_invoice
+      // and leaves the product master untouched.
+      const mrp = this.showPurchaseInvoiceMrpColumn() ? this.lineNumber(row, ['mrp']) : 0;
+      const sellingPrice = this.showPurchaseInvoiceSellingPriceColumn() ? this.lineNumber(row, ['selling price']) : 0;
       const discountPct = this.lineNumber(row, ['disc', 'discount']);
       const gstRate = this.transactionLineGstPercent(row);
       const taxPayload = this.transactionLineTaxPayload(row, index, qty, rate, discountPct, gstRate);
@@ -22301,7 +22425,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         qty,
         rate,
         mrp,
-        selling_price: sellingPrice || mrp,
+        // Previous: selling_price: sellingPrice || mrp,
+        selling_price: sellingPrice,
         discount_pct: discountPct,
         gst_rate: gstRate,
         gst_inclusive: taxPayload.gst_inclusive,
@@ -22818,6 +22943,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
     if (this.config?.key === 'categoryMaster') {
       if (!hasValue(payload['category_name'])) return 'Category name is required.';
+      if (!payload['serial_applicable']) return 'Serial No. Policy is mandatory. Set Serial No. Policy Applicable to Yes and select a policy.';
+      if (!hasValue(payload['serial_policy_name'])) return 'Select or add a Serial Number Policy.';
     }
 
     if (this.config?.key === 'variantMaster') {
@@ -22965,8 +23092,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       }
       if (this.config?.key === 'purchaseInvoice') {
         if (!hasValue(payload['vendor_name'])) return 'Vendor is required for Purchase Invoice.';
-        if (!hasValue(payload['pi_number'])) return 'Invoice no. is required for Purchase Invoice.';
-        if (!hasValue(payload['pi_date'])) return 'Invoice date is required for Purchase Invoice.';
+        // Previous: PI Number / PI Date were mandatory. PI Number is system-filled
+        // (read-only); Vendor Invoice No / Date below are the mandatory pair now.
+        // if (!hasValue(payload['pi_number'])) return 'Invoice no. is required for Purchase Invoice.';
+        // if (!hasValue(payload['pi_date'])) return 'Invoice date is required for Purchase Invoice.';
         // Required even when the PI references a GRN — a GRN can be receipted
         // before the vendor's own invoice arrives, but the PI itself always
         // represents that vendor invoice and must record its real number/date.
@@ -22998,6 +23127,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!hasValue(payload['base_uom_name']) && !hasValue(payload['base_uom_id'])) return 'Base UOM is mandatory.';
     if (!hasValue(payload['hsn_sac_code']) && !hasValue(payload['hsn_sac_id'])) return 'HSN/SAC tax classification is mandatory.';
     if (payload['gst_rate'] === null || payload['gst_rate'] === undefined || payload['gst_rate'] === '') return 'GST Rate is mandatory.';
+    // Tax Details: Tax Category is mandatory too (HSN/SAC and GST Rate above).
+    if (!hasValue(payload['tax_category'])) return 'Tax Category is mandatory.';
     if (this.categoryRequiresBatchPolicy() && !hasValue(payload['batch_policy_name'])) return 'Selected category requires Batch / Lot Policy.';
     if (this.categoryRequiresSerialPolicy() && !hasValue(payload['serial_policy_name'])) return 'Selected category requires Serial Number Policy.';
     const variantRows = payload['applicable_variants'] || [];

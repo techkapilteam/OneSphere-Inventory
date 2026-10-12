@@ -1248,8 +1248,11 @@
                   <td class="text-center">
                     <div class="inventory-row-actions">
                       @if (isAdmin()) {
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit"><i class="pi pi-pencil"></i></button>
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete"><i class="pi pi-trash"></i></button>
+                        <!-- Previous: <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit"><i class="pi pi-pencil"></i></button> -->
+                        <!-- Previous: <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete"><i class="pi pi-trash"></i></button> -->
+                        <!-- Saved master records are locked: Edit/Delete always disabled. -->
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" disabled><i class="pi pi-pencil"></i></button>
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" disabled><i class="pi pi-trash"></i></button>
                       }
                     </div>
                   </td>

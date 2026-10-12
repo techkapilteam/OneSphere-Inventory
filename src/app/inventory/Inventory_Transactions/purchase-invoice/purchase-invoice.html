@@ -51,6 +51,15 @@
         <div class="inventory-transaction-header">
           @if (transactionNumberField(); as numField) {
             <div class="erp-form-group">
+              <!-- Previous (PI Number marked mandatory):
+              <label class="erp-label">
+                {{ numField.label }}
+                @if (config.key === 'purchaseInvoice' && numField.key === 'piNo') {
+                  <span aria-hidden="true">*</span>
+                }
+              </label>
+              <input ... [attr.aria-required]="config.key === 'purchaseInvoice' && numField.key === 'piNo' ? 'true' : null" ... />
+              -->
               <label class="erp-label">{{ numField.label }}</label>
               <input class="erp-input" type="text"
                 readonly
@@ -61,6 +70,17 @@
           }
           @if (transactionDateField(); as dateField) {
             <div class="erp-form-group">
+              <!-- Previous (PI Date marked mandatory):
+              <label class="erp-label">
+                {{ dateField.label }}
+                @if (config.key === 'purchaseInvoice' && dateField.key === 'piDate') {
+                  <span aria-hidden="true">*</span>
+                }
+              </label>
+              <p-datepicker
+                [required]="config.key === 'purchaseInvoice' && dateField.key === 'piDate'"
+                [attr.aria-required]="config.key === 'purchaseInvoice' && dateField.key === 'piDate' ? 'true' : null" ... >
+              -->
               <label class="erp-label">{{ dateField.label }}</label>
               <div class="inventory-date-wrap">
                 <p-datepicker
@@ -138,7 +158,8 @@
       <div class="inventory-form-grid">
         @for (field of bodyDisplayFields(); track field.key) {
           <div class="erp-form-group" [class.span-2]="field.type === 'textarea'">
-            <label class="erp-label">{{ field.label }}</label>
+            <!-- Previous: <label class="erp-label">{{ field.label }}</label> -->
+            <label class="erp-label">{{ field.label }}@if (field.key === 'vendorInvoiceNo' || field.key === 'vendorInvoiceDate') { <span class="text-danger">*</span>}</label>
             <div class="inventory-field-with-add">
               @if (isStatusSwitchField(field) || isYesNoSwitchField(field)) {
                 <label class="inventory-labeled-switch" [class.status]="isStatusSwitchField(field)" [class.yes-no]="isYesNoSwitchField(field)">
@@ -545,10 +566,14 @@
                     <button type="button" class="erp-btn btn-white btn-icon btn-sm pr-expand-btn" title="Toggle Items" (click)="togglePurchaseInvoiceExpandedRow(row)">
                       <i class="pi" [class.pi-chevron-down]="isExpandedGrn(row)" [class.pi-chevron-right]="!isExpandedGrn(row)"></i>
                     </button>
+                    <!-- Previous (buttons hidden for Posted/Cancelled rows):
                     @if (canEditOrDeleteRow(row)) {
                       <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
                       <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" (click)="cancelRecordByRow(row)"><i class="pi pi-trash"></i></button>
-                    }
+                    } -->
+                    <!-- Saved transactions are read-only from this grid. -->
+                    <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" [disabled]="!canEditOrDeleteRow(row)" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
+                    <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" [disabled]="!canEditOrDeleteRow(row)" (click)="cancelRecordByRow(row)"><i class="pi pi-trash"></i></button>
                   </div>
                 </td>
                 @for (col of visibleRecordColumns(); track col.index) {

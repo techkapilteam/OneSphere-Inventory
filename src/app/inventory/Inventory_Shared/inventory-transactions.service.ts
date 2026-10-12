@@ -1823,6 +1823,9 @@ export class InventoryTransactionsService {
       // Lead By (Sales Invoice, migration 253).
       lead_by_contact_id: r?.leadByContactId ?? r?.lead_by_contact_id,
       lead_by_name: r?.leadByName || r?.lead_by_name,
+      // Delivery / Ship address (Sales Invoice, migration 257).
+      delivery_address: r?.deliveryAddress || r?.delivery_address,
+      ship_address: r?.shipAddress || r?.ship_address,
       place_of_supply: r?.placeOfSupply || r?.place_of_supply,
       warehouse_id: r?.warehouseId ?? r?.warehouse_id,
       warehouse_name: r?.warehouseName || r?.warehouse_name, payment_terms: r?.paymentTerms || r?.payment_terms,
