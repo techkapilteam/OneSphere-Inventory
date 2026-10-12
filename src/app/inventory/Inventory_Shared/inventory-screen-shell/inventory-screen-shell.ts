@@ -19982,6 +19982,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.txDocStatus.set(record.status || 'draft');
     this.txDocNumber.set(record.doc_number || '');
     this.hydrateLineSerialUnitsFromRecord(record);
+    // Sales Invoice draft: reload "+ Warranty" per serial (migration 258),
+    // same helper GRN/PI drafts use. Other sales documents don't carry it.
+    if (this.config?.key === 'salesInvoice') this.hydrateLineSerialWarrantyFromRecord(record);
 
     if (this.config?.key === 'estimation' || this.config?.key === 'proformaInvoice') {
       this.formValues.set({
