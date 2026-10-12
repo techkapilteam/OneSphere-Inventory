@@ -52,7 +52,7 @@
 
   <!-- Serial No. Policy Applicable -->
   <div class="erp-form-group">
-    <label class="erp-label">Serial No. Policy Applicable</label>
+    <label class="erp-label">Serial No. Policy Applicable <span class="text-danger">*</span></label>
     <label class="inventory-labeled-switch yes-no">
       <input type="checkbox" [checked]="serialApplicable()"
         (change)="setSerialApplicable($any($event.target).checked)" />
@@ -63,7 +63,7 @@
     </label>
     @if (serialApplicable()) {
       <div class="inventory-switch-reveal">
-        <label class="erp-label">Default Serial Number Policy</label>
+        <label class="erp-label">Default Serial Number Policy <span class="text-danger">*</span></label>
         <div class="inventory-field-with-add">
           <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
             [items]="localSerialPolicies()" [searchable]="true" [clearable]="true"

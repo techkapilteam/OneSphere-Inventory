@@ -2107,19 +2107,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         this.productSerialApplicable.set(false);
         this.collectFormField('serialPolicyName', null);
       }
-      // Batch / Lot from the category is disabled for now -- only Serial No.
-      // is carried over (and kept mandatory) from the category.
-      // if (cat.batch_applicable) {
-      //   this.productBatchApplicable.set(true);
-      //   if (cat.batch_policy_name) {
-      //     this.collectFormField('batchPolicyName', cat.batch_policy_name);
-      //   }
-      // } else {
-      //   this.productBatchApplicable.set(false);
-      //   this.collectFormField('batchPolicyName', null);
-      // }
-      // if (cat.serial_applicable || cat.batch_applicable) {
-      if (cat.serial_applicable) {
+      if (cat.batch_applicable) {
+        this.productBatchApplicable.set(true);
+        if (cat.batch_policy_name) {
+          this.collectFormField('batchPolicyName', cat.batch_policy_name);
+        }
+      } else {
+        this.productBatchApplicable.set(false);
+        this.collectFormField('batchPolicyName', null);
+      }
+      if (cat.serial_applicable || cat.batch_applicable) {
         this.productTrackingRequired.set(true);
       }
     }
@@ -6757,13 +6754,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   setProductBatchApplicable(required: boolean): void {
-    // Category no longer forces Batch / Lot on the product (disabled for now).
-    // if (!required && this.categoryRequiresBatchPolicy()) {
-    //   this.saveError.set('Selected category requires Batch / Lot Policy.');
-    //   this.productBatchApplicable.set(true);
-    //   this.productTrackingRequired.set(true);
-    //   return;
-    // }
+    if (!required && this.categoryRequiresBatchPolicy()) {
+      this.saveError.set('Selected category requires Batch / Lot Policy.');
+      this.productBatchApplicable.set(true);
+      this.productTrackingRequired.set(true);
+      return;
+    }
     this.productBatchApplicable.set(required);
     if (!required) this.collectFormField('batchPolicyName', null);
   }
@@ -6852,9 +6848,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   setProductTrackingRequired(required: boolean): void {
-    // Batch / Lot from the category disabled for now -- only Serial keeps tracking mandatory.
-    // if (!required && (this.categoryRequiresBatchPolicy() || this.categoryRequiresSerialPolicy())) {
-    if (!required && this.categoryRequiresSerialPolicy()) {
+    if (!required && (this.categoryRequiresBatchPolicy() || this.categoryRequiresSerialPolicy())) {
       this.saveError.set('Selected category has mandatory tracking policy.');
       this.productTrackingRequired.set(true);
       return;
@@ -22759,6 +22753,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
     if (this.config?.key === 'categoryMaster') {
       if (!hasValue(payload['category_name'])) return 'Category name is required.';
+      if (!payload['serial_applicable']) return 'Serial No. Policy is mandatory. Set Serial No. Policy Applicable to Yes and select a policy.';
+      if (!hasValue(payload['serial_policy_name'])) return 'Select or add a Serial Number Policy.';
     }
 
     if (this.config?.key === 'variantMaster') {
@@ -22939,8 +22935,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!hasValue(payload['base_uom_name']) && !hasValue(payload['base_uom_id'])) return 'Base UOM is mandatory.';
     if (!hasValue(payload['hsn_sac_code']) && !hasValue(payload['hsn_sac_id'])) return 'HSN/SAC tax classification is mandatory.';
     if (payload['gst_rate'] === null || payload['gst_rate'] === undefined || payload['gst_rate'] === '') return 'GST Rate is mandatory.';
-    // Batch / Lot from the category disabled for now -- Serial No. stays mandatory below.
-    // if (this.categoryRequiresBatchPolicy() && !hasValue(payload['batch_policy_name'])) return 'Selected category requires Batch / Lot Policy.';
+    if (this.categoryRequiresBatchPolicy() && !hasValue(payload['batch_policy_name'])) return 'Selected category requires Batch / Lot Policy.';
     if (this.categoryRequiresSerialPolicy() && !hasValue(payload['serial_policy_name'])) return 'Selected category requires Serial Number Policy.';
     const variantRows = payload['applicable_variants'] || [];
     if (this.productVariantRequired() && (!Array.isArray(variantRows) || !variantRows.length)) {
