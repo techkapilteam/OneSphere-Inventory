@@ -10019,6 +10019,27 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       }
       return next;
     });
+    // Picked serials and their per-serial warranty must move up with their
+    // rows too. Without this, deleting a row left every row below it showing
+    // (and saving) the previous row's serials/warranty on GRN, PI and SI.
+    this.lineSerialUnitsMap.update(map => {
+      const next: Record<number, string[]> = {};
+      for (const [key, val] of Object.entries(map)) {
+        const idx = Number(key);
+        if (idx < rowIndex) next[idx] = val;
+        else if (idx > rowIndex) next[idx - 1] = val;
+      }
+      return next;
+    });
+    this.lineSerialWarrantyMap.update(map => {
+      const next: Record<number, Record<string, SerialWarrantyEntry>> = {};
+      for (const [key, val] of Object.entries(map)) {
+        const idx = Number(key);
+        if (idx < rowIndex) next[idx] = val;
+        else if (idx > rowIndex) next[idx - 1] = val;
+      }
+      return next;
+    });
     this.entryLineRows.update(rows => {
       const nextRows = rows.filter((_, index) => index !== rowIndex);
       return nextRows.length ? nextRows : [this.blankLineRow()];
