@@ -144,14 +144,16 @@
                   </span>
                 </label>
               } @else if (field.key === 'returnToWarehouse') {
+                <!-- Previous: [items]="grnReceivingLocationGroups()" ... placeholder="Select Warehouse or Branch" (warehouses + branches) -->
+                <!-- Return To Branch: branches only, no warehouses. -->
                 <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
                   [class.inventory-control-readonly]="salesReturnLocationLocked()"
-                  [items]="grnReceivingLocationGroups()" bindLabel="label" bindValue="label" groupBy="group"
+                  [items]="salesReturnBranchOptions()" bindLabel="label" bindValue="label" groupBy="group"
                   [searchable]="!salesReturnLocationLocked()" [clearable]="!salesReturnLocationLocked()"
                   [readonly]="salesReturnLocationLocked()"
                   [ngModel]="formFieldValue(field)"
                   (ngModelChange)="collectFormField(field.key, $event)"
-                  placeholder="Select Warehouse or Branch">
+                  placeholder="Select Branch">
                   <ng-template ng-option-tmp let-item="item">
                     {{ item.label }}
                     @if (item.type === 'warehouse') { <span class="inventory-location-badge">WH</span> }
@@ -462,10 +464,14 @@
                     <button type="button" class="erp-btn btn-white btn-icon btn-sm pr-expand-btn" title="Toggle Items" (click)="toggleExpandGrn(row)">
                       <i class="pi" [class.pi-chevron-down]="isExpandedGrn(row)" [class.pi-chevron-right]="!isExpandedGrn(row)"></i>
                     </button>
+                    <!-- Previous (buttons hidden for Posted/Cancelled rows):
                     @if (canEditOrDeleteRow(row)) {
                       <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
                       <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" (click)="cancelRecordByRow(row)"><i class="pi pi-trash"></i></button>
-                    }
+                    } -->
+                    <!-- Saved transactions are read-only from this grid. -->
+                    <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" [disabled]="!canEditOrDeleteRow(row)" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
+                    <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" [disabled]="!canEditOrDeleteRow(row)" (click)="cancelRecordByRow(row)"><i class="pi pi-trash"></i></button>
                   </div>
                 </td>
                 @for (col of visibleRecordColumns(); track col.index) {

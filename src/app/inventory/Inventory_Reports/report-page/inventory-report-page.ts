@@ -289,6 +289,13 @@ export class InventoryReportPageComponent implements OnInit {
     return allowed.has('fromDate') || allowed.has('toDate');
   });
 
+  // Stock Summary shows From Date / To Date as two separate pickers instead of
+  // the single range picker; both still write the same fromDate/toDate filters.
+  readonly separateFromToDates = computed(() => this.report().key === 'stockSummary');
+
+  // Upper limit for the To Date picker (no future dates).
+  readonly todayDate = new Date();
+
   readonly activeLocationOption = computed<BranchWarehouseOption | null>(() => {
     const scope = this.reportLocationScope();
     if (scope.warehouseId) {

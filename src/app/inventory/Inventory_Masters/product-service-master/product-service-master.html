@@ -524,7 +524,8 @@
 
                 <!-- Category -->
                 <div class="erp-form-group">
-                  <label class="erp-label">Category</label>
+                  <!-- Previous: <label class="erp-label">Category</label> -->
+                  <label class="erp-label">Category <span class="text-danger">*</span></label>
                   <div class="inventory-field-with-add">
                     <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
                       [items]="categoryOptions" [searchable]="true" [clearable]="true"
@@ -697,7 +698,8 @@
               }
               <div class="inventory-form-grid inventory-config-grid">
                 <div class="erp-form-group">
-                  <label class="erp-label">HSN/SAC Code</label>
+                  <!-- Previous: <label class="erp-label">HSN/SAC Code</label> -->
+                  <label class="erp-label">HSN/SAC Code <span class="text-danger">*</span></label>
                   <div class="inventory-field-with-add">
                     <app-hsn-sac-picker
                       [code]="hsnSacCode()"
@@ -719,14 +721,16 @@
                     placeholder="Auto-fills when HSN code is selected" />
                 </div>
                 <div class="erp-form-group">
-                  <label class="erp-label">GST Rate</label>
+                  <!-- Previous: <label class="erp-label">GST Rate</label> -->
+                  <label class="erp-label">GST Rate <span class="text-danger">*</span></label>
                   <input class="erp-input" type="number" min="0" max="100" step="0.01"
                     [ngModel]="gstRate()"
                     (ngModelChange)="onGstRateChange($event)"
                     placeholder="GST %" />
                 </div>
                 <div class="erp-form-group">
-                  <label class="erp-label">Tax Category</label>
+                  <!-- Previous: <label class="erp-label">Tax Category</label> -->
+                  <label class="erp-label">Tax Category <span class="text-danger">*</span></label>
                   <div class="inventory-field-with-add">
                     <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
                       [items]="['GST 0%', 'GST 5%', 'GST 12%', 'GST 18%', 'GST 28%', 'Exempt']"
@@ -1979,8 +1983,11 @@
                   <td class="text-center">
                     <div class="inventory-row-actions">
                       @if (isAdmin()) {
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit"><i class="pi pi-pencil"></i></button>
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete"><i class="pi pi-trash"></i></button>
+                        <!-- Previous: <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit"><i class="pi pi-pencil"></i></button> -->
+                        <!-- Previous: <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete"><i class="pi pi-trash"></i></button> -->
+                        <!-- Saved master records are locked: Edit/Delete always disabled. -->
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" disabled><i class="pi pi-pencil"></i></button>
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" disabled><i class="pi pi-trash"></i></button>
                       }
                     </div>
                   </td>
