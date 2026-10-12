@@ -7443,6 +7443,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const customerState = String(customer?.state || this.partyPrimaryState(customer)
       || record.place_of_supply || record.placeOfSupply || '').trim();
     const warehouseName = String(record.warehouse_name || record.warehouseName || '');
+    const deliveryAddress = String(record.delivery_address || record.deliveryAddress || '').trim()
+      || this.partyFullAddress(customer);
     const bank = this.invoiceBankDetails();
     const columns = ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'];
     const rows = this.salesInvoiceDocumentRows(record);
@@ -7456,7 +7458,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['Due Date', this.gridDateDisplay(String(record.due_date || record.dueDate || ''))],
       ['Customer', customerName],
       ['Customer Phone', String(customer?.mobile || '')],
-      ['Customer Address', this.partyFullAddress(customer)],
+      // Previous: ['Customer Address', this.partyFullAddress(customer)],
+      // Delivery Address entered on the invoice (customer master address when
+      // none was entered); Ship Address falls back to the delivery address.
+      ['Delivery Address', deliveryAddress || '-'],
+      ['Ship Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
       ['State', customerState || '-'],
       ['GSTIN No', customerGstin || '-'],
       ['Place of Supply', String(record.place_of_supply || record.placeOfSupply || '')],
@@ -15819,9 +15825,33 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.formValues.update(v => ({
         ...v,
         deliveryHouseNo: '', deliveryStreet: '', deliveryState: '',
-        deliveryDistrict: '', deliveryCity: '', deliveryPincode: '', deliveryAddress: ''
+        deliveryDistrict: '', deliveryCity: '', deliveryPincode: '', deliveryAddress: '',
+        shipSameAsDelivery: 'Yes', shipAddress: ''
       }));
     }
+  }
+
+  // Sales Invoice: "Ship Address same as Full Delivery Address" switch inside
+  // the Delivery Address section. Yes (the default) ships to the delivery
+  // address; No shows a separate Ship Address box.
+  shipSameAsDelivery(): boolean {
+    return this.formValues()['shipSameAsDelivery'] !== 'No';
+  }
+
+  toggleShipSameAsDelivery(checked: boolean): void {
+    this.formValues.update(v => ({
+      ...v,
+      shipSameAsDelivery: checked ? 'Yes' : 'No',
+      shipAddress: checked ? '' : (v['shipAddress'] || '')
+    }));
+  }
+
+  // Ship address to save/print: the typed Ship Address when the switch is No,
+  // otherwise the delivery address.
+  private resolvedShipAddress(v: Record<string, any> = this.formValues()): string {
+    const delivery = String(v['deliveryAddress'] || this.composeDcDeliveryAddress(v) || '').trim();
+    if (v['shipSameAsDelivery'] === 'No') return String(v['shipAddress'] || '').trim() || delivery;
+    return delivery;
   }
 
   // ── Transport Details (shared across every goods-moving transaction screen) ──
@@ -19916,6 +19946,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
 
     if (this.config?.key === 'salesInvoice') {
+      const siShipAddress = String(record.ship_address || '').trim();
+      const siShipDiffers = !!siShipAddress && siShipAddress !== String(record.delivery_address || '').trim();
       this.formValues.set({
         invoiceNo: record.doc_number || '',
         invoiceDate: record.doc_date || null,
@@ -19956,6 +19988,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         paymentTerms: record.payment_terms || '',
         customerNotes: record.customer_notes || '',
         internalNotes: record.internal_notes || '',
+        // Delivery / Ship address (migration 257). A ship address that differs
+        // from the delivery address reopens with the switch on No.
+        deliveryAddress: record.delivery_address || '',
+        shipSameAsDelivery: siShipDiffers ? 'No' : 'Yes',
+        shipAddress: siShipDiffers ? siShipAddress : '',
         status: cap(record.status || 'draft')
       });
       this.entryLineRowsKey.set(this.config.key);
@@ -21223,6 +21260,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         payment_terms: v['paymentTerms'] || null,
         customer_notes: v['customerNotes'] || null,
         internal_notes: v['internalNotes'] || null,
+        // Delivery / Ship address (migration 257).
+        delivery_address: v['deliveryAddress'] || this.composeDcDeliveryAddress(v) || null,
+        ship_address: this.resolvedShipAddress(v) || null,
         status: status(v['status'], 'draft'),
         items
       };
@@ -22761,6 +22801,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
     if (this.config?.key === 'categoryMaster') {
       if (!hasValue(payload['category_name'])) return 'Category name is required.';
+      if (!payload['serial_applicable']) return 'Serial No. Policy is mandatory. Set Serial No. Policy Applicable to Yes and select a policy.';
+      if (!hasValue(payload['serial_policy_name'])) return 'Select or add a Serial Number Policy.';
     }
 
     if (this.config?.key === 'variantMaster') {

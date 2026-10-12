@@ -1173,14 +1173,14 @@
                   }
                 </div>
                 <div class="erp-form-group">
-                  <label class="erp-label">Serial Number Applicable</label>
+                  <label class="erp-label">Serial Number Applicable @if (categoryRequiresSerialPolicy()) {<span class="text-danger">*</span>}</label>
                   <label class="inventory-labeled-switch yes-no">
                     <input type="checkbox" [checked]="productSerialApplicable()" (change)="setProductSerialApplicable($any($event.target).checked)" />
                     <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
                   </label>
                   @if (productSerialApplicable()) {
                   <div class="mt-2">
-                    <label class="erp-label">Serial Number Policy</label>
+                    <label class="erp-label">Serial Number Policy <span class="text-danger">*</span></label>
                     <div class="inventory-field-with-add">
                   <ng-select class="erp-ng-select inventory-ng-select" appendTo="body" [items]="serialPolicyOptions" [searchable]="true" [clearable]="true" [ngModel]="formValues()['serialPolicyName'] || null" (ngModelChange)="onSerialPolicyChange($event)" placeholder="Select Serial Policy"></ng-select>
                       <button type="button" class="erp-btn btn-white btn-icon" title="Add Serial Number Policy" (click)="openAddMaster('Serial Number Policy', 'serialPolicyName')"><i class="pi pi-plus"></i></button>
