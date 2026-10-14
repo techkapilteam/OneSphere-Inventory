@@ -2095,7 +2095,7 @@ export const productionPlanningConfig = transaction(
       { key: 'productionDate', label: 'Production Date', type: 'date' },
       { key: 'finishedProduct', label: 'Finished Product', type: 'select', options: INVENTORY_OPTIONS.products, addMaster: 'Product / Service' },
       { key: 'plannedQty', label: 'Planned Qty', type: 'number' },
-      { key: 'bomVersion', label: 'BOM Version', type: 'select', options: ['V1', 'V2', 'V3', 'Latest'], addMaster: 'BOM' },
+      { key: 'bomVersion', label: 'BOM Version', type: 'select', options: [], addMaster: 'BOM' },
       { key: 'warehouse', label: 'Production Warehouse / Branch', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
       { key: 'remarks', label: 'Remarks', type: 'textarea' }
     ],

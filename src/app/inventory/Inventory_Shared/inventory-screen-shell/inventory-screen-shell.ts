@@ -8734,8 +8734,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return options;
   }
 
-  private bomVersionOptionsFromMaster(): string[] {
+  // BOM Version options = versions saved in BOM Master for the selected Finished Product only.
+  private bomVersionOptionsFromMaster(finishedProduct: any = this.formValues()['finishedProduct']): string[] {
+    const finishedKey = this.normalizeKey(String(finishedProduct || '').trim());
+    if (!finishedKey) return [];
     return this.productionPlanningBomRecords()
+      .filter(record => this.normalizeKey(record.finishedProduct) === finishedKey)
       .map(record => record.version)
       .filter(Boolean);
   }
@@ -15724,6 +15728,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       }
       if (this.config?.kind === 'transaction' && this.isSalesTransactionKey(this.config?.key || '')) {
         this.applySalesTransactionPaymentDefaults(next, key);
+      }
+      if (this.config?.key === 'productionPlanning' && key === 'finishedProduct' && next['bomVersion']
+        && !this.bomVersionOptionsFromMaster(normalizedValue).some(version => this.optionEquals(version, next['bomVersion']))) {
+        next['bomVersion'] = '';
       }
       return next;
     });
