@@ -2096,21 +2096,20 @@ export const productionPlanningConfig = transaction(
       { key: 'finishedProduct', label: 'Finished Product', type: 'select', options: INVENTORY_OPTIONS.products, addMaster: 'Product / Service' },
       { key: 'plannedQty', label: 'Planned Qty', type: 'number' },
       { key: 'bomVersion', label: 'BOM Version', type: 'select', options: ['V1', 'V2', 'V3', 'Latest'], addMaster: 'BOM' },
-      { key: 'workCenter', label: 'Work Center', type: 'select', options: ['Assembly Line', 'Quality Check', 'Kitchen Station'], addMaster: 'Work Center' },
       { key: 'warehouse', label: 'Production Warehouse / Branch', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
       { key: 'remarks', label: 'Remarks', type: 'textarea' }
     ],
     lineTitle: 'Raw Material Requirement Grid',
-    lineColumns: ['Raw Material', 'Variant', 'Attribute', 'UOM', 'Required Qty', 'Available Qty', 'Shortage', 'Batch Req'],
+    lineColumns: ['Raw Material', 'Variant', 'Attribute', 'UOM', 'Required Qty'],
     lineRows: [
-      ['Drone Motor', '', '', 'Nos', '48', '620', '0', 'Yes'],
-      ['Flight Controller', '', '', 'Nos', '12', '86', '0', 'No'],
-      ['Battery Pack', '', '', 'Nos', '12', '55', '0', 'Yes']
+      ['Drone Motor', '', '', 'Nos', '48'],
+      ['Flight Controller', '', '', 'Nos', '12'],
+      ['Battery Pack', '', '', 'Nos', '12']
     ],
-    columns: ['Plan No', 'Plan Date', 'Finished Product', 'Planned Qty', 'Work Center', 'Status'],
+    columns: ['Plan No', 'Plan Date', 'Finished Product', 'Planned Qty', 'Status'],
     rows: [
-      ['PP-001', '08-May-2026', 'Drone Motor', '12 Sets', 'Assembly Line', 'In Progress'],
-      ['PP-002', '07-May-2026', 'Paneer Tikka', '50 Plates', 'Kitchen Station', 'Completed']
+      ['PP-001', '08-May-2026', 'Drone Motor', '12 Sets', 'In Progress'],
+      ['PP-002', '07-May-2026', 'Paneer Tikka', '50 Plates', 'Completed']
     ]
   }
 );

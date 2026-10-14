@@ -23583,7 +23583,6 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           r.plan_date || r.planDate || '',
           r.finished_product_name || r.finishedProductName || '',
           String(r.planned_qty ?? r.plannedQty ?? 0),
-          r.work_center || r.workCenter || '',
           cap(r.status || 'draft')
         ]);
       case 'materialIssueProduction':
