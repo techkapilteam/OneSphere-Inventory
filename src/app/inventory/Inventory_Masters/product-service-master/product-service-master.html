@@ -589,16 +589,14 @@
                 }
 
                 @if (rawMaterialBehaviorVisible()) {
-                <div class="erp-form-group span-2">
+                <div class="erp-form-group">
                   <label class="erp-label">Raw Material Sale</label>
-                  <div class="inventory-access-grid">
-                    <label class="inventory-access-option">
-                      <input type="checkbox"
-                        [checked]="rawMaterialCanSaleChecked()"
-                        (change)="setRawMaterialCanSale($any($event.target).checked)" />
-                      <span>Can sale</span>
-                    </label>
-                  </div>
+                  <label style="display:flex;align-items:center;gap:8px;height:38px;white-space:nowrap;cursor:pointer;">
+                    <input type="checkbox" style="margin:0;"
+                      [checked]="rawMaterialCanSaleChecked()"
+                      (change)="setRawMaterialCanSale($any($event.target).checked)" />
+                    <span>Can sale</span>
+                  </label>
                 </div>
                 }
 
@@ -628,8 +626,8 @@
                 </div>
                 }
 
-                <!-- SKU -->
-                <div class="erp-form-group">
+                <!-- SKU (starts a new row next to Base UOM when Raw Material Sale is shown) -->
+                <div class="erp-form-group" [style.grid-column-start]="rawMaterialBehaviorVisible() ? 1 : null">
                   <label class="erp-label">SKU
                   </label>
                   <input class="erp-input" type="text"
