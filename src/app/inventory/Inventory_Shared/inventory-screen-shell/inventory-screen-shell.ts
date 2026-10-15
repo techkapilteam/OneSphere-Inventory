@@ -16440,12 +16440,32 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // be a plain method re-running mapToGridRows()/segmentFilteredRecords()
   // on every change-detection pass across the whole app, since this shell
   // has no OnPush and every unrelated click/keystroke retriggers it).
+  // Previous version (rows kept the API order — Product Master came back A–Z
+  // by product_name, so a newly saved product could land on any page):
+  //
+  // private readonly _stableLiveRows = computed((): string[][] => {
+  //   if (this.isApiWired()) {
+  //     return this.mapToGridRows(this.segmentFilteredRecords(this.savedRecordObjects()));
+  //   }
+  //   return this.config?.kind === 'transaction' ? [] : (this.config?.rows || []);
+  // });
+
   private readonly _stableLiveRows = computed((): string[][] => {
     if (this.isApiWired()) {
-      return this.mapToGridRows(this.segmentFilteredRecords(this.savedRecordObjects()));
+      return this.mapToGridRows(this.newestFirstRecords(this.segmentFilteredRecords(this.savedRecordObjects())));
     }
     return this.config?.kind === 'transaction' ? [] : (this.config?.rows || []);
   });
+
+  // Product Master's saved-records grid shows the most recently created
+  // product first (highest id on top). Only this grid: sp_get_products still
+  // returns A–Z because every product dropdown in the app reads it. Row
+  // clicks resolve by product_code (findRecordByRow), not position, so the
+  // reorder is safe; a column-header click still re-sorts as before.
+  private newestFirstRecords(records: any[]): any[] {
+    if (this.config?.key !== 'productServiceMaster') return records;
+    return [...records].sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0));
+  }
 
   // Old version, kept for reference (plain method, rebuilt the array from
   // scratch on every call instead of caching):
@@ -22977,8 +22997,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
     if (this.config?.key === 'categoryMaster') {
       if (!hasValue(payload['category_name'])) return 'Category name is required.';
-      if (!payload['serial_applicable']) return 'Serial No. Policy is mandatory. Set Serial No. Policy Applicable to Yes and select a policy.';
-      if (!hasValue(payload['serial_policy_name'])) return 'Select or add a Serial Number Policy.';
+      // Previous (Serial No. Policy forced on every category):
+      // if (!payload['serial_applicable']) return 'Serial No. Policy is mandatory. Set Serial No. Policy Applicable to Yes and select a policy.';
+      // if (!hasValue(payload['serial_policy_name'])) return 'Select or add a Serial Number Policy.';
+      // Serial is optional now; a policy is only required when it is switched on.
+      if (payload['serial_applicable'] && !hasValue(payload['serial_policy_name'])) return 'Select or add a Serial Number Policy.';
     }
 
     if (this.config?.key === 'variantMaster') {

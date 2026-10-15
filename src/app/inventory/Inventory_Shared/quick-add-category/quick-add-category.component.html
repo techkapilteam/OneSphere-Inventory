@@ -52,7 +52,8 @@
 
   <!-- Serial No. Policy Applicable -->
   <div class="erp-form-group">
-    <label class="erp-label">Serial No. Policy Applicable <span class="text-danger">*</span></label>
+    <!-- Previous: <label class="erp-label">Serial No. Policy Applicable <span class="text-danger">*</span></label> -->
+    <label class="erp-label">Serial No. Policy Applicable</label>
     <label class="inventory-labeled-switch yes-no">
       <input type="checkbox" [checked]="serialApplicable()"
         (change)="setSerialApplicable($any($event.target).checked)" />

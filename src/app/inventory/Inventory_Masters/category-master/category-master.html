@@ -404,7 +404,8 @@
               <div class="inventory-fieldset-title">Category Default Policies</div>
               <div class="inventory-form-grid inventory-config-grid">
                 <div class="erp-form-group">
-                  <label class="erp-label">Serial No. Policy Applicable <span class="text-danger">*</span></label>
+                  <!-- Previous: <label class="erp-label">Serial No. Policy Applicable <span class="text-danger">*</span></label> -->
+                  <label class="erp-label">Serial No. Policy Applicable</label>
                   <label class="inventory-labeled-switch yes-no">
                     <input type="checkbox" [checked]="categorySerialApplicable()" (change)="setCategorySerialApplicable($any($event.target).checked)" />
                     <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
