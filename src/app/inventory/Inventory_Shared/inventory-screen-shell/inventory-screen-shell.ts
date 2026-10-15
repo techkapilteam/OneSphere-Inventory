@@ -8734,8 +8734,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return options;
   }
 
-  private bomVersionOptionsFromMaster(): string[] {
+  // BOM Version options = versions saved in BOM Master for the selected Finished Product only.
+  private bomVersionOptionsFromMaster(finishedProduct: any = this.formValues()['finishedProduct']): string[] {
+    const finishedKey = this.normalizeKey(String(finishedProduct || '').trim());
+    if (!finishedKey) return [];
     return this.productionPlanningBomRecords()
+      .filter(record => this.normalizeKey(record.finishedProduct) === finishedKey)
       .map(record => record.version)
       .filter(Boolean);
   }
@@ -9884,6 +9888,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // Purchase Return against a posted PI only: until a PI is picked there is
     // nothing to return, so the (blank) grid stays read-only.
     if (this.config?.key === 'purchaseReturn' && !this.formValues()['piId']) {
+      return true;
+    }
+    // Same for Sales Return against a posted Sales Invoice only: no Product
+    // selection on open -- rows bind only from the picked Invoice Reference.
+    if (this.config?.key === 'salesReturn' && !this.formValues()['invoiceId']) {
       return true;
     }
     if ((this.config?.key === 'purchaseReturn' || this.config?.key === 'salesReturn') && this.lineRefItemIdMap()[rowIndex]) {
@@ -15724,6 +15733,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       }
       if (this.config?.kind === 'transaction' && this.isSalesTransactionKey(this.config?.key || '')) {
         this.applySalesTransactionPaymentDefaults(next, key);
+      }
+      if (this.config?.key === 'productionPlanning' && key === 'finishedProduct' && next['bomVersion']
+        && !this.bomVersionOptionsFromMaster(normalizedValue).some(version => this.optionEquals(version, next['bomVersion']))) {
+        next['bomVersion'] = '';
       }
       return next;
     });
@@ -23583,7 +23596,6 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           r.plan_date || r.planDate || '',
           r.finished_product_name || r.finishedProductName || '',
           String(r.planned_qty ?? r.plannedQty ?? 0),
-          r.work_center || r.workCenter || '',
           cap(r.status || 'draft')
         ]);
       case 'materialIssueProduction':
