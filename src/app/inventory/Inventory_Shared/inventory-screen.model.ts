@@ -2083,7 +2083,8 @@ export const productionPlanningConfig = transaction(
   'pi pi-calendar-plus',
   [
     { name: 'BOM Master', status: 'Ready' },
-    { name: 'Work Center Master', status: 'Ready' },
+    // Hidden: Work Center removed from Production Planning
+    // { name: 'Work Center Master', status: 'Ready' },
     { name: 'Raw Material Stock', status: 'Pending Setup' }
   ],
   'Production plan drives material issue, production entry and finished goods stock.',
@@ -2096,7 +2097,8 @@ export const productionPlanningConfig = transaction(
       { key: 'finishedProduct', label: 'Finished Product', type: 'select', options: INVENTORY_OPTIONS.products, addMaster: 'Product / Service' },
       { key: 'plannedQty', label: 'Planned Qty', type: 'number' },
       { key: 'bomVersion', label: 'BOM Version', type: 'select', options: ['V1', 'V2', 'V3', 'Latest'], addMaster: 'BOM' },
-      { key: 'workCenter', label: 'Work Center', type: 'select', options: ['Assembly Line', 'Quality Check', 'Kitchen Station'], addMaster: 'Work Center' },
+      // Hidden: Work Center not used in Production Planning (optional on save, sends null)
+      // { key: 'workCenter', label: 'Work Center', type: 'select', options: ['Assembly Line', 'Quality Check', 'Kitchen Station'], addMaster: 'Work Center' },
       { key: 'warehouse', label: 'Production Warehouse / Branch', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
       { key: 'remarks', label: 'Remarks', type: 'textarea' }
     ],
