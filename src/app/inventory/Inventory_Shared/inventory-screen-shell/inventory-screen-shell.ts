@@ -9890,6 +9890,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (this.config?.key === 'purchaseReturn' && !this.formValues()['piId']) {
       return true;
     }
+    // Same for Sales Return against a posted Sales Invoice only: no Product
+    // selection on open -- rows bind only from the picked Invoice Reference.
+    if (this.config?.key === 'salesReturn' && !this.formValues()['invoiceId']) {
+      return true;
+    }
     if ((this.config?.key === 'purchaseReturn' || this.config?.key === 'salesReturn') && this.lineRefItemIdMap()[rowIndex]) {
       // Once a return line is populated from a picked PI/Sales Invoice
       // reference (selectPurchaseReference/selectSalesReference both stamp
