@@ -16958,8 +16958,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // returns A–Z because every product dropdown in the app reads it. Row
   // clicks resolve by product_code (findRecordByRow), not position, so the
   // reorder is safe; a column-header click still re-sorts as before.
+  // Category Master follows the same rule (rows resolve by category_code).
   private newestFirstRecords(records: any[]): any[] {
-    if (this.config?.key !== 'productServiceMaster') return records;
+    const key = this.config?.key;
+    if (key !== 'productServiceMaster' && key !== 'categoryMaster') return records;
     return [...records].sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0));
   }
 
