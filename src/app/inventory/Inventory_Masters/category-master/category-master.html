@@ -425,15 +425,50 @@
                     <!-- UIN: government registration number per serial (e.g. drones). Only with serial tracking. -->
                     <div class="inventory-switch-reveal">
                       <label class="erp-label">UIN Required</label>
-                      <label class="inventory-labeled-switch yes-no">
-                        <input type="checkbox"
-                          [checked]="formValues()['uinRequired'] === true"
-                          (change)="collectFormField('uinRequired', $any($event.target).checked)" />
-                        <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
-                      </label>
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <label class="inventory-labeled-switch yes-no">
+                          <input type="checkbox"
+                            [checked]="formValues()['uinRequired'] === true"
+                            (change)="collectFormField('uinRequired', $any($event.target).checked)" />
+                          <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
+                        </label>
+                        <button type="button" class="erp-btn btn-white btn-icon" title="UIN Required Guide"
+                          [class.active]="uinGuideVisible()"
+                          (click)="uinGuideVisible.set(!uinGuideVisible())">
+                          <i class="pi pi-info-circle"></i>
+                        </button>
+                      </div>
+                      <!-- Previous: always-visible hint, now shown only via the (i) guide toggle.
                       <div class="inventory-optional-hint">
                         Yes = each serial must get a UIN (Manufacturing &gt; UIN Registration) before it can be sold.
-                      </div>
+                      </div> -->
+                      @if (uinGuideVisible()) {
+                        <div class="product-nature-guide" style="margin-top:8px;">
+                          <div class="product-nature-guide-title">
+                            <div>
+                              <strong>UIN Required Guide</strong>
+                            </div>
+                            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Close"
+                              (click)="uinGuideVisible.set(false)">
+                              <i class="pi pi-times"></i>
+                            </button>
+                          </div>
+                          <div class="product-nature-guide-list" style="grid-template-columns:1fr;">
+                            <div class="product-nature-guide-item" style="grid-template-columns:1fr;" [class.active]="formValues()['uinRequired'] === true">
+                              <div class="product-nature-guide-main">
+                                <strong>Yes</strong>
+                                <span>Each serial must get a UIN (Manufacturing &gt; UIN Registration) before it can be sold.</span>
+                              </div>
+                            </div>
+                            <div class="product-nature-guide-item" style="grid-template-columns:1fr;" [class.active]="formValues()['uinRequired'] !== true">
+                              <div class="product-nature-guide-main">
+                                <strong>No</strong>
+                                <span>No UIN registration needed; serials can be sold directly.</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      }
                     </div>
                   }
                 </div>

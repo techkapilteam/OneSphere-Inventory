@@ -670,7 +670,7 @@
               <input class="erp-input" type="text" [ngModel]="host.formValues()['quickSerialFormat']" (ngModelChange)="host.collectFormField('quickSerialFormat', $event)" placeholder="Free-text reference note, e.g. 15-digit IMEI" />
             </div>
             <div class="erp-form-group">
-              <label class="erp-label">Capture Stage</label>
+              <label class="erp-label">Capture Stage <span class="text-danger">*</span></label>
               <ng-select class="erp-ng-select inventory-ng-select" appendTo="body" [items]="['Purchase Inward', 'Sales Invoice', 'Both Inward and Sale', 'Warranty Registration']" [searchable]="true" [clearable]="true" [ngModel]="host.formValues()['quickCaptureStage']" (ngModelChange)="host.collectFormField('quickCaptureStage', $event)" placeholder="Select Stage"></ng-select>
             </div>
           </div>
