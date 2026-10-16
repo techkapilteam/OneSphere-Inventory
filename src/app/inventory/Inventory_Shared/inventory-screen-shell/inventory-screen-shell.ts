@@ -8,7 +8,7 @@ import { DatePickerModule } from 'primeng/datepicker';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Observable, Subject, catchError, concatMap, debounceTime, distinctUntilChanged, forkJoin, from, map, of, switchMap, tap } from 'rxjs';
 import { ApiResponse, AttributeItem, BomItem, BomLineItem, PriceListItem, WorkCenterItem, AttributeValueItem, BranchInvItem, CategoryItem, ChannelPartnerItem, ContactItem, CustomerItem, GstRateGuide, HsnSacItem, InventoryConfigService, PaymentTermItem, ProductApplicableVariant, ProductBundleItem, ProductItem, ProductTypeItem, ProductUomConversion, ProductVariantStockAttribute, ProductVariantStockControl, SegmentItem, SerialPolicyItem, TaxCodeSuggestion, UomItem, VariantCombinationRow, VariantItem, VendorItem, WarehouseItem } from '../inventory-config.service';
-import { AvailableStock, InventoryTransactionsService, PurchaseRefDoc, ServiceBundleConsumption, TransportDetails } from '../inventory-transactions.service';
+import { AvailableStock, InventoryTransactionsService, PurchaseRefDoc, ServiceBundleConsumption, TransportDetails,UinRegistrationRow, UinRegistrationSaveItem } from '../inventory-transactions.service';
 import { applyInventoryTextCase, inventoryTextCaseForField, inventoryTextCaseForLineColumn, toInventoryTitleCase } from '../inventory-text-case.util';
 import { InventoryExportService } from '../inventory-export.service';
 import { InvoiceBankDetails, PaymentsService } from '../payments.service';
@@ -104,8 +104,30 @@ interface ManufacturingBomRecord {
   quantityPerUnit: number;
   wastagePercent: number;
   productionCost: number;
+  materials: Array<{ productName: string; quantity: number }>;
   status: string;
 }
+
+// BOM Master: one raw-material line = what is needed for ONE finished unit.
+// Wastage is recorded only; it does not increase the quantity.
+export interface BomMaterialLine {
+  productId: number | null;
+  productName: string;
+  uomId: number | null;
+  uomName: string;
+  quantity: number;
+  wastagePercent: number;
+}
+
+const NO_BOM_LINES: BomMaterialLine[] = [];
+// UIN Registration: what the user typed on a row (not saved yet)
+interface UinDraft {
+  uin_number: string;
+  uin_date: string;          // yyyy-MM-dd
+  uin_certificate_no: string;
+}
+type UinField = keyof UinDraft;
+
 
 interface GlobalContactOption {
   id?: number;
@@ -271,9 +293,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private readonly activatedRoute = inject(ActivatedRoute, { optional: true });
 
   // ── Reference picker ─────────────────────────────────────────────────────
-  readonly refPickerOpen  = signal(false);
-  readonly refPickerType  = signal('');
-  readonly refPickerDocs  = signal<PurchaseRefDoc[]>([]);
+  readonly refPickerOpen = signal(false);
+  readonly refPickerType = signal('');
+  readonly refPickerDocs = signal<PurchaseRefDoc[]>([]);
   readonly refPickerSearch = signal('');
   readonly refPickerLoading = signal(false);
   // Drill-down row in the reference-picker tray (Purchase Return's "Posted
@@ -286,12 +308,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private transactionReferenceOptionsCacheKey = '';
   private transactionReferenceOptionsCache: string[] = [];
   private readonly purchaseInvoiceReservedGrnRefKeys = new Set<string>();
-  readonly txDocId        = signal<number | null>(null);
-  readonly txDocNumber    = signal('');
-  readonly txDocStatus    = signal('draft');
-  readonly txSaving       = signal(false);
-  readonly txSaveMsg      = signal('');
-  readonly txSaveError    = signal('');
+  readonly txDocId = signal<number | null>(null);
+  readonly txDocNumber = signal('');
+  readonly txDocStatus = signal('draft');
+  readonly txSaving = signal(false);
+  readonly txSaveMsg = signal('');
+  readonly txSaveError = signal('');
   readonly bundleConsumptionOpen = signal(false);
   readonly bundleConsumptionInvoiceId = signal<number | null>(null);
   readonly bundleConsumptionInvoiceNo = signal('');
@@ -448,10 +470,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   readonly isBatchSaving = signal(false);
   readonly isAdmin = signal(false);
 
-  readonly quickAddName       = signal('');
-  readonly quickAddCode       = signal('');
-  readonly isSavingQuickAdd   = signal(false);
-  readonly quickAddError      = signal('');
+  readonly quickAddName = signal('');
+  readonly quickAddCode = signal('');
+  readonly isSavingQuickAdd = signal(false);
+  readonly quickAddError = signal('');
   readonly addMasterSourceFieldKey = signal<string | null>(null);
   private readonly inlineManufacturingFieldOptions = signal<Record<string, string[]>>({});
   private readonly inlineManufacturingOptionsCache = new Map<string, { signature: string; options: string[] }>();
@@ -460,7 +482,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // from hsnSacCode/gstRate (the product form's own tax fields) so opening
   // this popup while a product already has an HSN code selected doesn't
   // clobber that selection before the popup is saved or cancelled.
-  readonly quickAddHsnType    = signal<'HSN' | 'SAC'>('HSN');
+  readonly quickAddHsnType = signal<'HSN' | 'SAC'>('HSN');
   readonly quickAddHsnGstRate = signal<number | null>(null);
 
   // Suggestions shown when typing in quick-add Name fields to prevent duplicates
@@ -472,16 +494,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     switch (master) {
       // Company-wide list (not segment-scoped) — matches what sp_upsert_uom actually checks,
       // so the warning shows even when this segment's own UOM list is still empty.
-      case 'UOM':                  pool = this.loadedUomObjects().map(u => u.uom_name).filter((n): n is string => !!n); break;
-      case 'Category':             pool = this.categoryOptions; break;
-      case 'Variant':              pool = this.variantOptions; break;
-      case 'Attribute':            pool = this.attributeOptions; break;
-      case 'Brand':                pool = this.brandOptions; break;
+      case 'UOM': pool = this.loadedUomObjects().map(u => u.uom_name).filter((n): n is string => !!n); break;
+      case 'Category': pool = this.categoryOptions; break;
+      case 'Variant': pool = this.variantOptions; break;
+      case 'Attribute': pool = this.attributeOptions; break;
+      case 'Brand': pool = this.brandOptions; break;
       case 'Serial Number Policy': pool = this.serialPolicyOptions; break;
-      case 'Batch / Lot Policy':   pool = this.batchPolicyOptions; break;
-      case 'Product Type':         pool = this.productTypeOptions; break;
-      case 'Manufacturer':         pool = this.manufacturerOptions; break;
-      case 'Tax Category':         pool = this.taxCategoryOptions; break;
+      case 'Batch / Lot Policy': pool = this.batchPolicyOptions; break;
+      case 'Product Type': pool = this.productTypeOptions; break;
+      case 'Manufacturer': pool = this.manufacturerOptions; break;
+      case 'Tax Category': pool = this.taxCategoryOptions; break;
       default: return [];
     }
     return pool.filter(opt => opt.toLowerCase().includes(input)).slice(0, 8);
@@ -492,16 +514,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!input) return false;
     return this.quickAddSuggestions().some(opt => opt.toLowerCase() === input);
   });
-  readonly productCodeIsAuto  = signal(false);
-  readonly skuIsAuto          = signal(false);
+  readonly productCodeIsAuto = signal(false);
+  readonly skuIsAuto = signal(false);
   private _quickAddCodeManuallySet = false;
-  readonly quickAddUomSymbol     = signal('');
-  readonly quickAddUomType       = signal('Base');
-  readonly quickAddParentMaster  = signal('');
-  readonly quickAddParentName    = signal('');
-  readonly quickAddParentCode    = signal('');
-  readonly quickAddVariantRows   = signal<Array<{name: string; value: any}>>([{name: '', value: ''}]);
-  private _autoCodeFields        = new Set<string>();
+  readonly quickAddUomSymbol = signal('');
+  readonly quickAddUomType = signal('Base');
+  readonly quickAddParentMaster = signal('');
+  readonly quickAddParentName = signal('');
+  readonly quickAddParentCode = signal('');
+  readonly quickAddVariantRows = signal<Array<{ name: string; value: any }>>([{ name: '', value: '' }]);
+  private _autoCodeFields = new Set<string>();
 
   readonly kpis = INVENTORY_KPIS;
   private readonly segmentCardList = signal<InventorySegment[]>([]);
@@ -1419,7 +1441,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: res => this.loadedContactObjects.set(res.data ?? []),
-        error: () => {}
+        error: () => { }
       });
   }
 
@@ -1446,7 +1468,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: res => this.loadedGlobalMstContacts.set(res.data ?? []),
-        error: () => {} // legacy schema may be absent in some environments — fail quiet, keep inv_contacts working
+        error: () => { } // legacy schema may be absent in some environments — fail quiet, keep inv_contacts working
       });
   }
 
@@ -1628,6 +1650,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (this.config?.key === 'productServiceMaster' || this.config?.key === 'hsnSacMapping') {
       this.loadTaxCodeSourceStatus();
       this.loadGstGuide();
+    }
+    // UIN Registration: load the units waiting for a UIN when the screen opens
+    if (this.config?.key === 'uinRegistration') {
+      this.loadUinRegistrations();
     }
   }
 
@@ -1923,8 +1949,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (c) { this.collectFormField('productCode', c); this.productCodeIsAuto.set(true); }
     }
     if (!this.formValues()['sku'] || this.skuIsAuto()) {
-      const cat     = this.selectedProductCategory() || undefined;
-      const brand   = this.formValues()['brand'] as string || undefined;
+      const cat = this.selectedProductCategory() || undefined;
+      const brand = this.formValues()['brand'] as string || undefined;
       const variant = this.formValues()['variant'] as string || undefined;
       const s = this.generateSku(name, cat, brand, variant);
       if (s) { this.collectFormField('sku', s); this.skuIsAuto.set(true); }
@@ -2091,7 +2117,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.collectFormField('serialPolicyName', null);
       this.collectFormField('batchPolicyName', null);
       if (this.editingId() === null && this.skuIsAuto()) {
-        const brand   = this.formValues()['brand'] as string || undefined;
+        const brand = this.formValues()['brand'] as string || undefined;
         const variant = this.formValues()['variant'] as string || undefined;
         const s = this.generateSku(this.productName(), undefined, brand, variant);
         this.collectFormField('sku', s || '');
@@ -2143,7 +2169,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
 
     if (this.editingId() === null && (!this.formValues()['sku'] || this.skuIsAuto())) {
-      const brand   = this.formValues()['brand'] as string || undefined;
+      const brand = this.formValues()['brand'] as string || undefined;
       const variant = this.formValues()['variant'] as string || undefined;
       const s = this.generateSku(this.productName(), value, brand, variant);
       if (s) { this.collectFormField('sku', s); this.skuIsAuto.set(true); }
@@ -2154,7 +2180,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.collectFormField('brand', brand);
     if (this.editingId() !== null) return;
     if (!this.formValues()['sku'] || this.skuIsAuto()) {
-      const cat     = this.selectedProductCategory() || undefined;
+      const cat = this.selectedProductCategory() || undefined;
       const variant = this.formValues()['variant'] as string || undefined;
       const s = this.generateSku(this.productName(), cat, brand || undefined, variant);
       if (s) { this.collectFormField('sku', s); this.skuIsAuto.set(true); }
@@ -2165,7 +2191,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.collectFormField('variant', variant);
     if (this.editingId() !== null) return;
     if (!this.formValues()['sku'] || this.skuIsAuto()) {
-      const cat   = this.selectedProductCategory() || undefined;
+      const cat = this.selectedProductCategory() || undefined;
       const brand = this.formValues()['brand'] as string || undefined;
       const s = this.generateSku(this.productName(), cat, brand, this.variantNameFromSelection(variant || undefined) || undefined);
       if (s) { this.collectFormField('sku', s); this.skuIsAuto.set(true); }
@@ -3356,13 +3382,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
       if (activeWarehouseId != null && fromWarehouseId !== activeWarehouseId) {
         return `From: a Stock Transfer can only send stock out of `
-             + `${this.sessionActiveWarehouse()?.warehouse_name || 'your active warehouse'}. `
-             + `Switch your active location to transfer from somewhere else.`;
+          + `${this.sessionActiveWarehouse()?.warehouse_name || 'your active warehouse'}. `
+          + `Switch your active location to transfer from somewhere else.`;
       }
       if (activeWarehouseId == null && activeBranchId != null && fromBranchId !== activeBranchId) {
         return `From: a Stock Transfer can only send stock out of `
-             + `${this.sessionActiveBranch()?.branch_name || 'your active branch'}. `
-             + `Switch your active location to transfer from somewhere else.`;
+          + `${this.sessionActiveBranch()?.branch_name || 'your active branch'}. `
+          + `Switch your active location to transfer from somewhere else.`;
       }
     }
 
@@ -3424,7 +3450,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return this.compactKey(product?.product_nature_name || product?.product_type || '');
   }
 
-  private productIsManufacturingRawMaterial(product: ProductItem | null | undefined): boolean {
+  protected productIsManufacturingRawMaterial(product: ProductItem | null | undefined): boolean {
     if (!product || !this.productTracksStock(product)) return false;
     const nature = this.productNatureKey(product);
     if (!InventoryScreenShell.MANUFACTURING_RAW_NATURE_KEYS.has(nature)) return false;
@@ -3513,47 +3539,47 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // branch resolves does the default fall back to the warehouse, as before.
     noWarehouseFallback?: boolean;
   }>> = {
-    // Merged Warehouse/Branch fields below all default to the logged-in branch
-    // only (preferBranch + noWarehouseFallback) -- locations are branch-based.
-    // Previous (each merged entry): { field, kind: 'merged' } -- warehouse first, else branch.
-    purchaseRequisition: [{ field: 'branch', kind: 'branchOnly' }],
-    goodsReceipt:        [{ field: 'receivingLocation', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    // Previous: purchaseInvoice: [{ field: 'receivingLocation', kind: 'merged', preferBranch: true }],
-    purchaseInvoice:     [{ field: 'receivingLocation', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    purchaseReturn:      [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    deliveryChallan:     [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    // Sales Invoice's own merged Warehouse/Branch picker, plus its separate
-    // Interbranch Sale Branch field -- two independent capabilities.
-    // Previous: salesInvoice: [{ field: 'warehouse', kind: 'merged' }, { field: 'branch', kind: 'branchOnly' }],
-    // Previous: salesInvoice: [{ field: 'warehouse', kind: 'merged', preferBranch: true }, { field: 'branch', kind: 'branchOnly' }],
-    salesInvoice:        [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }, { field: 'branch', kind: 'branchOnly' }],
-    // Only fromWarehouse defaults -- toWarehouse is deliberately left blank
-    // so the existing mutual-exclusivity logic isn't pre-violated.
-    // Previous: stockTransfer: [{ field: 'fromWarehouse', kind: 'merged' }],
-    // Previous: stockTransfer: [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true }],
-    stockTransfer:       [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    // Was 'warehouseOnly' — fn_post_sales_return_stock is now branch-aware
-    // (migration 241), matching Purchase Return's merged picker.
-    // Kept as before (not branch-only): fn_post_sales_return_stock (migration
-    // 139) still posts by warehouse only — a branch-only return would post its
-    // stock to no location. Switch once that function is made branch-aware.
-    salesReturn:         [{ field: 'returnToWarehouse', kind: 'merged' }],
-    purchaseOrder:       [{ field: 'receivingWarehouse', kind: 'warehouseOnly' }],
-    // Opening Inventory Balance and Opening Stock Entry were missed by the
-    // original Full Warehouse/Branch Independence migration -- both used to
-    // show Branch and Warehouse as two separate mandatory fields and are
-    // folded into the same single merged 'warehouse' field as PR/SI now.
-    openingInventoryBalance: [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    // Kept as before (not branch-only): fn_post_opening_stock (migration 143)
-    // raises "Opening Stock Entry requires a Warehouse." for a branch-only entry.
-    openingStockEntry:   [{ field: 'warehouse', kind: 'merged' }],
-    // "in stock adjustment should add even branches too".
-    stockAdjustment:     [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    productionPlanning:  [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    materialIssueProduction: [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    productionEntry:     [{ field: 'toWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    productionReturn:    [{ field: 'toWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }]
-  };
+      // Merged Warehouse/Branch fields below all default to the logged-in branch
+      // only (preferBranch + noWarehouseFallback) -- locations are branch-based.
+      // Previous (each merged entry): { field, kind: 'merged' } -- warehouse first, else branch.
+      purchaseRequisition: [{ field: 'branch', kind: 'branchOnly' }],
+      goodsReceipt: [{ field: 'receivingLocation', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      // Previous: purchaseInvoice: [{ field: 'receivingLocation', kind: 'merged', preferBranch: true }],
+      purchaseInvoice: [{ field: 'receivingLocation', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      purchaseReturn: [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      deliveryChallan: [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      // Sales Invoice's own merged Warehouse/Branch picker, plus its separate
+      // Interbranch Sale Branch field -- two independent capabilities.
+      // Previous: salesInvoice: [{ field: 'warehouse', kind: 'merged' }, { field: 'branch', kind: 'branchOnly' }],
+      // Previous: salesInvoice: [{ field: 'warehouse', kind: 'merged', preferBranch: true }, { field: 'branch', kind: 'branchOnly' }],
+      salesInvoice: [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }, { field: 'branch', kind: 'branchOnly' }],
+      // Only fromWarehouse defaults -- toWarehouse is deliberately left blank
+      // so the existing mutual-exclusivity logic isn't pre-violated.
+      // Previous: stockTransfer: [{ field: 'fromWarehouse', kind: 'merged' }],
+      // Previous: stockTransfer: [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true }],
+      stockTransfer: [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      // Was 'warehouseOnly' — fn_post_sales_return_stock is now branch-aware
+      // (migration 241), matching Purchase Return's merged picker.
+      // Kept as before (not branch-only): fn_post_sales_return_stock (migration
+      // 139) still posts by warehouse only — a branch-only return would post its
+      // stock to no location. Switch once that function is made branch-aware.
+      salesReturn: [{ field: 'returnToWarehouse', kind: 'merged' }],
+      purchaseOrder: [{ field: 'receivingWarehouse', kind: 'warehouseOnly' }],
+      // Opening Inventory Balance and Opening Stock Entry were missed by the
+      // original Full Warehouse/Branch Independence migration -- both used to
+      // show Branch and Warehouse as two separate mandatory fields and are
+      // folded into the same single merged 'warehouse' field as PR/SI now.
+      openingInventoryBalance: [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      // Kept as before (not branch-only): fn_post_opening_stock (migration 143)
+      // raises "Opening Stock Entry requires a Warehouse." for a branch-only entry.
+      openingStockEntry: [{ field: 'warehouse', kind: 'merged' }],
+      // "in stock adjustment should add even branches too".
+      stockAdjustment: [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      productionPlanning: [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      materialIssueProduction: [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      productionEntry: [{ field: 'toWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      productionReturn: [{ field: 'toWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }]
+    };
 
   private shouldDefaultLocationForCurrentScreen(): boolean {
     return !!InventoryScreenShell.LOCATION_DEFAULT_CAPABILITIES[this.config?.key || ''];
@@ -4308,13 +4334,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   addQuickVariantRow(): void {
-    this.quickAddVariantRows.update(rows => [...rows, {name: '', value: ''}]);
+    this.quickAddVariantRows.update(rows => [...rows, { name: '', value: '' }]);
   }
 
   removeQuickVariantRow(index: number): void {
     this.quickAddVariantRows.update(rows => rows.filter((_, i) => i !== index));
     if (!this.quickAddVariantRows().length) {
-      this.quickAddVariantRows.set([{name: '', value: ''}]);
+      this.quickAddVariantRows.set([{ name: '', value: '' }]);
     }
   }
 
@@ -4322,7 +4348,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.quickAddVariantRows.update(rows => rows.map((row, i) => {
       if (i !== index) return row;
       const attrChanged = row.name !== name;
-      return {name, value: attrChanged ? '' : row.value};
+      return { name, value: attrChanged ? '' : row.value };
     }));
   }
 
@@ -4334,7 +4360,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (row?.name && value) {
       this.persistNewAttributeValueIfNeeded(row.name, value);
     }
-    this.quickAddVariantRows.update(rows => rows.map((row, i) => i === index ? {...row, value} : row));
+    this.quickAddVariantRows.update(rows => rows.map((row, i) => i === index ? { ...row, value } : row));
   }
 
   quickVariantRowValueOptions(index: number): string[] {
@@ -4567,7 +4593,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             this.refreshSegmentScopedOptions();
           }
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getUoms(true)
@@ -4583,7 +4609,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             this.refreshSegmentScopedOptions();
           }
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getHsnSac(undefined, true)
@@ -4601,7 +4627,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const taxCats = items.map(item => item.tax_category).filter(Boolean) as string[];
           this.taxCategoryOptionList.set(this.mergeOptions([], taxCats));
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getAttributes(null, true)
@@ -4615,7 +4641,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             this.attributeOptionList.set(this.mergeOptions([], names));
           }
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getBranchesInv(true)
@@ -4629,7 +4655,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           this.branchesMasterLoaded = true;
           this.tryApplyDefaultLocation();
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getWarehouses(true)
@@ -4646,7 +4672,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           this.warehousesMasterLoaded = true;
           this.tryApplyDefaultLocation();
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getPaymentTerms(true)
@@ -4660,16 +4686,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           // merge cleanup as warehouse/vendor (see loadSegmentScopedLookups).
           this.paymentTermOptionList.set(this.mergeOptions([], names));
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getBoms(true)
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: res => this.loadedBomObjects.set(res.data ?? []), error: () => {} });
+      .subscribe({ next: res => this.loadedBomObjects.set(res.data ?? []), error: () => { } });
 
     this.inventoryConfigService.getWorkCenters(true)
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: res => this.loadedWorkCenterObjects.set(res.data ?? []), error: () => {} });
+      .subscribe({ next: res => this.loadedWorkCenterObjects.set(res.data ?? []), error: () => { } });
 
     this.inventoryConfigService.getProductTypes(true)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -4731,7 +4757,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const mfrs = items.map(item => item.manufacturer).filter(Boolean) as string[];
           this.manufacturerOptionList.set(this.mergeOptions([], mfrs));
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getUoms(true, requestedSegmentId)
@@ -4744,7 +4770,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const names = uoms.map(item => item.uom_symbol || item.uom_name || item.uom_code).filter(Boolean) as string[];
           this.uomOptionList.set(this.mergeOptions([], names));
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getAttributes(requestedSegmentId, true)
@@ -4771,7 +4797,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const names = variants.map(item => this.variantDisplayLabel(item)).filter(Boolean) as string[];
           this.variantOptionList.set(this.mergeOptions([], names));
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getSerialPolicies(requestedSegmentId, null, false)
@@ -4784,7 +4810,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const names = policies.map(item => item.policy_name).filter(Boolean) as string[];
           this.serialPolicyOptionList.set(this.mergeOptions([], names));
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getBatchPolicies(requestedSegmentId, null, false)
@@ -4795,7 +4821,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const names = (res.data ?? []).map(item => item.policy_name).filter(Boolean) as string[];
           this.batchPolicyOptionList.set(this.mergeOptions([], names));
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getProducts(requestedSegmentId, null, true)
@@ -4809,7 +4835,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           this.productOptionList.set(this.mergeOptions([], names));
           this.applyPendingCreatedProductBind();
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getVendors(requestedSegmentId, true)
@@ -4827,7 +4853,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const vendorLabels = vendors.map(item => this.vendorOptionLabel(item)).filter(Boolean) as string[];
           this.vendorOptionList.set(this.mergeOptions([], vendorLabels));
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getCustomers(requestedSegmentId, true)
@@ -4840,7 +4866,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const names = customers.map(item => this.customerOptionLabel(item)).filter(Boolean) as string[];
           this.customerOptionList.set(this.mergeOptions([], names));
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getChannelPartners(requestedSegmentId, true)
@@ -4853,7 +4879,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const names = partners.map(item => this.channelPartnerOptionLabel(item)).filter(Boolean) as string[];
           this.channelPartnerOptionList.set(this.mergeOptions([], names));
         },
-        error: () => {}
+        error: () => { }
       });
   }
 
@@ -4888,6 +4914,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       finishedProduct: bom.finished_product_name || '',
       version: bom.bom_version || '',
       rawMaterials: (bom.items || []).map((item: BomLineItem) => item.product_name).filter(Boolean),
+      materials: (bom.items || [])
+        .map((item: BomLineItem) => ({ productName: item.product_name, quantity: Number(item.quantity) || 0 }))
+        .filter(m => !!m.productName),
       quantityPerUnit: Number(bom.quantity) || 1,
       wastagePercent: Number(bom.wastage_percent) || 0,
       productionCost: Number(bom.production_cost) || 0,
@@ -4897,6 +4926,430 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       && record.rawMaterials.length > 0
       && this.normalizeKey(record.status || 'Active') !== 'inactive'
     );
+  }
+
+    // ── Material Issue for Production ───────────────────────────────────────
+
+  // What is still to be issued for one plan line: Required - already issued.
+  private planItemRemainingQty(item: any): number {
+    const required = Number(item?.required_qty ?? item?.requiredQty ?? 0) || 0;
+    const issued = Number(item?.issued_qty ?? item?.issuedQty ?? 0) || 0;
+    return Math.max(required - issued, 0);
+  }
+
+  private planHasRemainingToIssue(plan: any): boolean {
+    const items: any[] = Array.isArray(plan?.items) ? plan.items : [];
+    return items.some(item => this.planItemRemainingQty(item) > 0);
+  }
+
+  // Live stock at the From location, in the row's UOM. null = not known yet.
+  private materialIssueAvailableQty(row: string[]): number | null {
+    const product = this.lineRowProduct(row);
+    if (!product?.id) return null;
+    const { warehouseId, branchId } = this.resolveHeaderStockLocation(
+      this.formValues()['fromWarehouse'] || this.formValues()['fromWarehouseId']);
+    if (!warehouseId && !branchId) return null;
+
+    const variantId = this.lineRowVariantId(product, row);
+    this.fetchAvailableStockForLine(product.id, null);
+    if (variantId) this.fetchAvailableStockForLine(product.id, variantId);
+    const cache = this.availableStockCache();
+    const rows = (variantId ? cache[this.availableStockKey(product.id, variantId)] : null)
+      || cache[this.availableStockKey(product.id, null)];
+    if (!rows) return null;
+
+    const here = warehouseId ? this.stockRowForWarehouse(rows, warehouseId) : this.stockRowForBranch(rows, branchId);
+    const available = Number(here?.available ?? 0) || 0;
+    const factor = this.productUomConversionFactorForSelection(product, this.lineValue(row, ['uom']), this.config?.key || '');
+    return factor > 0 ? available / factor : available;
+  }
+
+  private materialIssueAvailableText(row: string[]): string {
+    if (!String(this.formValues()['fromWarehouse'] || '').trim()) return 'Select location';
+    const qty = this.materialIssueAvailableQty(row);
+    if (qty === null) return 'Checking…';
+    if (qty <= 0) return '0 · not in stock here, remove this row';
+    return this.formatStockLimitQty(qty);
+  }
+
+  private materialIssueRowsValidationMessage(isPosting: boolean): string {
+    if (this.config?.key !== 'materialIssueProduction') return '';
+    const location = String(this.formValues()['fromWarehouse'] || '').trim() || 'the From location';
+    const rows = this.activeManufacturingLineRows();
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const name = this.lineValue(row, ['product', 'item', 'sku', 'material']);
+      const remaining = this.lineNumber(row, ['required']);
+      const issued = this.lineNumber(row, ['issued']);
+      const available = this.materialIssueAvailableQty(row);
+      if (isPosting && available !== null && available <= 0) {
+        return `${name} is not in stock at ${location}. Remove it from the grid, then post.`;
+      }
+      if (issued <= 0) return `Enter Issued Qty for ${name} (row ${i + 1}), or remove the row.`;
+      if (remaining > 0 && issued > remaining) {
+        return `${name}: Issued Qty ${this.formatStockLimitQty(issued)} is more than the ${this.formatStockLimitQty(remaining)} still to be issued.`;
+      }
+      if (isPosting && available !== null && issued > available) {
+        return `${name}: only ${this.formatStockLimitQty(available)} in stock at ${location}.`;
+      }
+    }
+    return '';
+  }
+
+    // ── UIN Registration ──────────────────────────────────────────────────
+  // Units of products whose category has UIN Required = Yes (e.g. drones).
+  // The user types the UIN per serial; only changed rows are saved.
+  // Editable until the unit is sold; the server blocks a sale without UIN.
+
+  readonly uinStatusOptions = [
+    { label: 'Pending (no UIN yet)', value: 'pending' },
+    { label: 'Registered', value: 'registered' },
+    { label: 'Sold', value: 'sold' },
+    { label: 'All', value: 'all' }
+  ];
+
+  readonly uinStatus = signal<string>('pending');
+  readonly uinProductFilter = signal<string | null>(null);
+  readonly uinSearchText = signal<string>('');
+  readonly uinRows = signal<UinRegistrationRow[]>([]);
+  readonly uinDrafts = signal<Record<number, UinDraft>>({});
+  readonly uinLoading = signal(false);
+  readonly uinSaving = signal(false);
+
+  readonly uinProductOptions = computed(() =>
+    [...new Set(this.uinRows().map(r => r.product_name).filter(Boolean))].sort());
+
+  readonly uinVisibleRows = computed(() => {
+    const product = this.uinProductFilter();
+    const text = this.uinSearchText().trim().toLowerCase();
+    return this.uinRows().filter(r =>
+      (!product || r.product_name === product) &&
+      (!text
+        || r.serial_no.toLowerCase().includes(text)
+        || (r.uin_number || '').toLowerCase().includes(text)
+        || (r.source_doc_no || '').toLowerCase().includes(text)));
+  });
+
+  readonly uinChangedRows = computed(() => {
+    this.uinDrafts();
+    return this.uinRows().filter(r => this.uinIsChanged(r));
+  });
+
+  loadUinRegistrations(): void {
+    this.uinLoading.set(true);
+    this.saveError.set('');
+    this.txService.getUinRegistrations({ status: this.uinStatus() }).subscribe({
+      next: res => {
+        this.uinRows.set(res?.data || []);
+        this.uinDrafts.set({});
+        this.uinLoading.set(false);
+      },
+      error: err => {
+        this.uinRows.set([]);
+        this.uinLoading.set(false);
+        this.saveError.set(this.uinErrorText(err, 'Could not load the units.'));
+      }
+    });
+  }
+
+  setUinStatus(value: string): void {
+    if (this.uinChangedRows().length && !confirm('You have unsaved UIN changes. Discard them?')) return;
+    this.uinStatus.set(value || 'pending');
+    this.saveMsg.set('');
+    this.loadUinRegistrations();
+  }
+
+  uinValue(row: UinRegistrationRow, field: UinField): string {
+    const draft = this.uinDrafts()[row.serial_unit_id];
+    return draft ? draft[field] : this.uinSavedValue(row, field);
+  }
+
+  setUinValue(row: UinRegistrationRow, field: UinField, value: string): void {
+    const current: UinDraft = this.uinDrafts()[row.serial_unit_id] || {
+      uin_number: this.uinSavedValue(row, 'uin_number'),
+      uin_date: this.uinSavedValue(row, 'uin_date'),
+      uin_certificate_no: this.uinSavedValue(row, 'uin_certificate_no')
+    };
+    this.uinDrafts.update(all => ({ ...all, [row.serial_unit_id]: { ...current, [field]: value ?? '' } }));
+    this.saveError.set('');
+    this.saveMsg.set('');
+  }
+
+  uinIsChanged(row: UinRegistrationRow): boolean {
+    const draft = this.uinDrafts()[row.serial_unit_id];
+    if (!draft) return false;
+    return (['uin_number', 'uin_date', 'uin_certificate_no'] as UinField[])
+      .some(f => (draft[f] || '').trim() !== this.uinSavedValue(row, f).trim());
+  }
+
+  undoUinRow(row: UinRegistrationRow): void {
+    this.uinDrafts.update(all => {
+      const next = { ...all };
+      delete next[row.serial_unit_id];
+      return next;
+    });
+  }
+
+  clearUinChanges(): void {
+    this.uinDrafts.set({});
+    this.saveError.set('');
+    this.saveMsg.set('');
+  }
+
+  saveUinRegistrations(): void {
+    const changed = this.uinChangedRows();
+    if (!changed.length) {
+      this.saveError.set('Nothing to save. Type a UIN Number on at least one row.');
+      return;
+    }
+
+    const items: UinRegistrationSaveItem[] = [];
+    const seen = new Map<string, string>();
+    for (const row of changed) {
+      const uin = this.uinValue(row, 'uin_number').trim();
+      const date = this.uinValue(row, 'uin_date').trim();
+      const cert = this.uinValue(row, 'uin_certificate_no').trim();
+
+      if (!uin && (date || cert)) {
+        this.saveError.set(`Serial ${row.serial_no}: enter the UIN Number (UIN Date and Certificate No alone are not enough).`);
+        return;
+      }
+      if (uin) {
+        const key = uin.toUpperCase();
+        if (seen.has(key)) {
+          this.saveError.set(`UIN Number ${uin} is typed on both ${seen.get(key)} and ${row.serial_no}.`);
+          return;
+        }
+        seen.set(key, row.serial_no);
+      }
+      items.push({
+        serial_unit_id: row.serial_unit_id,
+        uin_number: uin || null,
+        uin_date: uin ? (date || null) : null,
+        uin_certificate_no: uin ? (cert || null) : null
+      });
+    }
+
+    this.uinSaving.set(true);
+    this.saveError.set('');
+    this.txService.saveUinRegistrations(items).subscribe({
+      next: () => {
+        this.uinSaving.set(false);
+        this.saveMsg.set(`UIN saved for ${items.length} serial(s).`);
+        this.loadUinRegistrations();
+      },
+      error: err => {
+        this.uinSaving.set(false);
+        this.saveError.set(this.uinErrorText(err, 'Could not save the UIN details.'));
+      }
+    });
+  }
+
+  uinStatusLabel(row: UinRegistrationRow): string {
+    if (row.uin_status === 'sold') return 'Sold';
+    if (this.uinIsChanged(row)) return 'Changed';
+    return row.uin_status === 'registered' ? 'Registered' : 'Pending';
+  }
+
+  uinStatusClass(row: UinRegistrationRow): string {
+    if (row.uin_status === 'sold') return 'erp-badge';
+    if (this.uinIsChanged(row)) return 'erp-badge badge-info';
+    return row.uin_status === 'registered' ? 'erp-badge badge-success' : 'erp-badge badge-warning';
+  }
+
+  uinDateText(value: string | null | undefined): string {
+    if (!value) return '-';
+    const d = new Date(String(value).slice(0, 10) + 'T00:00:00');
+    if (isNaN(d.getTime())) return String(value);
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
+  }
+
+    private uinSavedValue(row: UinRegistrationRow, field: UinField): string {
+    let raw: string | null | undefined;
+    if (field === 'uin_number') raw = row.uin_number;
+    else if (field === 'uin_date') raw = row.uin_date;
+    else raw = row.uin_certificate_no;
+    if (!raw) return '';
+    return field === 'uin_date' ? String(raw).slice(0, 10) : String(raw);
+  }
+
+  private uinErrorText(err: any, fallback: string): string {
+    return err?.error?.message || err?.error?.detail || err?.error?.title || err?.message || fallback;
+  }
+
+  // ── BOM Master: line-wise raw materials ────────────────────────────────
+  // Lines and the entry row live in formValues, so they survive the trip to
+  // Product Master ("+" buttons) and are wiped by clearConfigForm().
+
+  readonly bomLines = computed<BomMaterialLine[]>(() => {
+    const raw = this.formValues()['bomLines'];
+    return Array.isArray(raw) ? raw : NO_BOM_LINES;
+  });
+
+  readonly bomEditingLine = computed<number | null>(() => {
+    const raw = this.formValues()['bomEditingLine'];
+    return raw === null || raw === undefined ? null : Number(raw);
+  });
+
+  readonly bomFinishedOptions = computed(() => this.finishedManufacturingProductOptions());
+
+  readonly bomRawOptions = computed(() => {
+    const finished = this.normalizeKey(this.formValues()['finishedProduct']);
+    const editing = this.bomEditingLine();
+    const used = new Set(this.bomLines().filter((_, i) => i !== editing).map(line => this.normalizeKey(line.productName)));
+    return this.rawMaterialProductOptions().filter(name => {
+      const key = this.normalizeKey(name);
+      return key !== finished && !used.has(key);
+    });
+  });
+
+  readonly bomDraftUom = computed(() => {
+    const product = this.findProductBySelection(this.formValues()['bomDraftProduct']);
+    return String(product?.base_uom_name || product?.base_uom_symbol || '');
+  });
+
+  readonly bomStatusActive = computed(() =>
+    String(this.formValues()['status'] || 'Active').toLowerCase() !== 'inactive');
+
+  readonly bomFinishedName = computed(() => String(this.formValues()['finishedProduct'] || '').trim());
+
+  onBomFinishedProductChange(value: any): void {
+    this.collectFormField('finishedProduct', value);
+    this.maybeAutoCode('finishedProduct', value);
+    const key = this.normalizeKey(value);
+    if (key && this.bomLines().some(line => this.normalizeKey(line.productName) === key)) {
+      this.bomPatch({ bomLines: this.bomLines().filter(line => this.normalizeKey(line.productName) !== key) });
+      this.saveError.set(`${value} was removed from the raw materials. A product cannot be made from itself.`);
+    }
+  }
+
+  onBomVersionChange(value: any): void {
+    this.collectFormField('version', value);
+    this.maybeAutoCode('version', value);
+  }
+
+  setBomStatus(active: boolean): void {
+    this.collectFormField('status', active ? 'Active' : 'Inactive');
+  }
+
+  addBomFinishedProduct(): void {
+    this.openFieldAddMaster({ key: 'finishedProduct', label: 'Finished Product', addMaster: 'Product / Service' } as InventoryField);
+  }
+
+  addBomRawMaterial(): void {
+    this.openFieldAddMaster({ key: 'rawMaterials', label: 'Raw Materials', addMaster: 'Product / Service' } as InventoryField);
+  }
+
+  setBomDraft(field: 'bomDraftProduct' | 'bomDraftQty' | 'bomDraftWastage', value: any): void {
+    this.bomPatch({ [field]: value });
+    this.saveError.set('');
+  }
+
+  addBomLine(): void {
+    const v = this.formValues();
+    const name = String(v['bomDraftProduct'] || '').trim();
+    if (!name) { this.saveError.set('Select a raw material.'); return; }
+
+    const product = this.findProductBySelection(name);
+    if (!product || !this.productIsManufacturingRawMaterial(product)) {
+      this.saveError.set(`${name} must have Product Nature Raw Material or Semi-Finished Product.`);
+      return;
+    }
+    if (this.normalizeKey(product.product_name) === this.normalizeKey(v['finishedProduct'])) {
+      this.saveError.set('A product cannot be a raw material of itself.');
+      return;
+    }
+
+    const quantity = Number(v['bomDraftQty']);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      this.saveError.set('Enter the quantity needed for 1 finished unit (more than 0).');
+      return;
+    }
+
+    const wastageText = String(v['bomDraftWastage'] ?? '').trim();
+    const wastagePercent = wastageText === '' ? 0 : Number(wastageText);
+    if (!Number.isFinite(wastagePercent) || wastagePercent < 0 || wastagePercent >= 100) {
+      this.saveError.set('Wastage % must be from 0 to below 100.');
+      return;
+    }
+
+    const editing = this.bomEditingLine();
+    if (this.bomLines().some((line, i) => i !== editing && this.normalizeKey(line.productName) === this.normalizeKey(product.product_name))) {
+      this.saveError.set(`${product.product_name} is already on this BOM. Edit that line instead.`);
+      return;
+    }
+
+    const line: BomMaterialLine = {
+      productId: product.id ?? null,
+      productName: product.product_name,
+      uomId: this.optionalNumber(product.base_uom_id),
+      uomName: String(product.base_uom_name || product.base_uom_symbol || ''),
+      quantity,
+      wastagePercent
+    };
+    const lines = editing === null
+      ? [...this.bomLines(), line]
+      : this.bomLines().map((existing, i) => (i === editing ? line : existing));
+
+    this.bomPatch({ bomLines: lines, ...this.emptyBomDraft() });
+    this.saveError.set('');
+  }
+
+  editBomLine(index: number): void {
+    const line = this.bomLines()[index];
+    if (!line) return;
+    this.bomPatch({
+      bomDraftProduct: line.productName,
+      bomDraftQty: String(line.quantity),
+      bomDraftWastage: line.wastagePercent ? String(line.wastagePercent) : '',
+      bomEditingLine: index
+    });
+    this.saveError.set('');
+  }
+
+  cancelBomLineEdit(): void {
+    this.bomPatch(this.emptyBomDraft());
+    this.saveError.set('');
+  }
+
+  removeBomLine(index: number): void {
+    const editing = this.bomEditingLine();
+    const patch: Record<string, any> = { bomLines: this.bomLines().filter((_, i) => i !== index) };
+    if (editing === index) Object.assign(patch, this.emptyBomDraft());
+    else if (editing !== null && editing > index) patch['bomEditingLine'] = editing - 1;
+    this.bomPatch(patch);
+  }
+
+  saveBom(): void {
+    const pending = String(this.formValues()['bomDraftProduct'] || '').trim();
+    if (pending) {
+      this.saveError.set(`${pending} is selected but not added. Click "${this.bomEditingLine() === null ? 'Add Material' : 'Update Material'}" first, or clear it.`);
+      return;
+    }
+    this.saveConfigRecord();
+  }
+
+  bomQtyText(value: number): string {
+    return Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 3 });
+  }
+
+  private bomPatch(values: Record<string, any>): void {
+    this.formValues.update(current => ({ ...current, ...values }));
+  }
+
+  private emptyBomDraft(): Record<string, any> {
+    return { bomDraftProduct: null, bomDraftQty: '', bomDraftWastage: '', bomEditingLine: null };
+  }
+
+  private bomLinesFromRecord(record: any): BomMaterialLine[] {
+    return (record?.items || []).map((item: any) => ({
+      productId: item.product_id ?? item.productId ?? null,
+      productName: item.product_name || item.productName || '',
+      uomId: item.uom_id ?? item.uomId ?? null,
+      uomName: item.uom_name || item.uomName || '',
+      quantity: Number(item.quantity) || 0,
+      wastagePercent: Number(item.wastage_percent ?? item.wastagePercent) || 0
+    }));
   }
 
   private formatDateLabel(value: string): string {
@@ -5322,7 +5775,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.quickAddHsnGstRate.set(null);
 
     if (master === 'Variant') {
-      this.quickAddVariantRows.set([{name: '', value: ''}]);
+      this.quickAddVariantRows.set([{ name: '', value: '' }]);
     }
 
     if (this.isInlineManufacturingQuickAdd(master)) {
@@ -5585,9 +6038,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!name) { this.quickAddError.set('UOM name is required.'); return; }
     if (this.isSavingQuickAdd()) return;
 
-    const code   = this.quickAddCode().trim() || this.generateCodeFromName(name);
+    const code = this.quickAddCode().trim() || this.generateCodeFromName(name);
     const symbol = this.quickAddUomSymbol().trim() || null;
-    const type   = this.quickAddUomType() || 'Base';
+    const type = this.quickAddUomType() || 'Base';
     const parentBeforeSave = this.quickAddParentMaster();
     const sourceKey = this.addMasterSourceFieldKey();
     const isQuickProductMapping = this.isQuickUomMappingContext();
@@ -6319,7 +6772,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       display_order: i + 1
     }));
     const attributeError = this.variantAttributesValidationMessage(
-      filledRows.map(r => ({attribute_name: r.name, attribute_value: r.value}))
+      filledRows.map(r => ({ attribute_name: r.name, attribute_value: r.value }))
     );
     if (attributeError) { this.quickAddError.set(attributeError); return; }
     const firstAttr = attributePayloads[0];
@@ -6608,11 +7061,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       quickVendorGstins: (Array.isArray(fv['quickVendorGstins']) && fv['quickVendorGstins'].length) || !contact?.gstin
         ? fv['quickVendorGstins']
         : [{
-            stateName: '',
-            stateCode: /^[0-9]{2}/.test(contact.gstin) ? contact.gstin.slice(0, 2) : null,
-            gstin: String(contact.gstin).toUpperCase(),
-            isPrimary: true
-          }]
+          stateName: '',
+          stateCode: /^[0-9]{2}/.test(contact.gstin) ? contact.gstin.slice(0, 2) : null,
+          gstin: String(contact.gstin).toUpperCase(),
+          isPrimary: true
+        }]
     }));
   }
 
@@ -6873,6 +7326,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   setCategorySerialApplicable(required: boolean): void {
     this.categorySerialApplicable.set(required);
+    // UIN is registered per serial number, so it only exists with serial tracking.
+    if (!required) {
+      this.formValues.update(v => ({ ...v, uinRequired: false }));
+    }
   }
 
   setCategoryBatchApplicable(required: boolean): void {
@@ -6988,11 +7445,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
     const result = sortKey
       ? filtered.sort((a, b) => {
-          const left = String(a[sort!.columnIndex] ?? '');
-          const right = String(b[sort!.columnIndex] ?? '');
-          const cmp = left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
-          return sort!.direction === 'asc' ? cmp : -cmp;
-        })
+        const left = String(a[sort!.columnIndex] ?? '');
+        const right = String(b[sort!.columnIndex] ?? '');
+        const cmp = left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
+        return sort!.direction === 'asc' ? cmp : -cmp;
+      })
       : filtered;
 
     this._gridRowsCache.set(tableId, { sourceRef: rawSourceRows, search, sortKey, result });
@@ -7062,7 +7519,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   runGridToolbarAction(tableId: string, action: 'print' | 'pdf' | 'excel'): void {
     const docStyledKeys = ['purchaseInvoice', 'salesInvoice', 'deliveryChallan'];
     if ((action === 'print' || action === 'pdf') && tableId === 'records'
-        && docStyledKeys.includes(this.config?.key || '') && !this.expandedGrnId()) {
+      && docStyledKeys.includes(this.config?.key || '') && !this.expandedGrnId()) {
       this.saveMsg.set(`Expand a ${this.config?.title || 'record'} row first, then use Print or PDF for the document format.`);
       setTimeout(() => this.saveMsg.set(''), 3500);
       return;
@@ -7117,7 +7574,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private selectedExpandedDocumentExportPayload(): GridExportPayload | null {
     const key = this.config?.key || '';
     if (key !== 'goodsReceipt' && key !== 'purchaseInvoice' && key !== 'debitNote' && key !== 'creditNote'
-        && key !== 'salesInvoice' && key !== 'deliveryChallan') return null;
+      && key !== 'salesInvoice' && key !== 'deliveryChallan') return null;
 
     const expandedId = this.expandedGrnId();
     if (!expandedId) return null;
@@ -7138,27 +7595,27 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         .map((item, index) => columnDefs.map(column => this.grnExpandedCell(item, column, index) || ''));
       const fields: Array<[string, string]> = isDebit
         ? [
-            ['Debit Note No', docNo],
-            ['Debit Note Date', this.gridDateDisplay(String(record.debit_note_date || record.debitNoteDate || ''))],
-            ['Vendor', String(record.vendor_name || record.vendorName || '')],
-            ['Reference', String(record.purchase_return_number || record.purchaseReturnNumber || record.purchase_invoice_number || record.purchaseInvoiceNumber || 'Direct')],
-            ['Reason', String(record.reason || '')],
-            ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
-            ['Return Amount', this.formatCurrency(record.subtotal ?? record.subTotal ?? 0)],
-            ['GST Amount', this.formatCurrency(record.tax_amount ?? record.taxAmount ?? 0)],
-            ['Total Amount', this.formatCurrency(record.total_amount ?? record.totalAmount ?? 0)]
-          ]
+          ['Debit Note No', docNo],
+          ['Debit Note Date', this.gridDateDisplay(String(record.debit_note_date || record.debitNoteDate || ''))],
+          ['Vendor', String(record.vendor_name || record.vendorName || '')],
+          ['Reference', String(record.purchase_return_number || record.purchaseReturnNumber || record.purchase_invoice_number || record.purchaseInvoiceNumber || 'Direct')],
+          ['Reason', String(record.reason || '')],
+          ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
+          ['Return Amount', this.formatCurrency(record.subtotal ?? record.subTotal ?? 0)],
+          ['GST Amount', this.formatCurrency(record.tax_amount ?? record.taxAmount ?? 0)],
+          ['Total Amount', this.formatCurrency(record.total_amount ?? record.totalAmount ?? 0)]
+        ]
         : [
-            ['Credit Note No', docNo],
-            ['Credit Note Date', this.gridDateDisplay(String(record.credit_note_date || record.creditNoteDate || ''))],
-            ['Customer', String(record.customer_name || record.customerName || '')],
-            ['Reference', String(record.sales_return_number || record.salesReturnNumber || record.sales_invoice_number || record.salesInvoiceNumber || 'Direct')],
-            ['Reason', String(record.reason || '')],
-            ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
-            ['Return Amount', this.formatCurrency(record.subtotal ?? record.subTotal ?? 0)],
-            ['GST Amount', this.formatCurrency(record.tax_amount ?? record.taxAmount ?? 0)],
-            ['Total Amount', this.formatCurrency(record.total_amount ?? record.totalAmount ?? 0)]
-          ];
+          ['Credit Note No', docNo],
+          ['Credit Note Date', this.gridDateDisplay(String(record.credit_note_date || record.creditNoteDate || ''))],
+          ['Customer', String(record.customer_name || record.customerName || '')],
+          ['Reference', String(record.sales_return_number || record.salesReturnNumber || record.sales_invoice_number || record.salesInvoiceNumber || 'Direct')],
+          ['Reason', String(record.reason || '')],
+          ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
+          ['Return Amount', this.formatCurrency(record.subtotal ?? record.subTotal ?? 0)],
+          ['GST Amount', this.formatCurrency(record.tax_amount ?? record.taxAmount ?? 0)],
+          ['Total Amount', this.formatCurrency(record.total_amount ?? record.totalAmount ?? 0)]
+        ];
 
       return { title: `${this.config?.title || 'Inventory'} - ${docNo || 'Selected Record'}`, fields, columns, rows };
     }
@@ -7189,15 +7646,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
 
     const fields: Array<[string, string]> = [
-          ['GRN No', docNo],
-          ['GRN Date', String(record.grn_date || record.grnDate || '')],
-          ['Vendor', String(record.vendor_name || record.vendorName || '')],
-          ['PO Reference', String(record.po_number || record.poNumber || record.rfq_number || record.rfqNumber || 'Direct')],
-          ['Warehouse', String(record.warehouse_name || record.warehouseName || '')],
-          ['Vendor Invoice No', String(record.vendor_invoice_no || record.vendorInvoiceNo || '')],
-          ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
-          ['Total', `Rs. ${Number(record.total_amount ?? record.totalAmount ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`]
-        ];
+      ['GRN No', docNo],
+      ['GRN Date', String(record.grn_date || record.grnDate || '')],
+      ['Vendor', String(record.vendor_name || record.vendorName || '')],
+      ['PO Reference', String(record.po_number || record.poNumber || record.rfq_number || record.rfqNumber || 'Direct')],
+      ['Warehouse', String(record.warehouse_name || record.warehouseName || '')],
+      ['Vendor Invoice No', String(record.vendor_invoice_no || record.vendorInvoiceNo || '')],
+      ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
+      ['Total', `Rs. ${Number(record.total_amount ?? record.totalAmount ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`]
+    ];
 
     return { title: `${this.config?.title || 'Inventory'} - ${docNo || 'Selected Record'}`, fields, columns, rows };
   }
@@ -7829,10 +8286,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // sending them a null number would break them.
   private serverAssignsDocNumber(): boolean {
     return ['salesInvoice', 'salesQuotation', 'salesOrder', 'salesReturn',
-            'creditNote', 'estimation', 'proformaInvoice',
-            // Delivery Challan joined this set in migration 231 — it used to
-            // number itself inline, which is why it kept failing on uq_dc_doc.
-            'deliveryChallan'].includes(this.config?.key || '');
+      'creditNote', 'estimation', 'proformaInvoice',
+      // Delivery Challan joined this set in migration 231 — it used to
+      // number itself inline, which is why it kept failing on uq_dc_doc.
+      'deliveryChallan'].includes(this.config?.key || '');
   }
 
   // Payload value for a server-assigned number: whatever the user actually
@@ -7969,13 +8426,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Purchase Return is raised against a posted PI only -- no direct option.
       : this.config?.key === 'purchaseReturn'
         ? docs
-      : this.config?.key === 'debitNote'
-        ? ['Direct Debit Note', ...docs]
-      : this.config?.key === 'creditNote'
-        ? ['Direct Credit Note', ...docs]
-      : this.config?.key === 'goodsReceipt'
-        ? ['Direct Goods Receipt', ...docs]
-        : (docs.length ? docs : (field.options || []));
+        : this.config?.key === 'debitNote'
+          ? ['Direct Debit Note', ...docs]
+          : this.config?.key === 'creditNote'
+            ? ['Direct Credit Note', ...docs]
+            : this.config?.key === 'goodsReceipt'
+              ? ['Direct Goods Receipt', ...docs]
+              : (docs.length ? docs : (field.options || []));
     const cacheKey = `${this.config?.key || ''}:${field.key}:${options.join('|')}`;
     if (cacheKey === this.transactionReferenceOptionsCacheKey) return this.transactionReferenceOptionsCache;
     this.transactionReferenceOptionsCacheKey = cacheKey;
@@ -8734,12 +9191,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return options;
   }
 
-  // BOM Version options = versions saved in BOM Master for the selected Finished Product only.
-  private bomVersionOptionsFromMaster(finishedProduct: any = this.formValues()['finishedProduct']): string[] {
-    const finishedKey = this.normalizeKey(String(finishedProduct || '').trim());
-    if (!finishedKey) return [];
+  // private bomVersionOptionsFromMaster(finishedProduct?: any): string[] {
+  //   // Only the versions of the selected finished product's BOMs.
+  //   const finished = this.normalizeKey(finishedProduct ?? this.formValues()['finishedProduct']);
+  //   return this.productionPlanningBomRecords()
+  //     .filter(record => !finished || this.normalizeKey(record.finishedProduct) === finished)
+  //     .map(record => record.version)
+  //     .filter(Boolean);
+  // }
+    private bomVersionOptionsFromMaster(finishedProduct?: any): string[] {
+    // Versions of the BOMs of one finished product. Uses the product passed in
+    // (e.g. from collectFormField, before formValues is updated), else the one on the form.
+    const finished = this.normalizeKey(finishedProduct ?? this.formValues()['finishedProduct']);
     return this.productionPlanningBomRecords()
-      .filter(record => this.normalizeKey(record.finishedProduct) === finishedKey)
+      .filter(record => !finished || this.normalizeKey(record.finishedProduct) === finished)
       .map(record => record.version)
       .filter(Boolean);
   }
@@ -9852,7 +10317,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (!dcItemId || !this.serialNumbersFromRecordItem(item).length) return;
       this.txService.getReservedSerialsForDcItem(dcItemId)
         .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe({ next: res => this.bindSalesInvoiceWarrantyFromSerials(startIndex + i, res.data || []), error: () => {} });
+        .subscribe({ next: res => this.bindSalesInvoiceWarrantyFromSerials(startIndex + i, res.data || []), error: () => { } });
     });
   }
 
@@ -9865,7 +10330,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   lineGridCellReadonly(rowIndex: number, row: string[], column: string): boolean {
-        // 258: Purchase Return is the whole invoice - once a PI is picked,
+    // 258: Purchase Return is the whole invoice - once a PI is picked,
     // Return Qty is fixed to the invoice quantity and cannot be edited.
     if (this.config?.key === 'purchaseReturn' && this.formValues()['piId']) {
       const returnKey = this.normalizeKey(column);
@@ -9910,7 +10375,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (this.lineGridColumnIsSerialPicker(column)) return false;
       return true;
     }
-    if (this.config?.key === 'productionPlanning' && this.normalizeKey(column) === 'batch req') {
+    if (this.config?.key === 'productionPlanning') {
       return true;
     }
     if (this.isManufacturingTransactionKey() && this.lineRefItemIdMap()[rowIndex]) {
@@ -9946,8 +10411,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   lineGridReadonlyCellText(rowIndex: number, row: string[], column: string, cellView: EntryLineColumnView | null | undefined, rowView?: EntryLineRowView): string {
-    if (this.lineGridColumnIsAttributeValue(column)) {
-      return this.lineGridAttributeSelection(rowView ?? this.entryLineRowViews()[rowIndex], column)?.value || '';
+    if (this.config?.key === 'materialIssueProduction' && this.normalizeKey(column) === 'available qty') {
+      return this.materialIssueAvailableText(row);
     }
     if (this.lineGridColumnIsSerialValue(column)) {
       const pickedSerials = this.lineSerialUnitsMap()[rowIndex];
@@ -10637,9 +11102,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const fallbackUom = conversions.length === 1
       ? conversions[0]
       : conversions.find(conversion => {
-          const candidate = Number(conversion.conversion_factor);
-          return Number.isFinite(candidate) && candidate > 1;
-        });
+        const candidate = Number(conversion.conversion_factor);
+        return Number.isFinite(candidate) && candidate > 1;
+      });
     const factor = Number((purchaseUom ?? fallbackUom)?.conversion_factor);
     return Number.isFinite(factor) && factor > 0 ? factor : 1;
   }
@@ -10759,7 +11224,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const factor = this.parseDecimalNumber(row[columnIndex]);
     if (!Number.isFinite(factor) || factor <= 0) return '';
     const baseUom = String(this.formValues()['baseUom'] ?? '').trim();
-    const altUom  = String(row[0] ?? '').trim();
+    const altUom = String(row[0] ?? '').trim();
     if (!baseUom || !altUom) return '';
     return `1 ${altUom} = ${factor} ${baseUom}`;
   }
@@ -11307,7 +11772,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // of a single "here" figure.
     const warehouseField = key === 'deliveryChallan' || key === 'stockTransfer' ? (this.formValues()['fromWarehouse'] || this.formValues()['fromWarehouseId'])
       : key === 'salesInvoice' ? (this.formValues()['warehouse'] || this.formValues()['warehouseId'])
-      : null;
+        : null;
     // Item 1: DC's "From Warehouse / Branch" and SI's "Warehouse / Branch"
     // header fields are both merged pickers now (Full Warehouse/Branch
     // Independence) — findWarehouseBySelection() alone silently returns
@@ -12103,15 +12568,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const qtyIndex = qtyColumn
       ? this.lineColumnIndex(qtyColumn)
       : key === 'purchaseReturn' || key === 'salesReturn'
-      ? this.lineColumnIndex('Return Qty')
-      : key === 'goodsReceipt'
-        ? this.lineColumnIndex('Accepted Qty')
-        // Item 5: a GRN-linked Purchase Invoice bills on Accepted Qty (what
-        // the GRN recorded); a direct invoice has no such column rendered
-        // at all and uses the plain Qty column instead.
-        : key === 'purchaseInvoice'
-          ? (this.isGrnLinkedPurchaseInvoice() ? this.lineColumnIndex('Accepted Qty') : this.lineColumnIndex('Qty'))
-          : this.findColumnIndex(['qty', 'quantity', 'received', 'accepted', 'produced']);
+        ? this.lineColumnIndex('Return Qty')
+        : key === 'goodsReceipt'
+          ? this.lineColumnIndex('Accepted Qty')
+          // Item 5: a GRN-linked Purchase Invoice bills on Accepted Qty (what
+          // the GRN recorded); a direct invoice has no such column rendered
+          // at all and uses the plain Qty column instead.
+          : key === 'purchaseInvoice'
+            ? (this.isGrnLinkedPurchaseInvoice() ? this.lineColumnIndex('Accepted Qty') : this.lineColumnIndex('Qty'))
+            : this.findColumnIndex(['qty', 'quantity', 'received', 'accepted', 'produced']);
     const rateIndex = this.findColumnIndex(['rate', 'price', 'cost']);
     const discountIndex = this.findColumnIndex(['disc', 'discount']);
     const taxIndex = this.findColumnIndex(['gst', 'tax']);
@@ -12519,14 +12984,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   private referenceDocsForType(type: string, docs: PurchaseRefDoc[]): PurchaseRefDoc[] {
-    if (type === 'PR')  return docs.filter(doc => this.normalizeKey(doc.status) === 'approved');
+    if (type === 'PR') return docs.filter(doc => this.normalizeKey(doc.status) === 'approved');
     if (type === 'RFQ') return docs.filter(doc => ['accepted', 'responsereceived'].includes(this.normalizeKey(doc.status)));
-    if (type === 'PO')  return docs.filter(doc => ['approved', 'confirmed'].includes(this.normalizeKey(doc.status)));
+    if (type === 'PO') return docs.filter(doc => ['approved', 'confirmed'].includes(this.normalizeKey(doc.status)));
     if (type === 'GRN') return this.filterPurchaseInvoiceAvailableGrnDocs(docs.filter(doc => this.normalizeKey(doc.status) === 'posted'));
-    if (type === 'PI')  return this.filterPurchaseReturnAvailablePiDocs(docs.filter(doc => this.normalizeKey(doc.status) === 'posted'));
-    if (type === 'SO')  return docs.filter(doc => this.normalizeKey(doc.status) === 'posted');
-    if (type === 'SI')  return this.filterSalesReturnAvailableInvoiceDocs(docs.filter(doc => this.normalizeKey(doc.status) === 'posted'));
-    if (type === 'DC')  return docs.filter(doc => this.normalizeKey(doc.status) === 'posted');
+    if (type === 'PI') return this.filterPurchaseReturnAvailablePiDocs(docs.filter(doc => this.normalizeKey(doc.status) === 'posted'));
+    if (type === 'SO') return docs.filter(doc => this.normalizeKey(doc.status) === 'posted');
+    if (type === 'SI') return this.filterSalesReturnAvailableInvoiceDocs(docs.filter(doc => this.normalizeKey(doc.status) === 'posted'));
+    if (type === 'DC') return docs.filter(doc => this.normalizeKey(doc.status) === 'posted');
     if (type === 'PURCHASERETURN' || type === 'SALESRETURN') return this.filterDocumentNoteAvailableReturnDocs(docs);
     return docs;
   }
@@ -12540,15 +13005,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (this.config?.key === 'debitNote') return 'Pick Purchase Return / Invoice';
     if (this.config?.key === 'creditNote') return 'Pick Sales Return / Invoice';
     const type = this.purchaseReferenceType() || this.salesReferenceType();
-    if (type === 'PR')  return 'Pick PR';
+    if (type === 'PR') return 'Pick PR';
     if (type === 'RFQ') return 'Pick RFQ';
-    if (type === 'PO')  return 'Pick PO';
+    if (type === 'PO') return 'Pick PO';
     if (type === 'GRN') return 'Pick GRN';
-    if (type === 'PI')  return 'Pick Invoice';
+    if (type === 'PI') return 'Pick Invoice';
     if (type === 'PURCHASERETURN') return 'Pick Purchase Return';
-    if (type === 'SO')  return 'Pick Sales Order';
-    if (type === 'DC')  return 'Pick Delivery Challan';
-    if (type === 'SI')  return 'Pick Sales Invoice';
+    if (type === 'SO') return 'Pick Sales Order';
+    if (type === 'DC') return 'Pick Delivery Challan';
+    if (type === 'SI') return 'Pick Sales Invoice';
     if (type === 'SALESRETURN') return 'Pick Sales Return';
     return 'Pick Reference';
   }
@@ -12681,6 +13146,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const source = Array.isArray(records) ? records : [];
     return source
       .filter(record => this.normalizeKey(record?.status || 'posted') === 'posted')
+      .filter(record => type !== 'PRODUCTIONPLAN' || this.config?.key !== 'materialIssueProduction' || this.planHasRemainingToIssue(record))
       .map(record => type === 'PRODUCTIONPLAN'
         ? this.productionPlanReferenceDoc(record)
         : this.materialIssueReferenceDoc(record));
@@ -13048,12 +13514,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   ): PurchaseRefDoc[] {
     const soDocs = so.success
       ? this.referenceDocsForType('SO', so.data || [])
-          .map(doc => ({ ...doc, doc_type: 'SO' }))
-          .filter(doc => !this.salesOrderHasDirectInvoiceProgress(doc))
+        .map(doc => ({ ...doc, doc_type: 'SO' }))
+        .filter(doc => !this.salesOrderHasDirectInvoiceProgress(doc))
       : [];
     const siDocs = si.success
       ? this.referenceDocsForType('SI', si.data || [])
-          .map(doc => ({ ...doc, doc_type: 'SI' }))
+        .map(doc => ({ ...doc, doc_type: 'SI' }))
       : [];
     return [...soDocs, ...siDocs];
   }
@@ -13113,8 +13579,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   ): PurchaseRefDoc[] {
     const soDocs = so.success
       ? this.referenceDocsForType('SO', so.data || [])
-          .map(doc => ({ ...doc, doc_type: 'SO' }))
-          .filter(doc => !this.salesOrderHasDeliveryProgress(doc))
+        .map(doc => ({ ...doc, doc_type: 'SO' }))
+        .filter(doc => !this.salesOrderHasDeliveryProgress(doc))
       : [];
     const dcDocs = dc.success
       ? this.referenceDocsForType('DC', dc.data || []).map(doc => ({ ...doc, doc_type: 'DC' }))
@@ -13366,7 +13832,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return (amt === undefined || amt === null || amt === '') ? '-' : String(amt);
   }
 
-    // ── 257: Purchase Return → PI Reference popup — where the rest of a PI line went ──
+  // ── 257: Purchase Return → PI Reference popup — where the rest of a PI line went ──
   // sp_get_purchase_docs_for_ref('PI') returns each item with the database field
   // names (sold_qty, transferred_out_qty, ...); camelCase is accepted too.
   // Serial products: exact split. Others: only not_at_location_qty is known.
@@ -13395,7 +13861,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   refPickerItemNotHereQty(item: any): number {
     return this.refPickerBreakdownQty(item?.not_at_location_qty ?? item?.notAtLocationQty);
   }
-    // 258: PI Reference popup (Purchase Return - whole invoice)
+  // 258: PI Reference popup (Purchase Return - whole invoice)
   refPickerDocTotal(doc: any): number {
     const total = (doc?.items || []).reduce((sum: number, item: any) => sum + (Number(item?.amount) || 0), 0);
     return Math.round(total * 100) / 100;
@@ -13405,8 +13871,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const serials = item?.returnable_serial_numbers ?? item?.returnableSerialNumbers ?? [];
     return Array.isArray(serials) && serials.length ? serials.join(', ') : '-';
   }
-    // 258: Purchase Return - the serials bound to a row, for the read-only cell's tooltip
-    // 258: Purchase Return - the serials bound to a row (tooltip of the read-only cell)
+  // 258: Purchase Return - the serials bound to a row, for the read-only cell's tooltip
+  // 258: Purchase Return - the serials bound to a row (tooltip of the read-only cell)
   purchaseReturnRowSerialsText(rowIndex: number): string {
     return (this.lineSerialUnitsMap()[rowIndex] || []).join(', ');
   }
@@ -13463,10 +13929,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const docs = this.refPickerAvailableDocs();
     const filtered = q
       ? docs.filter(doc =>
-          String(doc.doc_number || '').toLowerCase().includes(q)
-          || String(doc.party_name || '').toLowerCase().includes(q)
-          || String(doc.doc_date || '').toLowerCase().includes(q)
-        )
+        String(doc.doc_number || '').toLowerCase().includes(q)
+        || String(doc.party_name || '').toLowerCase().includes(q)
+        || String(doc.doc_date || '').toLowerCase().includes(q)
+      )
       : docs;
     return filtered.slice(0, 100);
   }
@@ -13476,10 +13942,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const docs = this.refPickerAvailableDocs();
     const total = q
       ? docs.filter(doc =>
-          String(doc.doc_number || '').toLowerCase().includes(q)
-          || String(doc.party_name || '').toLowerCase().includes(q)
-          || String(doc.doc_date || '').toLowerCase().includes(q)
-        ).length
+        String(doc.doc_number || '').toLowerCase().includes(q)
+        || String(doc.party_name || '').toLowerCase().includes(q)
+        || String(doc.doc_date || '').toLowerCase().includes(q)
+      ).length
       : docs.length;
     return Math.max(0, total - this.refPickerDisplayDocs().length);
   }
@@ -13549,7 +14015,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       && ['finishedProduct', 'plannedQty', 'bomVersion'].includes(fieldKey);
   }
 
-  private selectedProductionPlanningBom(values = this.formValues()): ManufacturingBomRecord | null {
+   private selectedProductionPlanningBom(values = this.formValues()): ManufacturingBomRecord | null {
     const finishedProduct = String(values['finishedProduct'] || '').trim();
     if (!finishedProduct) return null;
     const finishedKey = this.normalizeKey(finishedProduct);
@@ -13557,10 +14023,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const candidates = this.productionPlanningBomRecords()
       .filter(record => this.normalizeKey(record.finishedProduct) === finishedKey);
     if (!candidates.length) return null;
-    if (versionKey && versionKey !== 'latest') {
-      return candidates.find(record => this.normalizeKey(record.version) === versionKey) || null;
-    }
-    return candidates[0] || null;
+    // Version not chosen yet, or it belongs to another product: use the first BOM.
+    return candidates.find(record => this.normalizeKey(record.version) === versionKey) || candidates[0];
   }
 
   private formatBomRequirementQty(value: number): string {
@@ -13581,31 +14045,40 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.setManufacturingLineCell(row, ['Batch Req'], product?.batch_applicable ? 'Yes' : 'No');
     return this.normalizeLineRow(row);
   }
-
   private syncProductionPlanningBomRequirementRows(force = true): void {
     if (this.config?.key !== 'productionPlanning') return;
     if (!force && this.activeManufacturingLineRows().length) return;
 
     const values = this.formValues();
-    const plannedQty = Number(values['plannedQty']) || 0;
-    if (plannedQty <= 0) return;
-
-    const bom = this.selectedProductionPlanningBom(values);
-    if (!bom) return;
-
-    const rows = bom.rawMaterials
-      .map(rawMaterial => this.productionPlanningBomRequirementRow(rawMaterial, bom.quantityPerUnit * plannedQty))
-      .filter(row => row.some(cell => String(cell || '').trim()));
-    if (!rows.length) return;
-
-    if (!String(values['bomVersion'] || '').trim() && bom.version) {
-      this.formValues.update(current => ({ ...current, bomVersion: bom.version }));
-    }
+    const finishedProduct = String(values['finishedProduct'] || '').trim();
     this.entryLineRowsKey.set('productionPlanning');
-    this.entryLineRows.set(rows);
     this.lineRefItemIdMap.set({});
     this.lineSerialUnitsMap.set({});
-    this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
+    this.lineSerialWarrantyMap.set({});
+    this.lineSalesWarrantyBoundMap.set({});
+
+    if (!finishedProduct) {
+      this.entryLineRows.set([this.blankLineRow()]);
+      return;
+    }
+
+    const bom = this.selectedProductionPlanningBom(values);
+    if (!bom) {
+      this.entryLineRows.set([this.blankLineRow()]);
+      this.saveError.set(`No active BOM found for ${finishedProduct}. Create it in BOM Master first.`);
+      return;
+    }
+
+    if (!this.optionEquals(values['bomVersion'] || '', bom.version || '')) {
+      this.formValues.update(current => ({ ...current, bomVersion: bom.version }));
+    }
+
+    // Required Qty = BOM qty per 1 unit x Planned Qty (wastage does not add to it)
+    const plannedQty = Number(values['plannedQty']) || 0;
+    const rows = bom.materials.map(material =>
+      this.productionPlanningBomRequirementRow(material.productName, material.quantity * plannedQty));
+    this.entryLineRows.set(rows.length ? rows : [this.blankLineRow()]);
+    this.saveError.set('');
   }
 
   private manufacturingLineRefMapFromItems(
@@ -13630,16 +14103,29 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return map;
   }
 
-  private productionPlanMaterialToIssueLineRow(item: any): string[] {
+  // private productionPlanMaterialToIssueLineRow(item: any): string[] {
+  //   const row = this.blankLineRow();
+  //   this.setManufacturingLineCell(row, ['Raw Material', 'Material'], item.product_name || item.productName || '');
+  //   this.setManufacturingLineCell(row, ['Variant'], item.variant_name || item.variantName || '');
+  //   this.setManufacturingLineCell(row, ['Attribute'], item.attribute_value || item.attributeValue || item.attribute_name || item.attributeName || '');
+  //   this.setManufacturingLineCell(row, ['UOM'], item.uom_name || item.uomName || '');
+  //   this.setManufacturingLineCell(row, ['Required Qty'], item.required_qty ?? item.requiredQty ?? '');
+  //   this.setManufacturingLineCell(row, ['Issued Qty'], item.required_qty ?? item.requiredQty ?? '');
+  //   this.setManufacturingLineCell(row, ['Batch / Lot No', 'Batch / Serial'], item.batch_no || item.batchNo || '');
+  //   this.setManufacturingLineCell(row, ['Serial No'], item.serial_no || item.serialNo || '');
+  //   return this.normalizeLineRow(row);
+  // }
+    private productionPlanMaterialToIssueLineRow(item: any): string[] {
     const row = this.blankLineRow();
     this.setManufacturingLineCell(row, ['Raw Material', 'Material'], item.product_name || item.productName || '');
     this.setManufacturingLineCell(row, ['Variant'], item.variant_name || item.variantName || '');
     this.setManufacturingLineCell(row, ['Attribute'], item.attribute_value || item.attributeValue || item.attribute_name || item.attributeName || '');
     this.setManufacturingLineCell(row, ['UOM'], item.uom_name || item.uomName || '');
-    this.setManufacturingLineCell(row, ['Required Qty'], item.required_qty ?? item.requiredQty ?? '');
-    this.setManufacturingLineCell(row, ['Issued Qty'], item.required_qty ?? item.requiredQty ?? '');
+    // Required = still to be issued (plan Required - already issued). Partial issues allowed.
+    this.setManufacturingLineCell(row, ['Required Qty'], this.formatStockLimitQty(this.planItemRemainingQty(item)));
+    // Issued is typed by the user (what is actually sent today).
+    this.setManufacturingLineCell(row, ['Issued Qty'], '');
     this.setManufacturingLineCell(row, ['Batch / Lot No', 'Batch / Serial'], item.batch_no || item.batchNo || '');
-    this.setManufacturingLineCell(row, ['Serial No'], item.serial_no || item.serialNo || '');
     return this.normalizeLineRow(row);
   }
 
@@ -13767,8 +14253,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       patch['fromBranchId'] = doc.branch_id ?? null;
       patch['toWorkCenter'] = anyDoc.work_center || this.formValues()['toWorkCenter'] || '';
       patch['issueDate'] = this.isoDateValue(this.formValues()['issueDate']) || this.todayIso();
-      rows = (doc.items || []).map((item: any) => this.productionPlanMaterialToIssueLineRow(item));
-      refMap = this.manufacturingLineRefMapFromItems(doc.items || [], 'productionPlanItemId');
+      const openItems = (doc.items || []).filter((item: any) => this.planItemRemainingQty(item) > 0);
+      rows = openItems.map((item: any) => this.productionPlanMaterialToIssueLineRow(item));
+      refMap = this.manufacturingLineRefMapFromItems(openItems, 'productionPlanItemId');
+      patch['bomVersion'] = anyDoc.bom_version || anyDoc.bomVersion || '';
     } else if (key === 'productionEntry') {
       const cost = this.productionPlanEstimatedMaterialCost(doc);
       const plannedQty = anyDoc.planned_qty ?? anyDoc.plannedQty ?? '';
@@ -13958,7 +14446,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // surfaced as "Serial number X is not available" at Post (or the
       // openSerialPicker self-heal notice on reopen). The user must pick
       // from openSerialPicker's live, source-scoped, in-stock list instead.
-            const applyRows = () => {
+      const applyRows = () => {
         this.entryLineRowsKey.set(key);
         this.entryLineRows.set(rows);
         if (key === 'purchaseReturn' || key === 'goodsReceipt') {
@@ -14144,14 +14632,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           }
         }
         if (key === 'deliveryChallan' || key === 'salesInvoice') {
-        // Carry each picked SO item's own id forward so DC/SI posting can
-        // advance that SO item's delivered_qty/invoiced_qty (rule 4) — the
-        // ref-docs endpoint only started returning SO item ids once this was
-        // added (sp_get_purchase_docs_for_ref's WHEN 'SO' branch). Merged
-        // with the same item's own attribute_id/attribute_value (see
-        // attributeRefMapFromItems' doc comment) — DC/SI's own serial
-        // picker and save payload need that too, same reasoning as
-        // Purchase/Sales Return below.
+          // Carry each picked SO item's own id forward so DC/SI posting can
+          // advance that SO item's delivered_qty/invoiced_qty (rule 4) — the
+          // ref-docs endpoint only started returning SO item ids once this was
+          // added (sp_get_purchase_docs_for_ref's WHEN 'SO' branch). Merged
+          // with the same item's own attribute_id/attribute_value (see
+          // attributeRefMapFromItems' doc comment) — DC/SI's own serial
+          // picker and save payload need that too, same reasoning as
+          // Purchase/Sales Return below.
           const attrMap = this.attributeRefMapFromItems(doc.items || []);
           const nextMap: Record<number, { soItemId?: number; dcItemId?: number; siItemId?: number; attributeId?: number | null; attributeName?: string | null; attributeValue?: string | null }> = {};
           (doc.items || []).forEach((item: any, i: number) => {
@@ -15019,12 +15507,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // still reads 'in_stock'/'sold' until this document is actually saved, so
   // nothing server-side stops the same physical unit being picked twice
   // across two rows in one draft. This is the client-side backstop for that.
-  private serialUnitsUsedInOtherRows(excludeRowIndex: number): Set<string> {
+   private serialUnitsUsedInOtherRows(excludeRowIndex: number, productId: number | null = null): Set<string> {
+    // Serials picked in OTHER rows of this same document, for the SAME product only.
+    // Serial "1" of a motor and serial "1" of a frame are different physical units.
     const used = new Set<string>();
     const map = this.lineSerialUnitsMap();
+    const rows = this.entryLineRows();
     for (const key of Object.keys(map)) {
-      if (Number(key) === excludeRowIndex) continue;
-      for (const serial of map[Number(key)] || []) used.add(serial);
+      const rowIndex = Number(key);
+      if (rowIndex === excludeRowIndex) continue;
+      if (productId != null) {
+        const otherProduct = this.lineRowProduct(this.normalizeLineRow(rows[rowIndex] || []));
+        if (Number(otherProduct?.id) !== Number(productId)) continue;
+      }
+      for (const serial of map[rowIndex] || []) used.add(serial);
     }
     return used;
   }
@@ -15139,13 +15635,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       const attributeValue = refAttrForPicker?.attributeValue !== undefined ? refAttrForPicker.attributeValue : resolvedAttrForPicker.attribute_value;
       const obs = purchaseReturnPiId
         ? this.txService.getInstockSerialsForSource(purchaseReturnGrnId
-            ? { productId: product.id, sourceDocType: 'grn', sourceDocId: purchaseReturnGrnId, variantId, attributeId, attributeValue }
-            : { productId: product.id, sourceDocType: 'purchase_invoice', sourceDocId: purchaseReturnPiId, variantId, attributeId, attributeValue })
+          ? { productId: product.id, sourceDocType: 'grn', sourceDocId: purchaseReturnGrnId, variantId, attributeId, attributeValue }
+          : { productId: product.id, sourceDocType: 'purchase_invoice', sourceDocId: purchaseReturnPiId, variantId, attributeId, attributeValue })
         : this.config?.key === 'salesReturn'
           ? this.txService.getSoldSerialsForReturn({ productId: product.id, invoiceId: salesReturnInvoiceId, variantId, attributeId, attributeValue })
           : this.txService.getAvailableSerials({ productId: product.id, variantId, attributeId, attributeValue, ...this.resolveHeaderLocationForSerialPicker() });
-      const usedElsewhere = this.serialUnitsUsedInOtherRows(rowIndex);
-      const previouslySaved = [...this.serialPickerDraftValues()];
+      const usedElsewhere = this.serialUnitsUsedInOtherRows(rowIndex, product.id);      const previouslySaved = [...this.serialPickerDraftValues()];
       obs.pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: res => {
@@ -15583,7 +16078,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.lineSerialValueMap.set({});
       this.lineRefItemIdMap.set({});
       this.lineSerialUnitsMap.set({});
-    this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
+      this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
       this.applyDefaultLocationToCurrentTransaction(true);
       return;
     }
@@ -16079,7 +16574,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             this.transportDetailsForm.set({ ...data });
           }
         },
-        error: () => {}
+        error: () => { }
       });
   }
 
@@ -16089,7 +16584,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const payload: TransportDetails = { ...this.transportDetailsForm(), docType, docId } as TransportDetails;
     this.txService.saveTransportDetails(payload)
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: () => {}, error: () => {} });
+      .subscribe({ next: () => { }, error: () => { } });
   }
 
   dcDistrictOptions(): string[] {
@@ -16200,7 +16695,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           area: postOffice.Name || ''
         });
       })
-      .catch(() => {});
+      .catch(() => { });
   }
 
   private localDcPincodeLookup(pincode: string): { state: string; district: string; city: string; area: string } | null {
@@ -16294,7 +16789,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           area: postOffice.Name || ''
         });
       })
-      .catch(() => {});
+      .catch(() => { });
   }
 
   private applyPartyPincodeLookup(lookup: { state: string; district: string; city: string; area: string }): void {
@@ -16522,53 +17017,53 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const key = this.config?.key;
     const segmentId = this.selectedSegmentId();
     switch (key) {
-      case 'businessSegments':     obs$ = this.inventoryConfigService.getSegments(true);            break;
-      case 'branchMaster':         obs$ = this.inventoryConfigService.getBranchesInv(true);         break;
-      case 'warehouseMaster':      obs$ = this.inventoryConfigService.getWarehouses(true);          break;
-      case 'uomMaster':            obs$ = this.inventoryConfigService.getUoms(true, segmentId);     break;
-      case 'categoryMaster':       obs$ = this.inventoryConfigService.getCategories(true);          break;
-      case 'hsnSacMapping':        obs$ = this.inventoryConfigService.getHsnSac(undefined, true);   break;
-      case 'paymentTermsMaster':   obs$ = this.inventoryConfigService.getPaymentTerms(true);        break;
-      case 'brandMaster':          obs$ = this.inventoryConfigService.getBrands(segmentId, true);        break;
-      case 'attributeMaster':      obs$ = this.inventoryConfigService.getAttributes(segmentId, true);    break;
-      case 'productGroupMaster':   obs$ = this.inventoryConfigService.getProductGroups(segmentId, null, true); break;
-      case 'variantMaster':        obs$ = this.inventoryConfigService.getVariants(segmentId, null, true);     break;
-      case 'serialNumberPolicy':   obs$ = this.inventoryConfigService.getSerialPolicies(segmentId, null, true); break;
-      case 'batchLotPolicy':       obs$ = this.inventoryConfigService.getBatchPolicies(segmentId, null, true);  break;
-      case 'barcodeConfiguration':  obs$ = this.inventoryConfigService.getBarcodeConfigurations(true);     break;
-      case 'substituteProducts':    obs$ = this.inventoryConfigService.getSubstituteProducts(true);        break;
-      case 'consumptionTypeMaster': obs$ = this.inventoryConfigService.getConsumptionTypes(segmentId, true);   break;
-      case 'productTypeMaster':     obs$ = this.inventoryConfigService.getProductTypes(true);                  break;
-      case 'bomMaster':             obs$ = this.inventoryConfigService.getBoms(true);                          break;
-      case 'workCenterMaster':      obs$ = this.inventoryConfigService.getWorkCenters(true);                   break;
-      case 'priceListMaster':       obs$ = this.inventoryConfigService.getPriceLists(true);                    break;
-      case 'vendorMaster':         obs$ = this.inventoryConfigService.getVendors(null, true);            break;
-      case 'customerMaster':       obs$ = this.inventoryConfigService.getCustomers(null, true);          break;
-      case 'channelPartnerMaster': obs$ = this.inventoryConfigService.getChannelPartners(null, true);    break;
+      case 'businessSegments': obs$ = this.inventoryConfigService.getSegments(true); break;
+      case 'branchMaster': obs$ = this.inventoryConfigService.getBranchesInv(true); break;
+      case 'warehouseMaster': obs$ = this.inventoryConfigService.getWarehouses(true); break;
+      case 'uomMaster': obs$ = this.inventoryConfigService.getUoms(true, segmentId); break;
+      case 'categoryMaster': obs$ = this.inventoryConfigService.getCategories(true); break;
+      case 'hsnSacMapping': obs$ = this.inventoryConfigService.getHsnSac(undefined, true); break;
+      case 'paymentTermsMaster': obs$ = this.inventoryConfigService.getPaymentTerms(true); break;
+      case 'brandMaster': obs$ = this.inventoryConfigService.getBrands(segmentId, true); break;
+      case 'attributeMaster': obs$ = this.inventoryConfigService.getAttributes(segmentId, true); break;
+      case 'productGroupMaster': obs$ = this.inventoryConfigService.getProductGroups(segmentId, null, true); break;
+      case 'variantMaster': obs$ = this.inventoryConfigService.getVariants(segmentId, null, true); break;
+      case 'serialNumberPolicy': obs$ = this.inventoryConfigService.getSerialPolicies(segmentId, null, true); break;
+      case 'batchLotPolicy': obs$ = this.inventoryConfigService.getBatchPolicies(segmentId, null, true); break;
+      case 'barcodeConfiguration': obs$ = this.inventoryConfigService.getBarcodeConfigurations(true); break;
+      case 'substituteProducts': obs$ = this.inventoryConfigService.getSubstituteProducts(true); break;
+      case 'consumptionTypeMaster': obs$ = this.inventoryConfigService.getConsumptionTypes(segmentId, true); break;
+      case 'productTypeMaster': obs$ = this.inventoryConfigService.getProductTypes(true); break;
+      case 'bomMaster': obs$ = this.inventoryConfigService.getBoms(true); break;
+      case 'workCenterMaster': obs$ = this.inventoryConfigService.getWorkCenters(true); break;
+      case 'priceListMaster': obs$ = this.inventoryConfigService.getPriceLists(true); break;
+      case 'vendorMaster': obs$ = this.inventoryConfigService.getVendors(null, true); break;
+      case 'customerMaster': obs$ = this.inventoryConfigService.getCustomers(null, true); break;
+      case 'channelPartnerMaster': obs$ = this.inventoryConfigService.getChannelPartners(null, true); break;
       case 'productServiceMaster': obs$ = this.inventoryConfigService.getProducts(segmentId, null, true); break;
-      case 'purchaseRequisition':  obs$ = this.txService.getPurchaseRequisitions(undefined, segmentId); break;
-      case 'requestForQuotation':  obs$ = this.txService.getRfqs(undefined, segmentId); break;
-      case 'purchaseOrder':        obs$ = this.txService.getPurchaseOrders(undefined, segmentId); break;
-      case 'goodsReceipt':         obs$ = this.txService.getGrns(undefined, segmentId); break;
-      case 'stockTransfer':        obs$ = this.txService.getStockTransfers(undefined, segmentId); break;
-      case 'stockAdjustment':      obs$ = this.txService.getStockAdjustments(undefined, segmentId); break;
-      case 'openingStockEntry':    obs$ = this.txService.getOpeningStockEntries(undefined, segmentId); break;
-      case 'cycleCount':           obs$ = this.txService.getCycleCounts(undefined, segmentId); break;
-      case 'purchaseInvoice':      obs$ = this.txService.getPurchaseInvoices(undefined, segmentId); break;
-      case 'purchaseReturn':       obs$ = this.txService.getPurchaseReturns(undefined, segmentId); break;
-      case 'debitNote':            obs$ = this.txService.getDebitNotes(undefined, segmentId); break;
-      case 'productionPlanning':    obs$ = this.txService.getProductionPlans(undefined, segmentId); break;
+      case 'purchaseRequisition': obs$ = this.txService.getPurchaseRequisitions(undefined, segmentId); break;
+      case 'requestForQuotation': obs$ = this.txService.getRfqs(undefined, segmentId); break;
+      case 'purchaseOrder': obs$ = this.txService.getPurchaseOrders(undefined, segmentId); break;
+      case 'goodsReceipt': obs$ = this.txService.getGrns(undefined, segmentId); break;
+      case 'stockTransfer': obs$ = this.txService.getStockTransfers(undefined, segmentId); break;
+      case 'stockAdjustment': obs$ = this.txService.getStockAdjustments(undefined, segmentId); break;
+      case 'openingStockEntry': obs$ = this.txService.getOpeningStockEntries(undefined, segmentId); break;
+      case 'cycleCount': obs$ = this.txService.getCycleCounts(undefined, segmentId); break;
+      case 'purchaseInvoice': obs$ = this.txService.getPurchaseInvoices(undefined, segmentId); break;
+      case 'purchaseReturn': obs$ = this.txService.getPurchaseReturns(undefined, segmentId); break;
+      case 'debitNote': obs$ = this.txService.getDebitNotes(undefined, segmentId); break;
+      case 'productionPlanning': obs$ = this.txService.getProductionPlans(undefined, segmentId); break;
       case 'materialIssueProduction': obs$ = this.txService.getMaterialIssueProductions(undefined, segmentId); break;
-      case 'productionEntry':       obs$ = this.txService.getProductionEntries(undefined, segmentId); break;
-      case 'productionReturn':      obs$ = this.txService.getProductionReturns(undefined, segmentId); break;
-      case 'estimation':           obs$ = this.txService.getEstimations(undefined, segmentId); break;
-      case 'proformaInvoice':      obs$ = this.txService.getProformaInvoices(undefined, segmentId); break;
-      case 'salesInvoice':         obs$ = this.txService.getSalesInvoices(undefined, segmentId); break;
-      case 'salesOrder':           obs$ = this.txService.getSalesOrders(undefined, segmentId); break;
-      case 'salesQuotation':       obs$ = this.txService.getSalesQuotations(undefined, segmentId); break;
-      case 'deliveryChallan':      obs$ = this.txService.getDeliveryChallans(undefined, segmentId, undefined, this.dcPendingInvoiceFilter()); break;
-      case 'salesReturn':          obs$ = this.txService.getSalesReturns(undefined, segmentId); break;
-      case 'creditNote':           obs$ = this.txService.getCreditNotes(undefined, segmentId); break;
+      case 'productionEntry': obs$ = this.txService.getProductionEntries(undefined, segmentId); break;
+      case 'productionReturn': obs$ = this.txService.getProductionReturns(undefined, segmentId); break;
+      case 'estimation': obs$ = this.txService.getEstimations(undefined, segmentId); break;
+      case 'proformaInvoice': obs$ = this.txService.getProformaInvoices(undefined, segmentId); break;
+      case 'salesInvoice': obs$ = this.txService.getSalesInvoices(undefined, segmentId); break;
+      case 'salesOrder': obs$ = this.txService.getSalesOrders(undefined, segmentId); break;
+      case 'salesQuotation': obs$ = this.txService.getSalesQuotations(undefined, segmentId); break;
+      case 'deliveryChallan': obs$ = this.txService.getDeliveryChallans(undefined, segmentId, undefined, this.dcPendingInvoiceFilter()); break;
+      case 'salesReturn': obs$ = this.txService.getSalesReturns(undefined, segmentId); break;
+      case 'creditNote': obs$ = this.txService.getCreditNotes(undefined, segmentId); break;
       default: return;
     }
     obs$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
@@ -16577,7 +17072,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           this.savedRecordObjects.set(res.data);
         }
       },
-      error: () => {}
+      error: () => { }
     });
   }
 
@@ -17097,53 +17592,53 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.saveError.set('');
     let obs$: Observable<ApiResponse<any>>;
     switch (this.config?.key) {
-      case 'businessSegments':      obs$ = this.inventoryConfigService.saveSegment(payload, id);          break;
-      case 'branchMaster':          obs$ = this.inventoryConfigService.saveBranchInv(payload, id);       break;
-      case 'warehouseMaster':       obs$ = this.inventoryConfigService.saveWarehouse(payload, id);        break;
-      case 'uomMaster':             obs$ = this.inventoryConfigService.saveUom(payload, id);              break;
-      case 'categoryMaster':        obs$ = this.inventoryConfigService.saveCategory(payload, id);         break;
-      case 'hsnSacMapping':         obs$ = this.inventoryConfigService.saveHsnSac(payload, id);           break;
-      case 'paymentTermsMaster':    obs$ = this.inventoryConfigService.savePaymentTerm(payload, id);      break;
-      case 'brandMaster':           obs$ = this.inventoryConfigService.saveBrand(payload, id);            break;
-      case 'attributeMaster':       obs$ = this.inventoryConfigService.saveAttribute(payload, id);        break;
-      case 'productGroupMaster':    obs$ = this.inventoryConfigService.saveProductGroup(payload, id);     break;
-      case 'variantMaster':         obs$ = this.inventoryConfigService.saveVariant(payload, id);          break;
-      case 'serialNumberPolicy':    obs$ = this.inventoryConfigService.saveSerialPolicy(payload, id);     break;
-      case 'batchLotPolicy':        obs$ = this.inventoryConfigService.saveBatchPolicy(payload, id);      break;
-      case 'barcodeConfiguration':   obs$ = this.inventoryConfigService.saveBarcodeConfiguration(payload, id); break;
-      case 'substituteProducts':     obs$ = this.inventoryConfigService.saveSubstituteProduct(payload, id); break;
-      case 'consumptionTypeMaster': obs$ = this.inventoryConfigService.saveConsumptionType(payload, id);  break;
-      case 'productTypeMaster':     obs$ = this.inventoryConfigService.saveProductType(payload, id);       break;
-      case 'vendorMaster':          obs$ = this.saveVendorWithContactWriteback(payload, id);              break;
-      case 'customerMaster':        obs$ = this.saveCustomerWithContactWriteback(payload, id);            break;
-      case 'channelPartnerMaster':  obs$ = this.saveChannelPartnerWithContactWriteback(payload, id);      break;
-      case 'productServiceMaster':  obs$ = this.inventoryConfigService.saveProduct(payload, id);          break;
-      case 'bomMaster':             obs$ = this.inventoryConfigService.saveBom(payload, id);              break;
-      case 'workCenterMaster':      obs$ = this.inventoryConfigService.saveWorkCenter(payload, id);       break;
-      case 'priceListMaster':       obs$ = this.inventoryConfigService.savePriceList(payload, id);        break;
-      case 'purchaseRequisition':   obs$ = this.txService.savePurchaseRequisition(payload, id);           break;
-      case 'requestForQuotation':   obs$ = this.txService.saveRfq(payload, id);                           break;
-      case 'purchaseOrder':         obs$ = this.txService.savePurchaseOrder(payload, id);                  break;
-      case 'goodsReceipt':          obs$ = this.txService.saveGrn(payload, id);                           break;
-      case 'stockTransfer':         obs$ = this.txService.saveStockTransfer(payload, id);                 break;
-      case 'stockAdjustment':       obs$ = this.txService.saveStockAdjustment(payload, id);               break;
-      case 'openingStockEntry':     obs$ = this.txService.saveOpeningStockEntry(payload, id);             break;
-      case 'cycleCount':            obs$ = this.txService.saveCycleCount(payload, id);                    break;
-      case 'purchaseInvoice':       obs$ = this.txService.savePurchaseInvoice(payload, id);                break;
-      case 'purchaseReturn':        obs$ = this.txService.savePurchaseReturn(payload, id);                 break;
-      case 'debitNote':             obs$ = this.txService.saveDebitNote(payload, id);                      break;
-      case 'productionPlanning':     obs$ = this.txService.saveProductionPlan(payload, id);                 break;
-      case 'materialIssueProduction': obs$ = this.txService.saveMaterialIssueProduction(payload, id);       break;
-      case 'productionEntry':        obs$ = this.txService.saveProductionEntry(payload, id);                break;
-      case 'productionReturn':       obs$ = this.txService.saveProductionReturn(payload, id);               break;
-      case 'estimation':            obs$ = this.txService.saveEstimation(payload, id);                     break;
-      case 'proformaInvoice':       obs$ = this.txService.saveProformaInvoice(payload, id);                break;
-      case 'salesInvoice':          obs$ = this.txService.saveSalesInvoice(payload, id);                   break;
-      case 'salesOrder':            obs$ = this.txService.saveSalesOrder(payload, id);                     break;
-      case 'salesQuotation':        obs$ = this.txService.saveSalesQuotation(payload, id);                 break;
-      case 'deliveryChallan':       obs$ = this.txService.saveDeliveryChallan(payload, id);                break;
-      case 'salesReturn':           obs$ = this.txService.saveSalesReturn(payload, id);                    break;
-      case 'creditNote':            obs$ = this.txService.saveCreditNote(payload, id);                     break;
+      case 'businessSegments': obs$ = this.inventoryConfigService.saveSegment(payload, id); break;
+      case 'branchMaster': obs$ = this.inventoryConfigService.saveBranchInv(payload, id); break;
+      case 'warehouseMaster': obs$ = this.inventoryConfigService.saveWarehouse(payload, id); break;
+      case 'uomMaster': obs$ = this.inventoryConfigService.saveUom(payload, id); break;
+      case 'categoryMaster': obs$ = this.inventoryConfigService.saveCategory(payload, id); break;
+      case 'hsnSacMapping': obs$ = this.inventoryConfigService.saveHsnSac(payload, id); break;
+      case 'paymentTermsMaster': obs$ = this.inventoryConfigService.savePaymentTerm(payload, id); break;
+      case 'brandMaster': obs$ = this.inventoryConfigService.saveBrand(payload, id); break;
+      case 'attributeMaster': obs$ = this.inventoryConfigService.saveAttribute(payload, id); break;
+      case 'productGroupMaster': obs$ = this.inventoryConfigService.saveProductGroup(payload, id); break;
+      case 'variantMaster': obs$ = this.inventoryConfigService.saveVariant(payload, id); break;
+      case 'serialNumberPolicy': obs$ = this.inventoryConfigService.saveSerialPolicy(payload, id); break;
+      case 'batchLotPolicy': obs$ = this.inventoryConfigService.saveBatchPolicy(payload, id); break;
+      case 'barcodeConfiguration': obs$ = this.inventoryConfigService.saveBarcodeConfiguration(payload, id); break;
+      case 'substituteProducts': obs$ = this.inventoryConfigService.saveSubstituteProduct(payload, id); break;
+      case 'consumptionTypeMaster': obs$ = this.inventoryConfigService.saveConsumptionType(payload, id); break;
+      case 'productTypeMaster': obs$ = this.inventoryConfigService.saveProductType(payload, id); break;
+      case 'vendorMaster': obs$ = this.saveVendorWithContactWriteback(payload, id); break;
+      case 'customerMaster': obs$ = this.saveCustomerWithContactWriteback(payload, id); break;
+      case 'channelPartnerMaster': obs$ = this.saveChannelPartnerWithContactWriteback(payload, id); break;
+      case 'productServiceMaster': obs$ = this.inventoryConfigService.saveProduct(payload, id); break;
+      case 'bomMaster': obs$ = this.inventoryConfigService.saveBom(payload, id); break;
+      case 'workCenterMaster': obs$ = this.inventoryConfigService.saveWorkCenter(payload, id); break;
+      case 'priceListMaster': obs$ = this.inventoryConfigService.savePriceList(payload, id); break;
+      case 'purchaseRequisition': obs$ = this.txService.savePurchaseRequisition(payload, id); break;
+      case 'requestForQuotation': obs$ = this.txService.saveRfq(payload, id); break;
+      case 'purchaseOrder': obs$ = this.txService.savePurchaseOrder(payload, id); break;
+      case 'goodsReceipt': obs$ = this.txService.saveGrn(payload, id); break;
+      case 'stockTransfer': obs$ = this.txService.saveStockTransfer(payload, id); break;
+      case 'stockAdjustment': obs$ = this.txService.saveStockAdjustment(payload, id); break;
+      case 'openingStockEntry': obs$ = this.txService.saveOpeningStockEntry(payload, id); break;
+      case 'cycleCount': obs$ = this.txService.saveCycleCount(payload, id); break;
+      case 'purchaseInvoice': obs$ = this.txService.savePurchaseInvoice(payload, id); break;
+      case 'purchaseReturn': obs$ = this.txService.savePurchaseReturn(payload, id); break;
+      case 'debitNote': obs$ = this.txService.saveDebitNote(payload, id); break;
+      case 'productionPlanning': obs$ = this.txService.saveProductionPlan(payload, id); break;
+      case 'materialIssueProduction': obs$ = this.txService.saveMaterialIssueProduction(payload, id); break;
+      case 'productionEntry': obs$ = this.txService.saveProductionEntry(payload, id); break;
+      case 'productionReturn': obs$ = this.txService.saveProductionReturn(payload, id); break;
+      case 'estimation': obs$ = this.txService.saveEstimation(payload, id); break;
+      case 'proformaInvoice': obs$ = this.txService.saveProformaInvoice(payload, id); break;
+      case 'salesInvoice': obs$ = this.txService.saveSalesInvoice(payload, id); break;
+      case 'salesOrder': obs$ = this.txService.saveSalesOrder(payload, id); break;
+      case 'salesQuotation': obs$ = this.txService.saveSalesQuotation(payload, id); break;
+      case 'deliveryChallan': obs$ = this.txService.saveDeliveryChallan(payload, id); break;
+      case 'salesReturn': obs$ = this.txService.saveSalesReturn(payload, id); break;
+      case 'creditNote': obs$ = this.txService.saveCreditNote(payload, id); break;
       default: this.isSaving.set(false); return;
     }
     obs$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
@@ -17225,7 +17720,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             this.clearConfigForm();
             this.loadApiRecords();
             this.loadLookupOptions();
-            if (['purchaseInvoice', 'purchaseReturn', 'debitNote', 'creditNote', 'salesInvoice', 'deliveryChallan', 'salesReturn'].includes(this.config?.key || '')) {
+            if (['purchaseInvoice', 'purchaseReturn', 'debitNote', 'creditNote', 'salesInvoice', 'deliveryChallan', 'salesReturn','materialIssueProduction'].includes(this.config?.key || '')) {
               // Refresh the reference-doc list (the just-saved doc must drop
               // out of it — see the duplicate-reference exclusion below) but
               // don't auto-reopen the picker tray right after a save; that
@@ -17990,10 +18485,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   generateSku(name: string, category?: string, brand?: string, variant?: string): string {
-    const catAbbr     = category ? category.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) : '';
-    const brandAbbr   = brand    ? brand.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3)    : '';
-    const variantAbbr = variant  ? variant.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3)  : '';
-    const words    = String(name || '').trim().split(/\s+/).filter(Boolean);
+    const catAbbr = category ? category.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) : '';
+    const brandAbbr = brand ? brand.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) : '';
+    const variantAbbr = variant ? variant.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) : '';
+    const words = String(name || '').trim().split(/\s+/).filter(Boolean);
     const nameParts = words.slice(0, 2)
       .map(w => w.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3))
       .filter(Boolean);
@@ -18021,7 +18516,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     } else if (fieldKey === 'consumptionType') {
       codeKey = 'typeCode';
     } else if (fieldKey === 'name' &&
-               (this.config?.key === 'vendorMaster' || this.config?.key === 'customerMaster')) {
+      (this.config?.key === 'vendorMaster' || this.config?.key === 'customerMaster')) {
       codeKey = 'code';
     }
     if (!codeKey) return;
@@ -18041,9 +18536,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (current && String(current).trim() && !this._autoCodeFields.has(codeKey)) return;
     const sourceText = this.config?.key === 'bomMaster'
       ? [fieldKey === 'finishedProduct' ? value : this.formValues()['finishedProduct'], fieldKey === 'version' ? value : this.formValues()['version']]
-          .map(part => String(part || '').trim())
-          .filter(Boolean)
-          .join(' ')
+        .map(part => String(part || '').trim())
+        .filter(Boolean)
+        .join(' ')
       : value;
     const generated = this.generateCodeFromName(sourceText);
     if (!generated) return;
@@ -18062,16 +18557,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const display = this.mapToGridRows([displaySource])[0] || [];
     const formSnapshot: Record<string, any> = { ...this.formValues() };
     if (this.config?.key === 'productServiceMaster') {
-      formSnapshot['__productName']             = this.productName();
+      formSnapshot['__productName'] = this.productName();
       formSnapshot['__selectedProductCategory'] = this.selectedProductCategory();
-      formSnapshot['__hsnSacCode']              = this.hsnSacCode();
-      formSnapshot['__gstRate']                 = this.gstRate();
-      formSnapshot['__productBatchApplicable']  = this.productBatchApplicable();
+      formSnapshot['__hsnSacCode'] = this.hsnSacCode();
+      formSnapshot['__gstRate'] = this.gstRate();
+      formSnapshot['__productBatchApplicable'] = this.productBatchApplicable();
       formSnapshot['__productSerialApplicable'] = this.productSerialApplicable();
       formSnapshot['__productExpiryApplicable'] = this.productExpiryApplicable();
-      formSnapshot['__productQcRequired']       = this.productQcRequired();
+      formSnapshot['__productQcRequired'] = this.productQcRequired();
       formSnapshot['__productWarrantyApplicable'] = this.productWarrantyApplicable();
-      formSnapshot['__entryLineRows']           = JSON.stringify(this.entryLineRows());
+      formSnapshot['__entryLineRows'] = JSON.stringify(this.entryLineRows());
     }
     if (this.config?.key === 'uomMaster' || this.config?.key === 'variantMaster') {
       formSnapshot['__entryLineRows'] = JSON.stringify(this.entryLineRows());
@@ -18098,21 +18593,21 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.formValues.set({ ...row.formSnapshot });
     if (this.config?.key === 'productServiceMaster') {
       const s = row.formSnapshot;
-      if (s['__productName'] !== undefined)             this.productName.set(s['__productName']);
+      if (s['__productName'] !== undefined) this.productName.set(s['__productName']);
       if (s['__selectedProductCategory'] !== undefined) this.selectedProductCategory.set(s['__selectedProductCategory']);
-      if (s['__hsnSacCode'] !== undefined)              this.hsnSacCode.set(s['__hsnSacCode']);
-      if (s['__gstRate'] !== undefined)                 this.gstRate.set(s['__gstRate']);
-      if (s['__productBatchApplicable'] !== undefined)  this.productBatchApplicable.set(s['__productBatchApplicable']);
+      if (s['__hsnSacCode'] !== undefined) this.hsnSacCode.set(s['__hsnSacCode']);
+      if (s['__gstRate'] !== undefined) this.gstRate.set(s['__gstRate']);
+      if (s['__productBatchApplicable'] !== undefined) this.productBatchApplicable.set(s['__productBatchApplicable']);
       if (s['__productSerialApplicable'] !== undefined) this.productSerialApplicable.set(s['__productSerialApplicable']);
       if (s['__productExpiryApplicable'] !== undefined) this.productExpiryApplicable.set(s['__productExpiryApplicable']);
-      if (s['__productQcRequired'] !== undefined)       this.productQcRequired.set(s['__productQcRequired']);
+      if (s['__productQcRequired'] !== undefined) this.productQcRequired.set(s['__productQcRequired']);
       if (s['__productWarrantyApplicable'] !== undefined) this.productWarrantyApplicable.set(s['__productWarrantyApplicable']);
       if (s['__entryLineRows']) {
         try {
           const rows = JSON.parse(s['__entryLineRows']);
           this.entryLineRowsKey.set('productServiceMaster');
           this.entryLineRows.set(rows);
-        } catch {}
+        } catch { }
       }
     }
     if (this.config?.key === 'uomMaster' || this.config?.key === 'variantMaster') {
@@ -18123,7 +18618,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const rows = JSON.parse(s['__entryLineRows']);
           this.entryLineRowsKey.set(this.config.key);
           this.entryLineRows.set(rows);
-        } catch {}
+        } catch { }
       }
     }
     this.saveError.set('');
@@ -18148,30 +18643,30 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
     const saveOne = (payload: Record<string, any>): Observable<ApiResponse<any>> => {
       switch (this.config?.key) {
-        case 'businessSegments':     return this.inventoryConfigService.saveSegment(payload, null);
-        case 'branchMaster':         return this.inventoryConfigService.saveBranchInv(payload, null);
-        case 'warehouseMaster':      return this.inventoryConfigService.saveWarehouse(payload, null);
-        case 'uomMaster':            return this.inventoryConfigService.saveUom(payload, null);
-        case 'categoryMaster':       return this.inventoryConfigService.saveCategory(payload, null);
-        case 'hsnSacMapping':        return this.inventoryConfigService.saveHsnSac(payload, null);
-        case 'paymentTermsMaster':   return this.inventoryConfigService.savePaymentTerm(payload, null);
-        case 'brandMaster':          return this.inventoryConfigService.saveBrand(payload, null);
-        case 'attributeMaster':      return this.inventoryConfigService.saveAttribute(payload, null);
-        case 'productGroupMaster':   return this.inventoryConfigService.saveProductGroup(payload, null);
-        case 'variantMaster':        return this.inventoryConfigService.saveVariant(payload, null);
-        case 'serialNumberPolicy':   return this.inventoryConfigService.saveSerialPolicy(payload, null);
-        case 'batchLotPolicy':       return this.inventoryConfigService.saveBatchPolicy(payload, null);
+        case 'businessSegments': return this.inventoryConfigService.saveSegment(payload, null);
+        case 'branchMaster': return this.inventoryConfigService.saveBranchInv(payload, null);
+        case 'warehouseMaster': return this.inventoryConfigService.saveWarehouse(payload, null);
+        case 'uomMaster': return this.inventoryConfigService.saveUom(payload, null);
+        case 'categoryMaster': return this.inventoryConfigService.saveCategory(payload, null);
+        case 'hsnSacMapping': return this.inventoryConfigService.saveHsnSac(payload, null);
+        case 'paymentTermsMaster': return this.inventoryConfigService.savePaymentTerm(payload, null);
+        case 'brandMaster': return this.inventoryConfigService.saveBrand(payload, null);
+        case 'attributeMaster': return this.inventoryConfigService.saveAttribute(payload, null);
+        case 'productGroupMaster': return this.inventoryConfigService.saveProductGroup(payload, null);
+        case 'variantMaster': return this.inventoryConfigService.saveVariant(payload, null);
+        case 'serialNumberPolicy': return this.inventoryConfigService.saveSerialPolicy(payload, null);
+        case 'batchLotPolicy': return this.inventoryConfigService.saveBatchPolicy(payload, null);
         case 'barcodeConfiguration': return this.inventoryConfigService.saveBarcodeConfiguration(payload, null);
-        case 'substituteProducts':   return this.inventoryConfigService.saveSubstituteProduct(payload, null);
-        case 'consumptionTypeMaster':return this.inventoryConfigService.saveConsumptionType(payload, null);
-        case 'vendorMaster':         return this.saveVendorWithContactWriteback(payload, null);
-        case 'customerMaster':       return this.saveCustomerWithContactWriteback(payload, null);
+        case 'substituteProducts': return this.inventoryConfigService.saveSubstituteProduct(payload, null);
+        case 'consumptionTypeMaster': return this.inventoryConfigService.saveConsumptionType(payload, null);
+        case 'vendorMaster': return this.saveVendorWithContactWriteback(payload, null);
+        case 'customerMaster': return this.saveCustomerWithContactWriteback(payload, null);
         case 'channelPartnerMaster': return this.saveChannelPartnerWithContactWriteback(payload, null);
         case 'productServiceMaster': return this.inventoryConfigService.saveProduct(payload, null);
-        case 'productTypeMaster':    return this.inventoryConfigService.saveProductType(payload, null);
-        case 'bomMaster':            return this.inventoryConfigService.saveBom(payload, null);
-        case 'workCenterMaster':     return this.inventoryConfigService.saveWorkCenter(payload, null);
-        case 'priceListMaster':      return this.inventoryConfigService.savePriceList(payload, null);
+        case 'productTypeMaster': return this.inventoryConfigService.saveProductType(payload, null);
+        case 'bomMaster': return this.inventoryConfigService.saveBom(payload, null);
+        case 'workCenterMaster': return this.inventoryConfigService.saveWorkCenter(payload, null);
+        case 'priceListMaster': return this.inventoryConfigService.savePriceList(payload, null);
         default: return of({ success: false, message: 'Unknown screen', data: null });
       }
     };
@@ -18976,28 +19471,28 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private findRecordByRow(row: string[]): any {
     const records = this.segmentFilteredRecords(this.savedRecordObjects());
     switch (this.config?.key) {
-      case 'businessSegments':   return records.find(r => r.segment_name === row[0]);
-      case 'branchMaster':       return records.find(r => r.branch_code === row[0]);
-      case 'warehouseMaster':    return records.find(r => r.warehouse_code === row[0]);
-      case 'uomMaster':          return records.find(r => r.uom_code === row[0]);
-      case 'categoryMaster':     return records.find(r => r.category_code === row[0]);
-      case 'hsnSacMapping':      return records.find(r => r.code === row[0]);
+      case 'businessSegments': return records.find(r => r.segment_name === row[0]);
+      case 'branchMaster': return records.find(r => r.branch_code === row[0]);
+      case 'warehouseMaster': return records.find(r => r.warehouse_code === row[0]);
+      case 'uomMaster': return records.find(r => r.uom_code === row[0]);
+      case 'categoryMaster': return records.find(r => r.category_code === row[0]);
+      case 'hsnSacMapping': return records.find(r => r.code === row[0]);
       case 'paymentTermsMaster': return records.find(r => r.term_code === row[0] || r.term_name === row[0]);
-      case 'brandMaster':        return records.find(r => r.brand_code === row[0]);
-      case 'attributeMaster':    return records.find(r => r.attribute_code === row[0] || r.attribute_name === row[1]);
+      case 'brandMaster': return records.find(r => r.brand_code === row[0]);
+      case 'attributeMaster': return records.find(r => r.attribute_code === row[0] || r.attribute_name === row[1]);
       case 'productGroupMaster': return records.find(r => r.group_code === row[0]);
-      case 'variantMaster':      return records.find(r => r.variant_code === row[0]);
+      case 'variantMaster': return records.find(r => r.variant_code === row[0]);
       case 'serialNumberPolicy': return records.find(r => r.policy_code === row[0]);
-      case 'batchLotPolicy':     return records.find(r => r.policy_code === row[0]);
+      case 'batchLotPolicy': return records.find(r => r.policy_code === row[0]);
       case 'barcodeConfiguration': return records.find(r => r.barcode_type === row[0] && String(r.prefix || '') === row[2]);
       case 'substituteProducts': return records.find(r => r.product_name === row[0] && r.substitute_product_name === row[1]);
       case 'consumptionTypeMaster': return records.find(r => r.type_code === row[0] || r.type_name === row[0]);
-      case 'productTypeMaster':   return records.find(r => r.type_code === row[0]);
-      case 'bomMaster':           return records.find(r => r.bom_code === row[0]);
-      case 'workCenterMaster':    return records.find(r => r.work_center_code === row[0]);
-      case 'priceListMaster':     return records.find(r => r.price_list_name === row[0] && String(r.product_name || '') === row[2]);
-      case 'vendorMaster':       return records.find(r => r.vendor_code === row[0]);
-      case 'customerMaster':     return records.find(r => r.customer_code === row[0]);
+      case 'productTypeMaster': return records.find(r => r.type_code === row[0]);
+      case 'bomMaster': return records.find(r => r.bom_code === row[0]);
+      case 'workCenterMaster': return records.find(r => r.work_center_code === row[0]);
+      case 'priceListMaster': return records.find(r => r.price_list_name === row[0] && String(r.product_name || '') === row[2]);
+      case 'vendorMaster': return records.find(r => r.vendor_code === row[0]);
+      case 'customerMaster': return records.find(r => r.customer_code === row[0]);
       case 'channelPartnerMaster': return records.find(r => r.partner_code === row[0]);
       case 'productServiceMaster': return records.find(r => r.product_code === row[0]);
       case 'purchaseRequisition': return records.find(r => r.pr_number === row[0] || r.prNumber === row[0]);
@@ -19038,9 +19533,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private deleteApiCall(record: any): Observable<ApiResponse<any>> | null {
     switch (this.config?.key) {
       case 'productTypeMaster': return this.inventoryConfigService.deleteProductType(record.id);
-      case 'bomMaster':         return this.inventoryConfigService.deleteBom(record.id);
-      case 'workCenterMaster':  return this.inventoryConfigService.deleteWorkCenter(record.id);
-      case 'priceListMaster':   return this.inventoryConfigService.deletePriceList(record.id);
+      case 'bomMaster': return this.inventoryConfigService.deleteBom(record.id);
+      case 'workCenterMaster': return this.inventoryConfigService.deleteWorkCenter(record.id);
+      case 'priceListMaster': return this.inventoryConfigService.deletePriceList(record.id);
       default: return null;
     }
   }
@@ -19316,6 +19811,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           categoryName: record.category_name || '',
           description: record.description || '',
           serialPolicyName: record.serial_policy_name || '',
+          uinRequired: !!(record.uin_required ?? record.uinRequired),
           batchPolicyName: record.batch_policy_name || '',
           applicableUoms: (record.uoms || []).map((u: any) => u.uom_symbol || u.uom_name || u.uom_code).filter(Boolean),
           status: cap(record.status || 'active')
@@ -19354,13 +19850,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const rows = values
             .filter((v: any) => this.normalizeKey(v.status || 'active') !== 'inactive')
             .map((v: any) => [
-            v.value_code || '',
-            v.value_name || '',
-            cap(v.status || 'active'),
-            String(v.sort_order ?? 100),
-            v.id !== undefined && v.id !== null ? String(v.id) : '',
-            String(v.usage_count ?? 0)
-          ]);
+              v.value_code || '',
+              v.value_name || '',
+              cap(v.status || 'active'),
+              String(v.sort_order ?? 100),
+              v.id !== undefined && v.id !== null ? String(v.id) : '',
+              String(v.usage_count ?? 0)
+            ]);
           // rows is kept as the edit-time snapshot (name -> code/id) even though the
           // grid UI is gone — buildPayload's attributeMaster case diffs the tag list
           // typed into `possibleValues` against this snapshot so existing value
@@ -19419,17 +19915,28 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       case 'consumptionTypeMaster':
         this.formValues.set({ consumptionType: record.type_name || '', typeName: record.type_name || '', typeCode: record.type_code || '', department: record.department || '', approvalRequired: record.approval_required ? 'Yes' : 'No', approvalWorkflow: record.approval_workflow_name || '', remarks: record.remarks || '', status: cap(record.status || 'active') });
         break;
+      // case 'bomMaster':
+      //   this.formValues.set({
+      //     bomCode: record.bom_code || '',
+      //     finishedProduct: record.finished_product_name || '',
+      //     version: record.bom_version || '',
+      //     // Stored as rows; the form's Raw Materials control is a multiselect.
+      //     rawMaterials: (record.items || []).map((item: any) => item.product_name).filter(Boolean),
+      //     quantity: record.quantity ?? 1,
+      //     wastagePercent: record.wastage_percent ?? 0,
+      //     productionCost: record.production_cost ?? 0,
+      //     status: cap(record.status || 'active')
+      //   });
+      //   break;
       case 'bomMaster':
         this.formValues.set({
           bomCode: record.bom_code || '',
           finishedProduct: record.finished_product_name || '',
           version: record.bom_version || '',
-          // Stored as rows; the form's Raw Materials control is a multiselect.
-          rawMaterials: (record.items || []).map((item: any) => item.product_name).filter(Boolean),
-          quantity: record.quantity ?? 1,
-          wastagePercent: record.wastage_percent ?? 0,
           productionCost: record.production_cost ?? 0,
-          status: cap(record.status || 'active')
+          status: cap(record.status || 'active'),
+          bomLines: this.bomLinesFromRecord(record),
+          ...this.emptyBomDraft()
         });
         break;
       case 'workCenterMaster':
@@ -19585,7 +20092,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           this.applyApplicableVariantSelection(savedVariants);
         } else if (record.variant_name || record.variant_label) {
           const rawLabel = String(record.variant_label || record.variant_name || '').trim();
-          const rawName  = String(record.variant_name || '').trim();
+          const rawName = String(record.variant_name || '').trim();
           const match = this.loadedVariantObjects().find(v =>
             this.variantDisplayLabel(v) === rawLabel || v.variant_name === rawName
           );
@@ -19681,7 +20188,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           },
           error: () => { /* leave the row's summary on its existing fallback text */ }
         });
-      });
+    });
   }
 
   private manufacturingMaterialItemToLineRow(item: any): string[] {
@@ -19793,6 +20300,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           status
         });
         this.entryLineRowsKey.set('materialIssueProduction');
+        this.lineRefItemIdMap.set(this.manufacturingLineRefMapFromItems(items, 'materialIssueItemId'));
+        this.formValues.update(v => ({
+          ...v,
+          bomVersion: (this.transactionReferenceDocs().find(d => Number(d.id) === Number(record.production_plan_id)) as any)?.bom_version || ''
+        }));
         this.entryLineRows.set(items.length ? items.map((item: any) => this.manufacturingMaterialItemToLineRow(item)) : [this.blankLineRow()]);
         break;
       case 'productionEntry':
@@ -20455,6 +20967,31 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           usage_note: v['usageNote'] || null,
           status: lc(v['status'] || 'active')
         };
+      // case 'bomMaster':
+      //   return {
+      //     id: this.editingId(),
+      //     segment_id: selectedSegmentId,
+      //     bom_code: String(v['bomCode'] || '').trim() || null,
+      //     bom_version: String(v['version'] || '').trim() || null,
+      //     finished_product_id: this.findProductBySelection(v['finishedProduct'])?.id ?? null,
+      //     finished_product_name: String(v['finishedProduct'] || '').trim(),
+      //     quantity: this.parseCurrency(v['quantity']) || 1,
+      //     wastage_percent: this.parseCurrency(v['wastagePercent']) || 0,
+      //     production_cost: this.parseCurrency(v['productionCost']) || 0,
+      //     status: lc(v['status'] || 'active'),
+      //     // Raw materials are rows now, not a comma-joined string, so a BOM can
+      //     // be queried and costed. sp_upsert_bom replaces them wholesale.
+      //     items: this.rawMaterialNamesFromBomValue(v['rawMaterials']).map(name => {
+      //       const product = this.findProductBySelection(name);
+      //       return {
+      //         product_id: product?.id ?? null,
+      //         product_name: name,
+      //         quantity: 1,
+      //         uom_id: null,
+      //         uom_name: this.productBaseUomLabel(product) || null
+      //       };
+      //     })
+      //   };
       case 'bomMaster':
         return {
           id: this.editingId(),
@@ -20463,22 +21000,19 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           bom_version: String(v['version'] || '').trim() || null,
           finished_product_id: this.findProductBySelection(v['finishedProduct'])?.id ?? null,
           finished_product_name: String(v['finishedProduct'] || '').trim(),
-          quantity: this.parseCurrency(v['quantity']) || 1,
-          wastage_percent: this.parseCurrency(v['wastagePercent']) || 0,
+          // A BOM is always for 1 finished unit; wastage lives on each line.
+          quantity: 1,
+          wastage_percent: 0,
           production_cost: this.parseCurrency(v['productionCost']) || 0,
           status: lc(v['status'] || 'active'),
-          // Raw materials are rows now, not a comma-joined string, so a BOM can
-          // be queried and costed. sp_upsert_bom replaces them wholesale.
-          items: this.rawMaterialNamesFromBomValue(v['rawMaterials']).map(name => {
-            const product = this.findProductBySelection(name);
-            return {
-              product_id: product?.id ?? null,
-              product_name: name,
-              quantity: 1,
-              uom_id: null,
-              uom_name: this.productBaseUomLabel(product) || null
-            };
-          })
+          items: this.bomLines().map(line => ({
+            product_id: line.productId,
+            product_name: line.productName,
+            quantity: line.quantity,
+            wastage_percent: line.wastagePercent,
+            uom_id: line.uomId,
+            uom_name: line.uomName || null
+          }))
         };
       case 'workCenterMaster':
         return {
@@ -20562,6 +21096,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           description: v['description'] || '',
           serial_applicable: this.categorySerialApplicable(),
           serial_policy_name: v['serialPolicyName'] || null,
+          uin_required: this.categorySerialApplicable() && (v['uinRequired'] === true || v['uinRequired'] === 'true'),
           batch_applicable: this.categoryBatchApplicable(),
           batch_policy_name: v['batchPolicyName'] || null,
           uom_ids: idsFromSelection(v['applicableUoms'], this.loadedUomObjects(), (item, selected) =>
@@ -22099,7 +22634,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const grouped = new Map<string, string[]>();
     for (const attr of items) {
       const name = (attr.name || '').trim();
-      const val  = (attr.value || '').trim();
+      const val = (attr.value || '').trim();
       if (!name) continue;
       if (!grouped.has(name)) grouped.set(name, []);
       if (val && !grouped.get(name)!.includes(val)) grouped.get(name)!.push(val);
@@ -22713,8 +23248,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const recordSegmentId = Number(r.segment_id ?? r.segmentId);
           const sameSegment = payloadSegmentId > 0
             ? (Number.isFinite(recordSegmentId) && recordSegmentId > 0
-                ? recordSegmentId === payloadSegmentId
-                : this.segmentMappedIds('uoms').has(Number(r.id)))
+              ? recordSegmentId === payloadSegmentId
+              : this.segmentMappedIds('uoms').has(Number(r.id)))
             : (!Number.isFinite(recordSegmentId) || recordSegmentId <= 0);
           const hasPayloadCode = String(payload['uom_code'] ?? '').trim().length > 0;
           const hasPayloadSymbol = String(payload['uom_symbol'] ?? '').trim().length > 0;
@@ -22839,20 +23374,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       return this.validateManufacturingMaterialItems(payload['items'], 'plan');
     }
 
-    if (key === 'materialIssueProduction') {
+       if (key === 'materialIssueProduction') {
+      if (!this.payloadHasValue(payload['production_plan_id']) && !this.payloadHasValue(payload['production_plan_number'])) {
+        return 'Select the Production Plan this material is issued for.';
+      }
       if (isPosting && !this.payloadHasValue(payload['from_branch_id']) && !this.payloadHasValue(payload['from_warehouse_id'])) {
         return 'From Warehouse / Branch is required before posting Material Issue for Production.';
       }
-      const directIssue = !this.payloadHasValue(payload['production_plan_id']) && !this.payloadHasValue(payload['production_plan_number']);
-      if (directIssue) {
-        const forFinished = this.productByIdOrSelection(payload['for_finished_product_id'], payload['for_finished_product_name']);
-        if (!this.payloadHasValue(payload['for_finished_product_name']) && !payload['for_finished_product_id']) {
-          return 'For Finished Product is required for direct Material Issue.';
-        }
-        if (!forFinished || !this.productIsManufacturingFinished(forFinished)) {
-          return 'For Finished Product must be a Finished Product or Semi-Finished Product.';
-        }
-      }
+      const rowsMessage = this.materialIssueRowsValidationMessage(isPosting);
+      if (rowsMessage) return rowsMessage;
       return this.validateManufacturingMaterialItems(payload['items'], 'issue', isPosting);
     }
 
@@ -22957,9 +23487,29 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (serialMessage) return serialMessage;
     }
 
+    // if (this.config?.key === 'bomMaster') {
+    //   if (!hasValue(payload['bom_code'])) return 'BOM Code is required.';
+    //   if (!hasValue(payload['finished_product_name'])) return 'Select the Finished Product this BOM produces.';
+    //   const bomMessage = this.validateBomMasterPayload(payload);
+    //   if (bomMessage) return bomMessage;
+    // }
+
     if (this.config?.key === 'bomMaster') {
       if (!hasValue(payload['bom_code'])) return 'BOM Code is required.';
-      if (!hasValue(payload['finished_product_name'])) return 'Select the Finished Product this BOM produces.';
+      if (!hasValue(payload['finished_product_name'])) return 'Select the Finished Product this BOM makes.';
+      if (!this.bomFinishedOptions().some(name => this.optionEquals(name, payload['finished_product_name']))) {
+        return 'The Finished Product must have Product Nature Finished Product or Semi-Finished Product.';
+      }
+      if (!this.bomLines().length) return 'Add at least one raw material to the BOM.';
+      if (Number(payload['production_cost']) < 0) return 'Production Cost cannot be negative.';
+      const editingId = this.editingId();
+      const duplicate = this.savedRecordObjects().some(record =>
+        Number(record.id) !== Number(editingId)
+        && this.optionEquals(record.finished_product_name, payload['finished_product_name'])
+        && this.optionEquals(record.bom_version || '', payload['bom_version'] || ''));
+      if (duplicate) {
+        return `A BOM for ${payload['finished_product_name']} with version "${payload['bom_version'] || '(blank)'}" already exists. Edit that BOM, or use a different version.`;
+      }
       const bomMessage = this.validateBomMasterPayload(payload);
       if (bomMessage) return bomMessage;
     }
@@ -23090,10 +23640,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         const retWarehouse = this.optionalNumber(payload['return_to_warehouse_id']);
 
         if ((srcBranch ?? null) !== (retBranch ?? null)
-            || (srcWarehouse ?? null) !== (retWarehouse ?? null)) {
+          || (srcWarehouse ?? null) !== (retWarehouse ?? null)) {
           const where = srcDoc.warehouse_name || srcDoc.branch_name || 'the invoice location';
           return `Sales Return must go back to ${where}, the location `
-               + `${srcDoc.doc_number || 'the referenced invoice'} sold from.`;
+            + `${srcDoc.doc_number || 'the referenced invoice'} sold from.`;
         }
       }
     }
@@ -23309,10 +23859,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           r.category_name || '',
           r.parent_name || '',
           r.serial_applicable ? (r.serial_policy_name || 'Yes') : 'No',
+          (r.uin_required ?? r.uinRequired) ? 'Yes' : 'No',
           r.batch_applicable ? (r.batch_policy_name || 'Yes') : 'No',
           r.description || '',
           (r.uoms || []).map((u: any) => u.uom_symbol || u.uom_name || u.uom_code).filter(Boolean).join(', ')
-            || (Array.isArray(r.applicable_uom_names) ? r.applicable_uom_names.join(', ') : ''),
+          || (Array.isArray(r.applicable_uom_names) ? r.applicable_uom_names.join(', ') : ''),
           cap(r.status || 'active')
         ]);
       case 'hsnSacMapping':
@@ -23396,19 +23947,37 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           String(r.gst_rate ?? ''),
           cap(r.item_status || 'active')
         ]);
+      // case 'bomMaster':
+      //   return records.map(r => [
+      //     r.bom_code || r.bomCode || '',
+      //     r.finished_product_name || r.finishedProductName || r.finishedProduct || '',
+      //     r.bom_version || r.bomVersion || r.version || '',
+      //     Array.isArray(r.raw_materials || r.rawMaterials)
+      //       ? (r.raw_materials || r.rawMaterials).join(', ')
+      //       : (r.raw_materials || r.rawMaterials || ''),
+      //     String(r.quantity ?? r.qty ?? ''),
+      //     String(r.wastage_percent ?? r.wastagePercent ?? ''),
+      //     String(r.production_cost ?? r.productionCost ?? ''),
+      //     cap(r.status || 'active')
+      //   ]);
       case 'bomMaster':
-        return records.map(r => [
-          r.bom_code || r.bomCode || '',
-          r.finished_product_name || r.finishedProductName || r.finishedProduct || '',
-          r.bom_version || r.bomVersion || r.version || '',
-          Array.isArray(r.raw_materials || r.rawMaterials)
-            ? (r.raw_materials || r.rawMaterials).join(', ')
-            : (r.raw_materials || r.rawMaterials || ''),
-          String(r.quantity ?? r.qty ?? ''),
-          String(r.wastage_percent ?? r.wastagePercent ?? ''),
-          String(r.production_cost ?? r.productionCost ?? ''),
-          cap(r.status || 'active')
-        ]);
+        return records.map(r => {
+          const items: any[] = r.items || [];
+          const materials = items.map(item => {
+            const uom = item.uom_name ? ` ${item.uom_name}` : '';
+            const wastage = Number(item.wastage_percent) > 0 ? ` (wastage ${this.bomQtyText(item.wastage_percent)}%)` : '';
+            return `${item.product_name} × ${this.bomQtyText(item.quantity)}${uom}${wastage}`;
+          }).join(', ');
+          return [
+            r.bom_code || '',
+            r.finished_product_name || '',
+            r.bom_version || '',
+            materials,
+            String(items.length),
+            `Rs. ${Number(r.production_cost || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
+            cap(r.status || 'active')
+          ];
+        });
       case 'priceListMaster':
         return records.map(r => [
           r.price_list_name || r.priceListName || '',

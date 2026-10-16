@@ -107,7 +107,7 @@
                   <i class="pi pi-calendar inventory-date-icon"></i>
                 </div>
               } @else if (field.type === 'number') {
-                <input class="erp-input" type="number"
+                <input class="erp-input" type="number" min="0"
                   [ngModel]="formFieldValue(field)"
                   (ngModelChange)="collectFormField(field.key, $event)"
                   [placeholder]="fieldTypingHint(field)" />
@@ -138,10 +138,10 @@
         <div class="inventory-line-items grn-grid-compact">
           <div class="inventory-line-title">
             <div>
-              <strong>{{ config.lineTitle || 'Line Items' }}</strong>
-              <span>Add, edit or remove rows directly here before saving this document.</span>
+              <strong>{{ config.lineTitle || 'Raw Material Requirement' }}</strong>
+              <!-- Previous: Add, edit or remove rows directly here before saving this document. (+ Add row button) -->
+              <span>Filled from the BOM: Required Qty = BOM qty per 1 unit × Planned Qty.</span>
             </div>
-            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" aria-label="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button>
           </div>
           <div class="tbl-wrap">
             @let renderedColumns = lineGridRenderColumns();
@@ -149,7 +149,7 @@
             <table class="erp-table compact inventory-resizable-table">
               <thead>
                 <tr>
-                  <th class="text-center">Actions</th>
+                  <!-- Previous: Actions column (add / remove row). Rows come from the BOM now. -->
                   @for (column of renderedColumns; track column) {
                     <th [class]="lineGridColumnCssClass(column)" [style.width]="lineGridColumnWidthPx(column)">
                       {{ lineGridColumnHeader(column) }}
@@ -161,12 +161,6 @@
               <tbody>
                 @for (row of directEntryLineRows(); track $index; let rowIndex = $index) {
                   <tr>
-                    <td class="text-center">
-                      <div class="inventory-row-actions">
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button>
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove row" (click)="removeEntryLineRow(rowIndex)"><i class="pi pi-trash"></i></button>
-                      </div>
-                    </td>
                     @let rowView = rowViews[rowIndex];
                     @for (column of renderedColumns; track column) {
                       @let columnIndex = lineGridSourceColumnIndex(column);
