@@ -36,6 +36,7 @@ export class QuickAddCategoryComponent implements OnInit {
   batchApplicable = signal(false);
   serialPolicyName = signal<string | null>(null);
   batchPolicyName = signal<string | null>(null);
+  uinRequired = signal(false);
   saving = signal(false);
   error = signal('');
 
@@ -250,6 +251,7 @@ export class QuickAddCategoryComponent implements OnInit {
     this.serialApplicable.set(false);
     this.batchApplicable.set(false);
     this.serialPolicyName.set(null);
+    this.uinRequired.set(false);
     this.batchPolicyName.set(null);
     this.error.set('');
     this.closeInlineSerialAdd();
@@ -258,7 +260,8 @@ export class QuickAddCategoryComponent implements OnInit {
 
   setSerialApplicable(val: boolean): void {
     this.serialApplicable.set(val);
-    if (!val) { this.serialPolicyName.set(null); this.closeInlineSerialAdd(); }
+    // Previous: if (!val) { this.serialPolicyName.set(null); this.closeInlineSerialAdd(); }
+    if (!val) { this.serialPolicyName.set(null); this.uinRequired.set(false); this.closeInlineSerialAdd(); }
   }
 
   setBatchApplicable(val: boolean): void {
@@ -441,6 +444,7 @@ export class QuickAddCategoryComponent implements OnInit {
       category_name: name,
       description: this.catDescription().trim(),
       serial_applicable: this.serialApplicable(),
+      uin_required: this.serialApplicable() && this.uinRequired(),
       serial_policy_id: this.serialApplicable() ? this.serialPolicyId(serialPolicy) : null,
       serial_policy_name: serialPolicy,
       batch_applicable: this.batchApplicable(),
@@ -469,6 +473,7 @@ export class QuickAddCategoryComponent implements OnInit {
         } else if (res.success) {
           this.saved.emit({
             id: 0, category_code: code, category_name: name,
+            uin_required: this.serialApplicable() && this.uinRequired(),
             description: this.catDescription().trim(),
             serial_applicable: this.serialApplicable(),
             serial_policy_name: serialPolicy,
