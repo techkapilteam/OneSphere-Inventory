@@ -6834,6 +6834,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!name) { this.quickAddError.set('Policy name is required.'); return; }
     if (this.isSavingQuickAdd()) return;
     const v = this.formValues();
+    if (!String(v['quickCaptureStage'] || '').trim()) { this.quickAddError.set('Capture stage is required.'); return; }
     const code = this.quickAddCode().trim() || null;
     const categoryName = String(v['quickApplicableCategory'] || '').trim() || null;
     // sp_upsert_serial_policy links the category by id only — category_name is
