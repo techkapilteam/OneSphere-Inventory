@@ -224,6 +224,9 @@ export interface ProductionPlan {
   remarks?: string;
   status: string;
   created_at?: string;
+  producible_qty?: number;
+  produced_so_far?: number;
+  material_cost_per_unit?: number;
   items: ManufacturingMaterialItem[];
 }
 
@@ -1100,6 +1103,10 @@ export class InventoryTransactionsService {
       planned_qty: Number(r?.plannedQty ?? r?.planned_qty ?? 0),
       bom_version: r?.bomVersion || r?.bom_version,
       work_center: r?.workCenter || r?.work_center,
+            // From 262: what the issued material can still make, and its real cost per unit
+      producible_qty: Number(r?.producible_qty ?? r?.producibleQty ?? 0) || 0,
+      produced_so_far: Number(r?.produced_so_far ?? r?.producedSoFar ?? 0) || 0,
+      material_cost_per_unit: Number(r?.material_cost_per_unit ?? r?.materialCostPerUnit ?? 0) || 0,
       branch_id: r?.branchId ?? r?.branch_id,
       branch_name: r?.branchName || r?.branch_name,
       warehouse_id: r?.warehouseId ?? r?.warehouse_id,

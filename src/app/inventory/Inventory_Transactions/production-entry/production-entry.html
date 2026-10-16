@@ -137,6 +137,7 @@
               } @else if (field.type === 'number') {
                   <input class="erp-input" type="number" min="0"
                   [readonly]="field.key === 'productionCost'"
+                  [style.border-color]="field.key === 'producedQty' && productionEntryQtyLimitText() ? '#dc2626' : null"
                   [ngModel]="formFieldValue(field)"
                   (ngModelChange)="collectFormField(field.key, $event)"
                   [placeholder]="fieldTypingHint(field)" />
@@ -160,6 +161,11 @@
                 </button>
               }
             </div>
+            @if (field.key === 'producedQty' && productionEntryQtyLimitText(); as limitText) {
+              <small style="display:block; margin-top:4px; color:#dc2626; font-size:12px;">
+                <i class="pi pi-exclamation-circle" style="font-size:11px"></i> {{ limitText }}
+              </small>
+            }
           </div>
         }
       </div>
