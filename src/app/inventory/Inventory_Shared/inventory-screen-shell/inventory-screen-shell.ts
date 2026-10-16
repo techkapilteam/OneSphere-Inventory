@@ -9191,9 +9191,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return options;
   }
 
-  private bomVersionOptionsFromMaster(): string[] {
-    // Only the versions of the selected finished product's BOMs.
-    const finished = this.normalizeKey(this.formValues()['finishedProduct']);
+  // private bomVersionOptionsFromMaster(finishedProduct?: any): string[] {
+  //   // Only the versions of the selected finished product's BOMs.
+  //   const finished = this.normalizeKey(finishedProduct ?? this.formValues()['finishedProduct']);
+  //   return this.productionPlanningBomRecords()
+  //     .filter(record => !finished || this.normalizeKey(record.finishedProduct) === finished)
+  //     .map(record => record.version)
+  //     .filter(Boolean);
+  // }
+    private bomVersionOptionsFromMaster(finishedProduct?: any): string[] {
+    // Versions of the BOMs of one finished product. Uses the product passed in
+    // (e.g. from collectFormField, before formValues is updated), else the one on the form.
+    const finished = this.normalizeKey(finishedProduct ?? this.formValues()['finishedProduct']);
     return this.productionPlanningBomRecords()
       .filter(record => !finished || this.normalizeKey(record.finishedProduct) === finished)
       .map(record => record.version)
