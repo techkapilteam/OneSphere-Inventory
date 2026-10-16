@@ -113,7 +113,7 @@
                 </label>
               } @else if (field.type === 'select' || field.type === 'multiselect') {
                 <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
-                  [items]="field.options || []" [searchable]="true" [clearable]="field.key !== 'fromWarehouse'" [readonly]="field.key === 'fromWarehouse'"
+                  [items]="field.options || []" [searchable]="true" [clearable]="field.key !== 'fromWarehouse' && field.key !== 'forFinishedProduct'" [readonly]="field.key === 'fromWarehouse' || field.key === 'forFinishedProduct'"
                   [multiple]="field.type === 'multiselect'"
                   [closeOnSelect]="field.type !== 'multiselect'"
                   [ngModel]="formFieldValue(field)"
@@ -144,12 +144,13 @@
                   (ngModelChange)="collectFormField(field.key, $event)"
                   [placeholder]="fieldTypingHint(field)"></textarea>
               } @else {
-                <input class="erp-input" type="text"
+                  <input class="erp-input" type="text"
+                  [readonly]="field.key === 'bomVersion'"
                   [ngModel]="formFieldValue(field)"
                   (ngModelChange)="collectFormField(field.key, $event)"
-                  [placeholder]="fieldTypingHint(field)" />
+                  [placeholder]="field.key === 'bomVersion' ? 'From the Production Plan' : fieldTypingHint(field)" />
               }
-              @if (field.addMaster && field.key !== 'fromWarehouse') {
+                @if (field.addMaster && field.key !== 'fromWarehouse' && field.key !== 'forFinishedProduct') {
                 <button type="button" class="erp-btn btn-white btn-icon"
                   [title]="'Add ' + field.addMaster"
                   (click)="openFieldAddMaster(field)">
@@ -163,12 +164,18 @@
 
       @if (config.lineColumns?.length) {
         <div class="inventory-line-items grn-grid-compact">
-          <div class="inventory-line-title">
+          <!-- <div class="inventory-line-title">
             <div>
               <strong>{{ config.lineTitle || 'Line Items' }}</strong>
               <span>Add, edit or remove rows directly here before saving this document.</span>
             </div>
             <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" aria-label="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button>
+          </div> -->
+            <div class="inventory-line-title">
+            <div>
+              <strong>{{ config.lineTitle || 'Line Items' }}</strong>
+              <span>Rows come from the Production Plan. Enter Issued Qty and pick serials. Remove a row you cannot issue now.</span>
+            </div>
           </div>
           <div class="tbl-wrap">
             @let renderedColumns = lineGridRenderColumns();
@@ -190,7 +197,7 @@
                   <tr>
                     <td class="text-center">
                       <div class="inventory-row-actions">
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button>
+                        <!-- <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button> -->
                         <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove row" (click)="removeEntryLineRow(rowIndex)"><i class="pi pi-trash"></i></button>
                       </div>
                     </td>

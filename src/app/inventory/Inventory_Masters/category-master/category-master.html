@@ -421,6 +421,19 @@
                         <button type="button" class="erp-btn btn-white btn-icon" title="Add Serial Number Policy" (click)="openAddMaster('Serial Number Policy', 'serialPolicyName')"><i class="pi pi-plus"></i></button>
                       </div>
                     </div>
+                    <!-- UIN: government registration number per serial (e.g. drones). Only with serial tracking. -->
+                    <div class="inventory-switch-reveal">
+                      <label class="erp-label">UIN Required</label>
+                      <label class="inventory-labeled-switch yes-no">
+                        <input type="checkbox"
+                          [checked]="formValues()['uinRequired'] === true"
+                          (change)="collectFormField('uinRequired', $any($event.target).checked)" />
+                        <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
+                      </label>
+                      <div class="inventory-optional-hint">
+                        Yes = each serial must get a UIN (Manufacturing &gt; UIN Registration) before it can be sold.
+                      </div>
+                    </div>
                   }
                 </div>
                 <div class="erp-form-group">

@@ -47,6 +47,8 @@ export interface BomLineItem {
   quantity: number;
   uom_id?: number | null;
   uom_name?: string | null;
+  wastage_percent?: number;
+
 }
 
 export interface BomItem {
@@ -96,6 +98,7 @@ export interface CategoryItem {
   parent_name?: string;
   description?: string;
   serial_applicable?: boolean;
+  uin_required?: boolean; 
   serial_policy_id?: number | null;
   serial_policy_name?: string | null;
   batch_applicable?: boolean;
@@ -887,6 +890,7 @@ export class InventoryConfigService {
       parent_name: this.value(item, 'parent_name', 'parentName'),
       description: this.value(item, 'description', 'description'),
       serial_applicable: !!(this.value(item, 'serial_applicable', 'serialApplicable', false)),
+      uin_required: !!this.value(item, 'uin_required', 'uinRequired', false),
       serial_policy_id: this.value(item, 'serial_policy_id', 'serialPolicyId', null),
       serial_policy_name: this.value(item, 'serial_policy_name', 'serialPolicyName', null),
       batch_applicable: !!(this.value(item, 'batch_applicable', 'batchApplicable', false)),
@@ -2385,6 +2389,7 @@ export class InventoryConfigService {
         product_id: this.value(row, 'product_id', 'productId'),
         product_name: this.value(row, 'product_name', 'productName', ''),
         quantity: Number(this.value(row, 'quantity', 'quantity', 1)) || 0,
+        wastage_percent: Number(this.value(row, 'wastage_percent', 'wastagePercent', 0)) || 0,
         uom_id: this.value(row, 'uom_id', 'uomId'),
         uom_name: this.value(row, 'uom_name', 'uomName')
       }))

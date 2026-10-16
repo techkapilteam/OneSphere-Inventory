@@ -281,6 +281,35 @@ export interface ProductionEntry {
   items: ProductionEntryItem[];
 }
 
+// UIN Registration (migration 263): one row per serial of a UIN-required product
+export interface UinRegistrationRow {
+  serial_unit_id: number;
+  serial_no: string;
+  product_id: number;
+  product_name: string;
+  product_code?: string | null;
+  category_name?: string | null;
+  branch_id?: number | null;
+  branch_name?: string | null;
+  warehouse_id?: number | null;
+  warehouse_name?: string | null;
+  source_doc_no?: string | null;      // Production Entry number
+  source_doc_date?: string | null;
+  unit_status: string;                // in_stock | reserved | returned | sold
+  uin_number?: string | null;
+  uin_date?: string | null;           // yyyy-MM-dd
+  uin_certificate_no?: string | null;
+  uin_status: 'pending' | 'registered' | 'sold' | string;
+  can_edit: boolean;
+}
+
+export interface UinRegistrationSaveItem {
+  serial_unit_id: number;
+  uin_number: string | null;
+  uin_date: string | null;            // yyyy-MM-dd
+  uin_certificate_no: string | null;
+}
+
 export interface ProductionReturn {
   id: number;
   return_number: string;
@@ -1536,6 +1565,51 @@ export class InventoryTransactionsService {
         : this.http.post<ApiResponse<any>>(this.url('production-entries'), body, { headers: h }),
       r => this.normProductionEntry(r)
     );
+  }
+
+    // ── UIN Registration ─────────────────────────────────────────────────────
+  getUinRegistrations(filters: { status?: string; branchId?: number | null; warehouseId?: number | null; productId?: number | null; segmentId?: number | null } = {}): Observable<ApiResponse<UinRegistrationRow[]>> {
+    let params = new HttpParams();
+    if (filters.status) params = params.set('status', filters.status);
+    if (filters.branchId) params = params.set('branchId', String(filters.branchId));
+    if (filters.warehouseId) params = params.set('warehouseId', String(filters.warehouseId));
+    if (filters.productId) params = params.set('productId', String(filters.productId));
+    if (filters.segmentId) params = params.set('segmentId', String(filters.segmentId));
+    return this.mapArray(
+      this.http.get<ApiResponse<any[]>>(this.url('uin-registrations'), { headers: this.headers(), params }),
+      r => this.normUinRegistration(r)
+    );
+  }
+
+  saveUinRegistrations(items: UinRegistrationSaveItem[]): Observable<ApiResponse<any>> {
+    return this.mapItem(
+      this.http.post<ApiResponse<any>>(this.url('uin-registrations'), this.toApiValue({ items }), { headers: this.headers() }),
+      r => r
+    );
+  }
+
+  private normUinRegistration(r: any): UinRegistrationRow {
+    const pick = (snake: string, camel: string) => r?.[snake] ?? r?.[camel] ?? null;
+    return {
+      serial_unit_id: Number(pick('serial_unit_id', 'serialUnitId')),
+      serial_no: pick('serial_no', 'serialNo') || '',
+      product_id: Number(pick('product_id', 'productId')),
+      product_name: pick('product_name', 'productName') || '',
+      product_code: pick('product_code', 'productCode'),
+      category_name: pick('category_name', 'categoryName'),
+      branch_id: pick('branch_id', 'branchId'),
+      branch_name: pick('branch_name', 'branchName'),
+      warehouse_id: pick('warehouse_id', 'warehouseId'),
+      warehouse_name: pick('warehouse_name', 'warehouseName'),
+      source_doc_no: pick('source_doc_no', 'sourceDocNo'),
+      source_doc_date: pick('source_doc_date', 'sourceDocDate'),
+      unit_status: pick('unit_status', 'unitStatus') || 'in_stock',
+      uin_number: pick('uin_number', 'uinNumber'),
+      uin_date: pick('uin_date', 'uinDate'),
+      uin_certificate_no: pick('uin_certificate_no', 'uinCertificateNo'),
+      uin_status: pick('uin_status', 'uinStatus') || 'pending',
+      can_edit: !!pick('can_edit', 'canEdit')
+    };
   }
 
   getProductionReturns(status?: string, segmentId?: number | null): Observable<ApiResponse<ProductionReturn[]>> {
