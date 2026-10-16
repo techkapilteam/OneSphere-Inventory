@@ -118,6 +118,17 @@
           </div>
         }
       </div>
+      <!-- UIN Required: same as Product Category form. Only with serial tracking. -->
+      <div class="inventory-switch-reveal">
+        <label class="erp-label">UIN Required</label>
+        <label class="inventory-labeled-switch yes-no">
+          <input type="checkbox" [checked]="uinRequired()" (change)="uinRequired.set($any($event.target).checked)" />
+          <span class="inventory-switch-track">
+            <span class="switch-text switch-on">Yes</span>
+            <span class="switch-text switch-off">No</span>
+          </span>
+        </label>
+      </div>
     }
   </div>
 

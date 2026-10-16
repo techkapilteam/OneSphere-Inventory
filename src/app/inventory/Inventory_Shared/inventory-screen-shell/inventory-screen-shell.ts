@@ -427,6 +427,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     ).slice(0, 6);
   });
 
+  // A row in the "existing" panel is only a real duplicate when one of its
+  // cells equals the typed name exactly; a partial match (e.g. "Drone Frame"
+  // vs "Drone Frame Assembly") is just a similar name, so it is labelled so.
+  isExactExistingMatch(row: string[]): boolean {
+    const q = this.genericNameValue().trim().toLowerCase();
+    return !!q && row.some(cell => String(cell ?? '').trim().toLowerCase() === q);
+  }
+
   readonly formValues = signal<Record<string, any>>({});
   readonly savedRecordObjects = signal<any[]>([]);
   readonly editingId = signal<number | null>(null);
@@ -2112,6 +2120,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.selectedProductCategory.set(value || '');
 
     if (!value) {
+      // Clear the stale id too, so UIN / locks don't follow the old category.
+      this.collectFormField('categoryId', null);
       this.productSerialApplicable.set(false);
       this.productBatchApplicable.set(false);
       this.collectFormField('serialPolicyName', null);
@@ -4485,6 +4495,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return !!this.selectedProductCategoryObject()?.serial_applicable;
   }
 
+  // Category's UIN Required, shown read-only in Product Master's Tracking Policies.
+  categoryUinRequired(): boolean {
+    return !!this.selectedProductCategoryObject()?.uin_required;
+  }
+
   // HSN codes matching the selected product category — shown as a suggestion panel
   readonly categoryHsnSuggestions = computed(() => {
     const category = this.selectedProductCategory();
@@ -6025,6 +6040,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       serial_applicable: !!(item?.serial_applicable ?? item?.serialApplicable ?? false),
       serial_policy_id: item?.serial_policy_id ?? item?.serialPolicyId ?? null,
       serial_policy_name: item?.serial_policy_name ?? item?.serialPolicyName ?? null,
+      // UIN Required from the quick-add category, so Product Master can show it.
+      uin_required: !!(item?.uin_required ?? item?.uinRequired ?? false),
       batch_applicable: !!(item?.batch_applicable ?? item?.batchApplicable ?? false),
       batch_policy_id: item?.batch_policy_id ?? item?.batchPolicyId ?? null,
       batch_policy_name: item?.batch_policy_name ?? item?.batchPolicyName ?? null,
@@ -10910,10 +10927,17 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   private productSerialColumnLabels(product: ProductItem | null | undefined): string[] {
     if (!product?.serial_applicable) return [];
-    // The serial column keeps its own name: always "Serial No", never renamed
-    // from the product's Serial Number Policy name or format (e.g. "Sh").
-    // The policy still drives serial behaviour; only the header stays fixed.
-    return ['Serial No'];
+    // --- Previous (08-Oct) rule, kept for reference ---
+    // // The serial column keeps its own name: always "Serial No", never renamed
+    // // from the product's Serial Number Policy name or format (e.g. "Sh").
+    // // The policy still drives serial behaviour; only the header stays fixed.
+    // return ['Serial No'];
+    // --- End previous rule ---
+
+    // The serial column header is "Policy" for every serial product (one shared
+    // column). Each row's own Serial Number Policy name is shown inside the cell,
+    // on the serial button -- see serialPickerSummaryForRow().
+    return ['Policy'];
     // --- Previous code (kept for reference) ---
     // const policy = this.serialPolicyForProduct(product);
     // const format = String(policy?.serial_format || '').trim();
@@ -10929,6 +10953,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     //   .filter(Boolean);
     // return labels.length ? [...new Set(labels)] : ['Serial No'];
     // --- End previous code ---
+  }
+
+  // The product's Serial Number Policy name as saved in Product Master.
+  private productSerialPolicyName(product: ProductItem | null | undefined): string {
+    if (!product?.serial_applicable) return '';
+    return String(this.serialPolicyForProduct(product)?.policy_name || product.serial_policy_name || '').trim();
   }
 
   private lineGridSerialColumnNamesForRow(row: string[]): string[] {
@@ -14001,6 +14031,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.entryLineRows.set([this.blankLineRow()]);
   }
 
+  // Production Entry: the header Produced Qty / Rejected Qty bind into the
+  // output grid row as they are typed, the same way Production Cost does
+  // (applyProductionEntryTentativeCost). Without this the grid kept the
+  // values from when the Production Plan was picked.
+  private syncProductionEntryQtyToGrid(key: 'producedQty' | 'rejectedQty', value: any): void {
+    const label = key === 'producedQty' ? 'Produced Qty' : 'Rejected Qty';
+    this.entryLineRows.update(rows => rows.map((row, index) => {
+      if (index !== 0) return row;
+      const next = this.normalizeLineRow(row);
+      this.setManufacturingLineCell(next, [label], value);
+      return next;
+    }));
+  }
+
   private setManufacturingLineCell(row: string[], labels: string[], value: any): void {
     const normalizedLabels = labels.map(label => this.normalizeKey(label)).filter(Boolean);
     const idx = (this.config?.lineColumns || []).findIndex(column => {
@@ -15431,7 +15475,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // number this line wants (IMEI Number, Chassis No, ...). The captured/
     // required count stays alongside it: it is the only place the qty cap is
     // visible before the picker opens.
-    const label = this.productSerialColumnLabels(product)[0] || 'Serial No';
+    // Previous: const label = this.productSerialColumnLabels(product)[0] || 'Serial No';
+    // The column header is "Policy", so the button shows this row's policy name
+    // as saved in Product Master (e.g. "IMEI Required").
+    const label = this.productSerialPolicyName(product) || 'Serial No';
     if (dcItemId) return count ? `${count} ${label}(s) from DC` : 'Loading…';
 
     if (siItemId) return count ? `${count} ${label}(s) from SI` : 'Loading...';
@@ -15450,7 +15497,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!product?.serial_applicable) return '';
     const count = (this.lineSerialUnitsMap()[rowIndex] || []).length;
     if (!count) return '';
-    const policyName = String(product.serial_policy_name || '').trim() || this.productSerialColumnLabels(product)[0] || 'Serial No';
+    // Previous: const policyName = String(product.serial_policy_name || '').trim() || this.productSerialColumnLabels(product)[0] || 'Serial No';
+    const policyName = this.productSerialPolicyName(product) || 'Serial No';
     return `${policyName} · ${count}`;
   }
 
@@ -16237,6 +16285,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     });
     if (this.shouldSyncProductionPlanningBomRows(key)) {
       this.syncProductionPlanningBomRequirementRows(true);
+    }
+    if (this.config?.key === 'productionEntry' && (key === 'producedQty' || key === 'rejectedQty')) {
+      this.syncProductionEntryQtyToGrid(key, normalizedValue);
     }
     if (key === 'segment' && normalizedValue && !this.optionEquals(this.selectedSegment(), normalizedValue)) {
       this.selectedSegment.set(normalizedValue);
