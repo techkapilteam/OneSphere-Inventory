@@ -2115,7 +2115,8 @@ export const productionPlanningConfig = transaction(
   'pi pi-calendar-plus',
   [
     { name: 'BOM Master', status: 'Ready' },
-    { name: 'Work Center Master', status: 'Ready' },
+    // Hidden: Work Center removed from Production Planning
+    // { name: 'Work Center Master', status: 'Ready' },
     { name: 'Raw Material Stock', status: 'Pending Setup' }
   ],
   'Production plan drives material issue, production entry and finished goods stock.',

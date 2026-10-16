@@ -13296,7 +13296,11 @@ body .ng-dropdown-panel.ap-switch-ng-select .ng-option.ng-option-selected::after
   position: sticky;
   top: 68px; // sits flush under .breadcrumb-bar (main-layout.component.scss), which is sticky at top: 0
   z-index: 150; // above form content, below .breadcrumb-bar (z-index 200)
-  margin: -20px 0 14px; // tightens the gap under the Business Segment bar above it
+  // -14px exactly cancels .product-segment-bar's 14px margin-bottom, so the tab bar
+  // sits flush under the segment bar instead of overlapping its bottom border
+  // (-20px pulled it 6px into the box). It also keeps the pinned/unpinned layout
+  // the same height, since the JS pin swaps this bar for a spacer with margin 0.
+  margin: -14px 0 14px;
   padding: 10px 0;
   background: var(--page-bg, #fff);
   border-bottom: 1px solid rgba(15, 23, 42, 0.06);

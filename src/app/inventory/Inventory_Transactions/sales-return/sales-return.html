@@ -238,9 +238,11 @@
           <div class="inventory-line-title">
             <div>
               <strong>{{ config.lineTitle || 'Line Items' }}</strong>
-              <span>Add, edit or remove rows directly here before saving this document.</span>
+              <!-- Previous: <span>Add, edit or remove rows directly here before saving this document.</span> -->
+              <span>Rows come from the selected Invoice Reference. Edit Return Qty, or remove items you are not returning.</span>
             </div>
-            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" aria-label="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button>
+            <!-- Previous (Sales Return is against a Sales Invoice only, so no manual rows):
+            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" aria-label="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button> -->
           </div>
           <div class="tbl-wrap">
             @let renderedColumns = lineGridRenderColumns();
@@ -262,8 +264,11 @@
                   <tr>
                     <td class="text-center">
                       <div class="inventory-row-actions">
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button>
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove row" (click)="removeEntryLineRow(rowIndex)"><i class="pi pi-trash"></i></button>
+                        <!-- Previous (Sales Return is against a Sales Invoice only, so no manual rows):
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button> -->
+                        @if (lineRefItemIdMap()[rowIndex]) {
+                          <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove row" (click)="removeEntryLineRow(rowIndex)"><i class="pi pi-trash"></i></button>
+                        }
                       </div>
                     </td>
                     @let rowView = rowViews[rowIndex];
