@@ -9005,7 +9005,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       purchaseInvoice: { dateKey: 'piDate', numberKey: 'pi_number' },
       purchaseReturn: { dateKey: 'returnDate', numberKey: 'return_number' },
       // Display only: sp_save_stock_transfer assigns the real number (migration 250).
-      stockTransfer: { dateKey: 'transferDate', numberKey: 'transfer_number' }
+      stockTransfer: { dateKey: 'transferDate', numberKey: 'transfer_number' },
+       // Display only: the server assigns MI00001/26-27 and PRD00001/26-27 (261 / 262).
+      materialIssueProduction: { dateKey: 'issueDate', numberKey: 'issue_number' },
+      productionEntry: { dateKey: 'productionDate', numberKey: 'production_number' }
     };
     return series[this.config?.key || ''] || null;
   }
