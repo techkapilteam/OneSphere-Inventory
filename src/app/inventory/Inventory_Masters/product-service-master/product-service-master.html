@@ -504,7 +504,8 @@
                           <button type="button" class="erp-exist-item" (click)="editRecordByRow(row)">
                             <span class="erp-exist-code">{{ row[0] }}</span>
                             <span class="erp-exist-name">{{ row[1] }}</span>
-                            <span class="erp-exist-hint">Already exists · click to edit</span>
+                            <!-- Previous: <span class="erp-exist-hint">Already exists · click to edit</span> -->
+                            <span class="erp-exist-hint">{{ isExactExistingMatch(row) ? 'Already exists · click to edit' : 'Similar name · click to edit' }}</span>
                           </button>
                         }
                       </div>
@@ -1145,7 +1146,9 @@
               <div class="inventory-fieldset-title inventory-fieldset-title-row">
                 <span>Tracking Policies</span>
                 <label class="inventory-labeled-switch yes-no">
-                  <input type="checkbox" [checked]="productTrackingRequired()" (change)="setProductTrackingRequired($any($event.target).checked)" />
+                  <!-- Previous: <input type="checkbox" [checked]="productTrackingRequired()" (change)="setProductTrackingRequired($any($event.target).checked)" /> -->
+                  <!-- Locked when Serial No comes from the selected category. -->
+                  <input type="checkbox" [checked]="productTrackingRequired()" [disabled]="categoryRequiresSerialPolicy()" (change)="setProductTrackingRequired($any($event.target).checked)" />
                   <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
                 </label>
               </div>
@@ -1171,9 +1174,12 @@
                   }
                 </div>
                 <div class="erp-form-group">
-                  <label class="erp-label">Serial Number Applicable @if (categoryRequiresSerialPolicy()) {<span class="text-danger">*</span>}</label>
+                  <!-- Previous: <label class="erp-label">Serial Number Applicable @if (categoryRequiresSerialPolicy()) {<span class="text-danger">*</span>}</label> -->
+                  <label class="erp-label">Serial Number Applicable</label>
                   <label class="inventory-labeled-switch yes-no">
-                    <input type="checkbox" [checked]="productSerialApplicable()" (change)="setProductSerialApplicable($any($event.target).checked)" />
+                    <!-- Previous: <input type="checkbox" [checked]="productSerialApplicable()" (change)="setProductSerialApplicable($any($event.target).checked)" /> -->
+                    <!-- Locked when Serial No comes from the selected category. -->
+                    <input type="checkbox" [checked]="productSerialApplicable()" [disabled]="categoryRequiresSerialPolicy()" (change)="setProductSerialApplicable($any($event.target).checked)" />
                     <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
                   </label>
                   @if (productSerialApplicable()) {
@@ -1186,6 +1192,16 @@
                   </div>
                   }
                 </div>
+                <!-- UIN Required: from the selected category (read-only), shown when the category binds Serial No. -->
+                @if (productSerialApplicable() && categoryRequiresSerialPolicy() && categoryUinRequired()) {
+                <div class="erp-form-group">
+                  <label class="erp-label">UIN Required</label>
+                  <label class="inventory-labeled-switch yes-no">
+                    <input type="checkbox" [checked]="categoryUinRequired()" disabled />
+                    <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
+                  </label>
+                </div>
+                }
                 <div class="erp-form-group">
                   <label class="erp-label">Expiry Applicable</label>
                   <label class="inventory-labeled-switch yes-no">
@@ -1733,7 +1749,8 @@
                             <button type="button" class="erp-exist-item" (click)="editRecordByRow(row)">
                               <span class="erp-exist-code">{{ row[0] }}</span>
                               <span class="erp-exist-name">{{ row[1] }}</span>
-                              <span class="erp-exist-hint">Already exists · click to edit</span>
+                              <!-- Previous: <span class="erp-exist-hint">Already exists · click to edit</span> -->
+                              <span class="erp-exist-hint">{{ isExactExistingMatch(row) ? 'Already exists · click to edit' : 'Similar name · click to edit' }}</span>
                             </button>
                           }
                         </div>

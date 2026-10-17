@@ -428,6 +428,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     ).slice(0, 6);
   });
 
+  // A row in the "existing" panel is only a real duplicate when one of its
+  // cells equals the typed name exactly; a partial match (e.g. "Drone Frame"
+  // vs "Drone Frame Assembly") is just a similar name, so it is labelled so.
+  isExactExistingMatch(row: string[]): boolean {
+    const q = this.genericNameValue().trim().toLowerCase();
+    return !!q && row.some(cell => String(cell ?? '').trim().toLowerCase() === q);
+  }
+
   readonly formValues = signal<Record<string, any>>({});
   readonly savedRecordObjects = signal<any[]>([]);
   readonly editingId = signal<number | null>(null);
@@ -2117,6 +2125,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.selectedProductCategory.set(value || '');
 
     if (!value) {
+      // Clear the stale id too, so UIN / locks don't follow the old category.
+      this.collectFormField('categoryId', null);
       this.productSerialApplicable.set(false);
       this.productBatchApplicable.set(false);
       this.collectFormField('serialPolicyName', null);
@@ -4490,6 +4500,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return !!this.selectedProductCategoryObject()?.serial_applicable;
   }
 
+  // Category's UIN Required, shown read-only in Product Master's Tracking Policies.
+  categoryUinRequired(): boolean {
+    return !!this.selectedProductCategoryObject()?.uin_required;
+  }
+
   // HSN codes matching the selected product category — shown as a suggestion panel
   readonly categoryHsnSuggestions = computed(() => {
     const category = this.selectedProductCategory();
@@ -6030,6 +6045,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       serial_applicable: !!(item?.serial_applicable ?? item?.serialApplicable ?? false),
       serial_policy_id: item?.serial_policy_id ?? item?.serialPolicyId ?? null,
       serial_policy_name: item?.serial_policy_name ?? item?.serialPolicyName ?? null,
+      // UIN Required from the quick-add category, so Product Master can show it.
+      uin_required: !!(item?.uin_required ?? item?.uinRequired ?? false),
       batch_applicable: !!(item?.batch_applicable ?? item?.batchApplicable ?? false),
       batch_policy_id: item?.batch_policy_id ?? item?.batchPolicyId ?? null,
       batch_policy_name: item?.batch_policy_name ?? item?.batchPolicyName ?? null,
@@ -9011,7 +9028,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       purchaseInvoice: { dateKey: 'piDate', numberKey: 'pi_number' },
       purchaseReturn: { dateKey: 'returnDate', numberKey: 'return_number' },
       // Display only: sp_save_stock_transfer assigns the real number (migration 250).
-      stockTransfer: { dateKey: 'transferDate', numberKey: 'transfer_number' }
+      stockTransfer: { dateKey: 'transferDate', numberKey: 'transfer_number' },
+       // Display only: the server assigns MI00001/26-27 and PRD00001/26-27 (261 / 262).
+      materialIssueProduction: { dateKey: 'issueDate', numberKey: 'issue_number' },
+      productionEntry: { dateKey: 'productionDate', numberKey: 'production_number' }
     };
     return series[this.config?.key || ''] || null;
   }
@@ -10392,7 +10412,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         return true;
       }
       if (this.config?.key === 'productionEntry') {
-        if (refCellKey.includes('produced') || refCellKey.includes('rejected')) return false;
+        // Produced / Rejected are entered in the header and copied here (syncProductionEntryOutput)
         if (this.lineGridColumnIsSerialPicker(column)) return false;
         return true;
       }
@@ -10916,10 +10936,17 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   private productSerialColumnLabels(product: ProductItem | null | undefined): string[] {
     if (!product?.serial_applicable) return [];
-    // The serial column keeps its own name: always "Serial No", never renamed
-    // from the product's Serial Number Policy name or format (e.g. "Sh").
-    // The policy still drives serial behaviour; only the header stays fixed.
-    return ['Serial No'];
+    // --- Previous (08-Oct) rule, kept for reference ---
+    // // The serial column keeps its own name: always "Serial No", never renamed
+    // // from the product's Serial Number Policy name or format (e.g. "Sh").
+    // // The policy still drives serial behaviour; only the header stays fixed.
+    // return ['Serial No'];
+    // --- End previous rule ---
+
+    // The serial column header is "Policy" for every serial product (one shared
+    // column). Each row's own Serial Number Policy name is shown inside the cell,
+    // on the serial button -- see serialPickerSummaryForRow().
+    return ['Policy'];
     // --- Previous code (kept for reference) ---
     // const policy = this.serialPolicyForProduct(product);
     // const format = String(policy?.serial_format || '').trim();
@@ -10935,6 +10962,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     //   .filter(Boolean);
     // return labels.length ? [...new Set(labels)] : ['Serial No'];
     // --- End previous code ---
+  }
+
+  // The product's Serial Number Policy name as saved in Product Master.
+  private productSerialPolicyName(product: ProductItem | null | undefined): string {
+    if (!product?.serial_applicable) return '';
+    return String(this.serialPolicyForProduct(product)?.policy_name || product.serial_policy_name || '').trim();
   }
 
   private lineGridSerialColumnNamesForRow(row: string[]): string[] {
@@ -13153,6 +13186,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return source
       .filter(record => this.normalizeKey(record?.status || 'posted') === 'posted')
       .filter(record => type !== 'PRODUCTIONPLAN' || this.config?.key !== 'materialIssueProduction' || this.planHasRemainingToIssue(record))
+       .filter(record => type !== 'PRODUCTIONPLAN' || this.config?.key !== 'productionEntry'
+        || Number(record?.producible_qty ?? record?.producibleQty ?? 0) > 0)
       .map(record => type === 'PRODUCTIONPLAN'
         ? this.productionPlanReferenceDoc(record)
         : this.materialIssueReferenceDoc(record));
@@ -13180,7 +13215,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       finished_product_name: plan?.finished_product_name || plan?.finishedProductName || '',
       planned_qty: plan?.planned_qty ?? plan?.plannedQty,
       bom_version: plan?.bom_version || plan?.bomVersion || '',
-      work_center: plan?.work_center || plan?.workCenter || ''
+      work_center: plan?.work_center || plan?.workCenter || '',
+      // What the issued material can still make, and its real cost per finished unit (from 262)
+      producible_qty: Number(plan?.producible_qty ?? plan?.producibleQty ?? 0) || 0,
+      produced_so_far: Number(plan?.produced_so_far ?? plan?.producedSoFar ?? 0) || 0,
+      material_cost_per_unit: Number(plan?.material_cost_per_unit ?? plan?.materialCostPerUnit ?? 0) || 0
     };
     return doc as PurchaseRefDoc;
   }
@@ -14007,6 +14046,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.entryLineRows.set([this.blankLineRow()]);
   }
 
+  // Production Entry: the header Produced Qty / Rejected Qty bind into the
+  // output grid row as they are typed, the same way Production Cost does
+  // (applyProductionEntryTentativeCost). Without this the grid kept the
+  // values from when the Production Plan was picked.
+  private syncProductionEntryQtyToGrid(key: 'producedQty' | 'rejectedQty', value: any): void {
+    const label = key === 'producedQty' ? 'Produced Qty' : 'Rejected Qty';
+    this.entryLineRows.update(rows => rows.map((row, index) => {
+      if (index !== 0) return row;
+      const next = this.normalizeLineRow(row);
+      this.setManufacturingLineCell(next, [label], value);
+      return next;
+    }));
+  }
+
   private setManufacturingLineCell(row: string[], labels: string[], value: any): void {
     const normalizedLabels = labels.map(label => this.normalizeKey(label)).filter(Boolean);
     const idx = (this.config?.lineColumns || []).findIndex(column => {
@@ -14264,20 +14317,27 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       refMap = this.manufacturingLineRefMapFromItems(openItems, 'productionPlanItemId');
       patch['bomVersion'] = anyDoc.bom_version || anyDoc.bomVersion || '';
     } else if (key === 'productionEntry') {
-      const cost = this.productionPlanEstimatedMaterialCost(doc);
-      const plannedQty = anyDoc.planned_qty ?? anyDoc.plannedQty ?? '';
+       // Can Produce and cost per set come from the issued material (262).
+      // The user enters Produced / Rejected; cost and grid follow (Step 4).
+      const producible = Number(anyDoc.producible_qty ?? anyDoc.producibleQty ?? 0) || 0;
+      const perSet = Number(anyDoc.material_cost_per_unit ?? anyDoc.materialCostPerUnit ?? 0) || 0;
       patch['productionPlanId'] = doc.id;
       patch['planRef'] = doc.doc_number;
-      patch['productionDate'] = this.isoDateValue(this.formValues()['productionDate']) || anyDoc.production_date || this.todayIso();
+      patch['productionDate'] = this.isoDateValue(this.formValues()['productionDate']) || this.todayIso();
       patch['finishedProduct'] = anyDoc.finished_product_name || anyDoc.finishedProductName || doc.party_name || '';
       patch['finishedProductId'] = anyDoc.finished_product_id ?? anyDoc.finishedProductId ?? doc.vendor_id ?? null;
-      patch['producedQty'] = plannedQty;
-      patch['rejectedQty'] = this.formValues()['rejectedQty'] || '0';
-      patch['productionCost'] = this.formatProductionCostValue(cost);
+      patch['producibleQty'] = String(producible);
+      patch['materialCostPerUnit'] = perSet;
+      patch['producedQty'] = '';
+      patch['rejectedQty'] = '';
+      patch['productionCost'] = '';
       patch['toWarehouse'] = locationName || this.formValues()['toWarehouse'] || '';
       patch['toWarehouseId'] = doc.warehouse_id ?? null;
       patch['toBranchId'] = doc.branch_id ?? null;
-      rows = [this.productionPlanOutputLineRow(doc, cost)];
+      const outputRow = this.productionPlanOutputLineRow(doc, 0);
+      this.setManufacturingLineCell(outputRow, ['Produced Qty'], '');
+      this.setManufacturingLineCell(outputRow, ['Rejected Qty'], '');
+      rows = [outputRow];
       refMap = { 0: { productionPlanItemId: null } };
     } else if (key === 'productionReturn') {
       patch['materialIssueId'] = doc.id;
@@ -14302,9 +14362,48 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
     this.boundReferenceLabels.set([doc.doc_number]);
     this.boundReferenceFields.set(patch);
-    if (key === 'productionEntry') {
-      this.refreshProductionEntryTentativeCostFromIssues(doc, this.productionPlanEstimatedMaterialCost(doc));
+   
+  }
+
+    // Production Entry: Produced / Rejected typed in the header drive the
+  // cost and the output grid.  Cost = (Produced + Rejected) x cost per set,
+  // where cost per set is the real issued cost from the server (262).
+  private syncProductionEntryOutput(): void {
+    if (this.config?.key !== 'productionEntry') return;
+    const values = this.formValues();
+    const produced = Number(values['producedQty']) || 0;
+    const rejected = Number(values['rejectedQty']) || 0;
+    const perSet = Number(values['materialCostPerUnit']) || 0;
+    const cost = Math.round((produced + rejected) * perSet * 100) / 100;
+    const costText = cost > 0 ? this.formatProductionCostValue(cost) : '';
+
+    if (String(values['productionCost'] ?? '') !== costText) {
+      this.formValues.update(v => ({ ...v, productionCost: costText }));
     }
+    this.entryLineRows.update(rows => rows.map((row, index) => {
+      if (index !== 0) return row;
+      const next = this.normalizeLineRow(row);
+      this.setManufacturingLineCell(next, ['Produced Qty'], values['producedQty'] ?? '');
+      this.setManufacturingLineCell(next, ['Rejected Qty'], values['rejectedQty'] ?? '');
+      this.setManufacturingLineCell(next, ['Production Cost', 'Cost'], costText);
+      return next;
+    }));
+    // Serials are for produced units only: drop extras if Produced went down
+    this.trimLineSerialUnitsToCurrentQty(0);
+  }
+
+    // Production Entry: message shown under Produced Qty while typing,
+  // when Produced + Rejected is more than Can Produce. Empty = no message.
+  productionEntryQtyLimitText(): string {
+    if (this.config?.key !== 'productionEntry') return '';
+    const values = this.formValues();
+    const producible = Number(values['producibleQty']) || 0;
+    const used = (Number(values['producedQty']) || 0) + (Number(values['rejectedQty']) || 0);
+    if (producible > 0 && used > producible) {
+      return `Produced + Rejected (${used}) is more than Can Produce (${producible}). ` +
+             `Reduce the quantity, or issue more material against this plan first.`;
+    }
+    return '';
   }
 
   selectPrimaryReference(doc: PurchaseRefDoc): void {
@@ -15437,7 +15536,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // number this line wants (IMEI Number, Chassis No, ...). The captured/
     // required count stays alongside it: it is the only place the qty cap is
     // visible before the picker opens.
-    const label = this.productSerialColumnLabels(product)[0] || 'Serial No';
+    // Previous: const label = this.productSerialColumnLabels(product)[0] || 'Serial No';
+    // The column header is "Policy", so the button shows this row's policy name
+    // as saved in Product Master (e.g. "IMEI Required").
+    const label = this.productSerialPolicyName(product) || 'Serial No';
     if (dcItemId) return count ? `${count} ${label}(s) from DC` : 'Loading…';
 
     if (siItemId) return count ? `${count} ${label}(s) from SI` : 'Loading...';
@@ -15456,7 +15558,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!product?.serial_applicable) return '';
     const count = (this.lineSerialUnitsMap()[rowIndex] || []).length;
     if (!count) return '';
-    const policyName = String(product.serial_policy_name || '').trim() || this.productSerialColumnLabels(product)[0] || 'Serial No';
+    // Previous: const policyName = String(product.serial_policy_name || '').trim() || this.productSerialColumnLabels(product)[0] || 'Serial No';
+    const policyName = this.productSerialPolicyName(product) || 'Serial No';
     return `${policyName} · ${count}`;
   }
 
@@ -16243,6 +16346,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     });
     if (this.shouldSyncProductionPlanningBomRows(key)) {
       this.syncProductionPlanningBomRequirementRows(true);
+    }
+   
+    // Production Entry: Produced / Rejected -> cost (from issued material) and output grid
+    if (this.config?.key === 'productionEntry' && (key === 'producedQty' || key === 'rejectedQty')) {
+      this.syncProductionEntryOutput();
     }
     if (key === 'segment' && normalizedValue && !this.optionEquals(this.selectedSegment(), normalizedValue)) {
       this.selectedSegment.set(normalizedValue);
@@ -23403,6 +23511,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (!finished || !this.productIsManufacturingFinished(finished)) return 'Production Entry Finished Product must be a Finished Product or Semi-Finished Product.';
       if (!(Number(payload['produced_qty']) > 0) && !((payload['items'] || []).some((item: any) => Number(item?.produced_qty) > 0))) {
         return 'Produced Qty must be greater than zero for Production Entry.';
+      }
+      // Produced + Rejected cannot be more than the issued material can make (server checks this too)
+      const producible = Number(this.formValues()['producibleQty']) || 0;
+      const used = (Number(payload['produced_qty']) || 0) + (Number(payload['rejected_qty']) || 0);
+      if (producible > 0 && used > producible) {
+        return `Produced + Rejected (${used}) is more than the issued material can make (${producible}).`;
       }
       return this.validateProductionEntryItems(payload['items'], isPosting);
     }
