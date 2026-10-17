@@ -1513,8 +1513,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   constructor() {
     // Vendor Payment style top-right toast for every save / post / delete
-    // message on all screens built on this shell.
-    attachInventorySaveToast(this.saveMsg, this.saveError);
+    // message on all screens built on this shell. Vendor Payment / Customer
+    // Receipt only embed the shell for their header and raise their own
+    // toast, so they're left exactly as they were.
+    attachInventorySaveToast(this.saveMsg, this.saveError,
+      () => ['vendorPayment', 'customerReceipt'].includes(this.config?.key || ''));
 
     // Safety net for startLineGridColumnResize(): if the component is
     // destroyed mid-drag (route navigation while a resize handle is still
@@ -17781,7 +17784,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             : '';
           const finishSave = () => {
             const forcedStatusMessage = this.forcedDocumentStatusMessage(forceDocumentStatus);
-            const savedMessage = forcedStatusMessage || (wasEditing ? 'Record updated.' : 'Record saved.');
+            const savedMessage = forcedStatusMessage || (wasEditing ? 'Updated successfully.' : 'Saved successfully.');
             // Advisory captured before the save (e.g. Rate over MRP) rides
             // along with the confirmation instead of having blocked it.
             const saveNotice = this.pendingSaveNotice;
@@ -17846,7 +17849,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
               this.loadTransactionReferenceDocs(true, false);
             }
             // A confirmation carrying an advisory needs longer on screen than
-            // a bare "Record saved." — it's the only place the user sees it.
+            // a bare "Saved successfully." — it's the only place the user sees it.
             setTimeout(() => this.saveMsg.set(''), saveNotice ? 8000 : 3000);
             if (savedSalesInvoiceId > 0 && savedSalesInvoiceStatus === 'posted') {
               this.loadSalesInvoiceBundleConsumption(savedSalesInvoiceId, savedSalesInvoiceNo);

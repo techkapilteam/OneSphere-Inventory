@@ -45,14 +45,19 @@ function classifySaveMessage(message: string): { severity: ToastSeverity; summar
  * as it is. Must be called in an injection context (constructor or field
  * initializer) of the component that owns the signals.
  */
-export function attachInventorySaveToast(saveMsg: Signal<string>, saveError: Signal<string>): void {
+export function attachInventorySaveToast(
+  saveMsg: Signal<string>,
+  saveError: Signal<string>,
+  skip: () => boolean = () => false
+): void {
   const viewContainer = inject(ViewContainerRef);
   let toast: InventorySaveToastComponent | null = null;
 
-  // Created after first render so it never interferes with the host's own
-  // view creation; p-toast is position:fixed, so where it sits in the DOM
-  // doesn't matter.
+  // Created after first render (inputs are bound by then, so `skip` can read
+  // them) so it never interferes with the host's own view creation; p-toast
+  // is position:fixed, so where it sits in the DOM doesn't matter.
   afterNextRender(() => {
+    if (skip()) return;
     toast = viewContainer.createComponent(InventorySaveToastComponent).instance;
   });
 
