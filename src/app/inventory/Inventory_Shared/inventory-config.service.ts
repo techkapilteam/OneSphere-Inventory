@@ -47,6 +47,8 @@ export interface BomLineItem {
   quantity: number;
   uom_id?: number | null;
   uom_name?: string | null;
+  wastage_percent?: number;
+
 }
 
 export interface BomItem {
@@ -96,6 +98,7 @@ export interface CategoryItem {
   parent_name?: string;
   description?: string;
   serial_applicable?: boolean;
+  uin_required?: boolean; 
   serial_policy_id?: number | null;
   serial_policy_name?: string | null;
   batch_applicable?: boolean;
@@ -608,6 +611,7 @@ export interface ContactItem {
   is_supplier?: boolean;
   is_customer?: boolean;
   is_channel_partner?: boolean;
+  is_lead_by?: boolean;
   vendor_exists?: boolean;
   customer_exists?: boolean;
   channel_partner_exists?: boolean;
@@ -886,6 +890,7 @@ export class InventoryConfigService {
       parent_name: this.value(item, 'parent_name', 'parentName'),
       description: this.value(item, 'description', 'description'),
       serial_applicable: !!(this.value(item, 'serial_applicable', 'serialApplicable', false)),
+      uin_required: !!this.value(item, 'uin_required', 'uinRequired', false),
       serial_policy_id: this.value(item, 'serial_policy_id', 'serialPolicyId', null),
       serial_policy_name: this.value(item, 'serial_policy_name', 'serialPolicyName', null),
       batch_applicable: !!(this.value(item, 'batch_applicable', 'batchApplicable', false)),
@@ -1665,6 +1670,7 @@ export class InventoryConfigService {
       is_supplier: this.value(item, 'is_supplier', 'isSupplier', false),
       is_customer: this.value(item, 'is_customer', 'isCustomer', false),
       is_channel_partner: this.value(item, 'is_channel_partner', 'isChannelPartner', false),
+      is_lead_by: this.value(item, 'is_lead_by', 'isLeadBy', false),
       vendor_exists: this.value(item, 'vendor_exists', 'vendorExists', false),
       customer_exists: this.value(item, 'customer_exists', 'customerExists', false),
       channel_partner_exists: this.value(item, 'channel_partner_exists', 'channelPartnerExists', false),
@@ -2109,6 +2115,38 @@ export class InventoryConfigService {
     ), item => this.normalizeContact(item));
   }
 
+  // Global Contacts' "Supplier / Vendor" tab lists only contacts with an active
+  // global.tbl_mst_supplier row (per company/branch). Reuses the Accounts
+  // Contacts screen's own endpoint so an Inventory vendor shows up there too.
+  // The SP rejects a contact already registered for this company/branch --
+  // callers treat that as success.
+  markContactAsSupplier(contactId: number, pan?: string | null): Observable<unknown> {
+    const params = new HttpParams()
+      .set('globalSchema', 'global')
+      .set('companyCode', sessionStorage.getItem('companyCode') ?? '')
+      .set('branchCode', sessionStorage.getItem('branchCode') ?? '');
+    return this.http.post(
+      `${this.base()}/ContactMore/SaveContactSupplier`,
+      { pContactId: String(contactId), pIsSupplier: true, pPanNumber: pan || null },
+      { headers: this.headers(), params }
+    );
+  }
+
+  // Global Contacts' "Lead By" tab (after Freelancer) lists contacts with an
+  // active global.tbl_mst_lead_by row. Same endpoint shape as the Supplier
+  // role above; an already-registered contact is likewise treated as success.
+  markContactAsLeadBy(contactId: number, pan?: string | null): Observable<unknown> {
+    const params = new HttpParams()
+      .set('globalSchema', 'global')
+      .set('companyCode', sessionStorage.getItem('companyCode') ?? '')
+      .set('branchCode', sessionStorage.getItem('branchCode') ?? '');
+    return this.http.post(
+      `${this.base()}/ContactMore/SaveContactLeadBy`,
+      { pContactId: String(contactId), pIsLeadBy: true, pPanNumber: pan || null },
+      { headers: this.headers(), params }
+    );
+  }
+
   updateGlobalContact(payload: Record<string, any>, id: number): Observable<ApiResponse<ContactItem>> {
     const body = this.toApiValue(payload);
     return this.mapItem(
@@ -2351,6 +2389,7 @@ export class InventoryConfigService {
         product_id: this.value(row, 'product_id', 'productId'),
         product_name: this.value(row, 'product_name', 'productName', ''),
         quantity: Number(this.value(row, 'quantity', 'quantity', 1)) || 0,
+        wastage_percent: Number(this.value(row, 'wastage_percent', 'wastagePercent', 0)) || 0,
         uom_id: this.value(row, 'uom_id', 'uomId'),
         uom_name: this.value(row, 'uom_name', 'uomName')
       }))

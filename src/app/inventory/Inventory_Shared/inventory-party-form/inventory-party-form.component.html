@@ -45,7 +45,12 @@
         <div class="erp-form-group"><label class="erp-label">{{ partyLabel }} Code</label><input class="erp-input" type="text" placeholder="Auto / manual code" [ngModel]="host.formFieldValue({key:'code', label:'Code', type:'text'})" (ngModelChange)="host.collectFormField('code', $event)" /></div>
       }
 
-      <div class="erp-form-group"><label class="erp-label">PAN</label><input class="erp-input" type="text" [ngModel]="host.formValues()[pfx('pan')] || ''" (ngModelChange)="host.collectFormField(pfx('pan'), $event)" placeholder="Auto bind from Global Contact, editable" /></div>
+      <!-- Previous: <div class="erp-form-group"><label class="erp-label">PAN</label><input class="erp-input" type="text" [ngModel]="host.formValues()[pfx('pan')] || ''" (ngModelChange)="host.collectFormField(pfx('pan'), $event)" placeholder="Auto bind from Global Contact, editable" /></div> -->
+      <div class="erp-form-group"><label class="erp-label">PAN @if (taxIdsRequired) {<span class="text-danger">*</span>}</label><input class="erp-input" type="text" maxlength="10" [ngModel]="host.formValues()[pfx('pan')] || ''" (ngModelChange)="host.collectFormField(pfx('pan'), $event)" [placeholder]="host.panPlaceholder(!!host.selectedPartyContact())" />
+        @if (host.panValidationMessage(host.formValues()[pfx('pan')]); as panError) {
+        <div class="erp-field-error"><i class="pi pi-exclamation-circle"></i> {{ panError }}</div>
+        }
+      </div>
       @if (partyKind === 'channelPartner') {
         <div class="erp-form-group"><label class="erp-label">GSTIN</label><input class="erp-input" type="text" maxlength="15" [ngModel]="host.formValues()[pfx('gstin')] || ''" (ngModelChange)="host.collectFormField(pfx('gstin'), $event)" placeholder="Auto bind from Global Contact, editable" /></div>
       }
@@ -214,7 +219,7 @@
   </div>
 
   @if (partyKind !== 'channelPartner') {
-    <app-inventory-gstin-list [host]="host" [keyPrefix]="keyPrefix"></app-inventory-gstin-list>
+    <app-inventory-gstin-list [host]="host" [keyPrefix]="keyPrefix" [required]="taxIdsRequired"></app-inventory-gstin-list>
   }
 
   @if (partyKind !== 'channelPartner') {

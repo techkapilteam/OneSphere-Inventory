@@ -13,6 +13,7 @@ import { applyInventoryTextCase, toInventoryTitleCase } from '../../Inventory_Sh
 import { businessSegmentsConfig } from '../../Inventory_Shared/inventory-screen.model';
 import { InventoryScreenShell } from '../../Inventory_Shared/inventory-screen-shell/inventory-screen-shell';
 import { QuickAddCategoryComponent } from '../../Inventory_Shared/quick-add-category/quick-add-category.component';
+import { attachInventorySaveToast } from '../../Inventory_Shared/inventory-save-toast/inventory-save-toast.component';
 
 @Component({
   selector: 'app-inventory-business-segments',
@@ -44,6 +45,10 @@ export class InventoryBusinessSegmentsComponent implements OnInit {
   saving = signal(false);
   saveMsg = signal('');
   saveError = signal('');
+
+  constructor() {
+    attachInventorySaveToast(this.saveMsg, this.saveError);
+  }
 
   showCategoryMasterDialog = signal(false);
   pendingCategories = signal<CategoryItem[]>([]);

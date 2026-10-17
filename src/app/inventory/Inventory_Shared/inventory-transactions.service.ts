@@ -224,6 +224,9 @@ export interface ProductionPlan {
   remarks?: string;
   status: string;
   created_at?: string;
+  producible_qty?: number;
+  produced_so_far?: number;
+  material_cost_per_unit?: number;
   items: ManufacturingMaterialItem[];
 }
 
@@ -279,6 +282,35 @@ export interface ProductionEntry {
   status: string;
   created_at?: string;
   items: ProductionEntryItem[];
+}
+
+// UIN Registration (migration 263): one row per serial of a UIN-required product
+export interface UinRegistrationRow {
+  serial_unit_id: number;
+  serial_no: string;
+  product_id: number;
+  product_name: string;
+  product_code?: string | null;
+  category_name?: string | null;
+  branch_id?: number | null;
+  branch_name?: string | null;
+  warehouse_id?: number | null;
+  warehouse_name?: string | null;
+  source_doc_no?: string | null;      // Production Entry number
+  source_doc_date?: string | null;
+  unit_status: string;                // in_stock | reserved | returned | sold
+  uin_number?: string | null;
+  uin_date?: string | null;           // yyyy-MM-dd
+  uin_certificate_no?: string | null;
+  uin_status: 'pending' | 'registered' | 'sold' | string;
+  can_edit: boolean;
+}
+
+export interface UinRegistrationSaveItem {
+  serial_unit_id: number;
+  uin_number: string | null;
+  uin_date: string | null;            // yyyy-MM-dd
+  uin_certificate_no: string | null;
 }
 
 export interface ProductionReturn {
@@ -1071,6 +1103,10 @@ export class InventoryTransactionsService {
       planned_qty: Number(r?.plannedQty ?? r?.planned_qty ?? 0),
       bom_version: r?.bomVersion || r?.bom_version,
       work_center: r?.workCenter || r?.work_center,
+            // From 262: what the issued material can still make, and its real cost per unit
+      producible_qty: Number(r?.producible_qty ?? r?.producibleQty ?? 0) || 0,
+      produced_so_far: Number(r?.produced_so_far ?? r?.producedSoFar ?? 0) || 0,
+      material_cost_per_unit: Number(r?.material_cost_per_unit ?? r?.materialCostPerUnit ?? 0) || 0,
       branch_id: r?.branchId ?? r?.branch_id,
       branch_name: r?.branchName || r?.branch_name,
       warehouse_id: r?.warehouseId ?? r?.warehouse_id,
@@ -1538,6 +1574,51 @@ export class InventoryTransactionsService {
     );
   }
 
+    // ── UIN Registration ─────────────────────────────────────────────────────
+  getUinRegistrations(filters: { status?: string; branchId?: number | null; warehouseId?: number | null; productId?: number | null; segmentId?: number | null } = {}): Observable<ApiResponse<UinRegistrationRow[]>> {
+    let params = new HttpParams();
+    if (filters.status) params = params.set('status', filters.status);
+    if (filters.branchId) params = params.set('branchId', String(filters.branchId));
+    if (filters.warehouseId) params = params.set('warehouseId', String(filters.warehouseId));
+    if (filters.productId) params = params.set('productId', String(filters.productId));
+    if (filters.segmentId) params = params.set('segmentId', String(filters.segmentId));
+    return this.mapArray(
+      this.http.get<ApiResponse<any[]>>(this.url('uin-registrations'), { headers: this.headers(), params }),
+      r => this.normUinRegistration(r)
+    );
+  }
+
+  saveUinRegistrations(items: UinRegistrationSaveItem[]): Observable<ApiResponse<any>> {
+    return this.mapItem(
+      this.http.post<ApiResponse<any>>(this.url('uin-registrations'), this.toApiValue({ items }), { headers: this.headers() }),
+      r => r
+    );
+  }
+
+  private normUinRegistration(r: any): UinRegistrationRow {
+    const pick = (snake: string, camel: string) => r?.[snake] ?? r?.[camel] ?? null;
+    return {
+      serial_unit_id: Number(pick('serial_unit_id', 'serialUnitId')),
+      serial_no: pick('serial_no', 'serialNo') || '',
+      product_id: Number(pick('product_id', 'productId')),
+      product_name: pick('product_name', 'productName') || '',
+      product_code: pick('product_code', 'productCode'),
+      category_name: pick('category_name', 'categoryName'),
+      branch_id: pick('branch_id', 'branchId'),
+      branch_name: pick('branch_name', 'branchName'),
+      warehouse_id: pick('warehouse_id', 'warehouseId'),
+      warehouse_name: pick('warehouse_name', 'warehouseName'),
+      source_doc_no: pick('source_doc_no', 'sourceDocNo'),
+      source_doc_date: pick('source_doc_date', 'sourceDocDate'),
+      unit_status: pick('unit_status', 'unitStatus') || 'in_stock',
+      uin_number: pick('uin_number', 'uinNumber'),
+      uin_date: pick('uin_date', 'uinDate'),
+      uin_certificate_no: pick('uin_certificate_no', 'uinCertificateNo'),
+      uin_status: pick('uin_status', 'uinStatus') || 'pending',
+      can_edit: !!pick('can_edit', 'canEdit')
+    };
+  }
+
   getProductionReturns(status?: string, segmentId?: number | null): Observable<ApiResponse<ProductionReturn[]>> {
     let params = new HttpParams();
     if (status) params = params.set('status', status);
@@ -1820,9 +1901,21 @@ export class InventoryTransactionsService {
       customer_gstin: r?.customerGstin || r?.customer_gstin,
       channel_partner_id: r?.channelPartnerId ?? r?.channel_partner_id,
       channel_partner_name: r?.channelPartnerName || r?.channel_partner_name,
+      // Lead By (Sales Invoice, migration 253).
+      lead_by_contact_id: r?.leadByContactId ?? r?.lead_by_contact_id,
+      lead_by_name: r?.leadByName || r?.lead_by_name,
+      // Delivery / Ship address (Sales Invoice, migration 257).
+      delivery_address: r?.deliveryAddress || r?.delivery_address,
+      ship_address: r?.shipAddress || r?.ship_address,
       place_of_supply: r?.placeOfSupply || r?.place_of_supply,
       warehouse_id: r?.warehouseId ?? r?.warehouse_id,
       warehouse_name: r?.warehouseName || r?.warehouse_name, payment_terms: r?.paymentTerms || r?.payment_terms,
+      // Branch (migration 161): a Branch pick on the merged Warehouse/Branch
+      // field saves here with warehouse_* NULL. Without these the edit form's
+      // `warehouse_name || branch_name` fallback reopened the field empty and
+      // the next save wrote both location ids back out as NULL.
+      branch_id: r?.branchId ?? r?.branch_id,
+      branch_name: r?.branchName || r?.branch_name,
       remarks: r?.remarks, status: r?.status || 'draft', created_at: r?.createdAt || r?.created_at,
       items: (r?.items || []).map((i: any) => ({
         ...this.normSalesItem(i),

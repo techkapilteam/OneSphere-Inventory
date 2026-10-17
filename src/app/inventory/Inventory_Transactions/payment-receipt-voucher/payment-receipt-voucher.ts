@@ -1,4 +1,4 @@
-import { CommonModule } from '@angular/common';
+import { CommonModule, formatDate } from '@angular/common';
 import { Component, computed, effect, inject, signal, ViewChildren, QueryList } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterModule } from '@angular/router';
@@ -13,6 +13,7 @@ import { AvailableNote, OutstandingInvoice, PaymentVoucher, PaymentsService, Tds
 import { StickyFooterOffsetService } from '../../../core/services/Common/sticky-footer-offset.service';
 import { customerReceiptConfig, vendorPaymentConfig } from '../../Inventory_Shared/inventory-screen.model';
 import { InventoryScreenShell } from '../../Inventory_Shared/inventory-screen-shell/inventory-screen-shell';
+import { InventoryExportDocument, InventoryExportService } from '../../Inventory_Shared/inventory-export.service';
 import { PaymentModeOption, PaymentModeSelectorComponent, PaymentModeSelectorValue, defaultPaymentModeValue } from '../../../shared/payment-mode-selector/payment-mode-selector.component';
 
 type VoucherMode = 'pay' | 'receipt';
@@ -56,6 +57,7 @@ export class PaymentReceiptVoucherComponent {
   private readonly paymentsService = inject(PaymentsService);
   private readonly footerOffset = inject(StickyFooterOffsetService);
   private readonly messageService = inject(MessageService);
+  private readonly exportService = inject(InventoryExportService);
 
   @ViewChildren(PaymentModeSelectorComponent) modeSelectors!: QueryList<PaymentModeSelectorComponent>;
 
@@ -129,7 +131,16 @@ export class PaymentReceiptVoucherComponent {
   private readonly bankDetailsRequested = new Set<string>();
   readonly narration = signal('');
   readonly tdsSection = signal<string>('');
-  readonly voucherDate = signal<string>(new Date().toISOString().slice(0, 10));
+  // Stored as a local-date 'YYYY-MM-DD' string (what the save API expects).
+  // p-datepicker can't parse that string against dateFormat="dd-M-yy" and
+  // rendered blank, so the template binds voucherDateValue() (a real Date)
+  // and writes back through onVoucherDateChange(). toISOString() was also
+  // avoided because it is UTC and gave yesterday's date before 05:30 IST.
+  readonly voucherDate = signal<string>(this.toLocalIsoDate(new Date()));
+  readonly voucherDateValue = computed<Date | null>(() => {
+    const [y, m, d] = (this.voucherDate() || '').split('-').map(Number);
+    return y && m && d ? new Date(y, m - 1, d) : null;
+  });
   // Bug fix (2026-09-20): this screen renders its own Voucher Date picker
   // instead of going through the shared shell's transactionDateField()/
   // transactionDateValue()/maxTransactionDate machinery (it isn't a
@@ -324,7 +335,13 @@ export class PaymentReceiptVoucherComponent {
     this.loadPaymentAccountSetup();
   }
 
-  today(): string { return new Date().toISOString().slice(0, 10); }
+  today(): string { return this.toLocalIsoDate(new Date()); }
+  onVoucherDateChange(value: Date | null): void {
+    this.voucherDate.set(value instanceof Date && !isNaN(value.getTime()) ? this.toLocalIsoDate(value) : '');
+  }
+  private toLocalIsoDate(d: Date): string {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
   daysBetween(a: string, b: string): number { return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000); }
   fmtDate(d?: string): string { return d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'; }
   fmt(n: number | undefined): string { return '₹ ' + Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -623,6 +640,85 @@ export class PaymentReceiptVoucherComponent {
   }
   closeDrawer(): void { this.drawerInvoice.set(null); }
 
+  // Print / PDF / Excel — same Accounts-style output as every other screen.
+  // The toolbar exports the saved-vouchers list; the row icons print one
+  // voucher in the Accounts voucher layout (header block, S.No / Particulars /
+  // Amount, narration, Approved / Verified / Posted By).
+  exportVoucherList(action: 'Pdf' | 'Print' | 'Excel'): void {
+    const list = this.vouchers();
+    if (!list.length) { this.saveMsg.set('No rows available for this action.'); return; }
+    const title = this.mode() === 'pay' ? 'Vendor Payments' : 'Customer Receipts';
+    const exportDoc: InventoryExportDocument = {
+      title,
+      columns: ['Voucher No', 'Date', this.partyLabel(), 'Allocated', 'TDS', 'TCS', 'Net', 'Status'],
+      rows: list.map(v => [
+        v.voucher_number || '',
+        this.pdfDate(v.voucher_date),
+        v.party_name || '',
+        this.pdfAmt(v.total_allocated),
+        v.tds_amount ? this.pdfAmt(v.tds_amount) : '-',
+        v.tcs_amount ? this.pdfAmt(v.tcs_amount) : '-',
+        this.pdfAmt(v.net_amount),
+        v.status ? v.status.charAt(0).toUpperCase() + v.status.slice(1) : ''
+      ]),
+      fileName: title
+    };
+    if (action === 'Excel') this.exportService.excel(exportDoc);
+    else this.exportService.pdf(exportDoc, action);
+  }
+
+  printVoucher(v: PaymentVoucher, action: 'Pdf' | 'Print'): void {
+    const isPay = v.voucher_type !== 'receipt';
+    const typeLabel: Record<string, string> = {
+      purchase_invoice: 'Purchase Invoice', sales_invoice: 'Sales Invoice',
+      debit_note: 'Debit Note', credit_note: 'Credit Note'
+    };
+    const rows = (v.allocations || []).map((a, i) => [
+      String(i + 1),
+      `${typeLabel[a.invoice_type] || 'Invoice'} ${a.invoice_number || ''}`.trim(),
+      this.pdfAmt(a.allocated_amount)
+    ]);
+    if (!rows.length) rows.push(['1', 'On Account', this.pdfAmt(v.net_amount)]);
+    const modes = (v.modes || [])
+      .map(m => `${m.ref_json?.['summary'] || m.mode_key} (${this.pdfAmt(m.amount)})`)
+      .join(', ');
+    const summary: Array<[string, string]> = [['Total Allocated', this.pdfAmt(v.total_allocated)]];
+    if (v.tds_amount) summary.push(['TDS', this.pdfAmt(v.tds_amount)]);
+    if (v.tcs_amount) summary.push([`TCS${v.tcs_percentage ? ` (${v.tcs_percentage}%)` : ''}`, this.pdfAmt(v.tcs_amount)]);
+    summary.push(['Net Amount', this.pdfAmt(v.net_amount)]);
+    const title = isPay ? 'Payment Voucher' : 'Receipt Voucher';
+    this.exportService.pdf({
+      title,
+      fields: [
+        ['Voucher No', v.voucher_number || ''],
+        ['Date', this.pdfDate(v.voucher_date)],
+        [isPay ? 'Paid To' : 'Received From', v.party_name || ''],
+        ['GSTIN', v.party_gstin || ''],
+        ['Mode of Payment', modes],
+        ['Status', v.status ? v.status.charAt(0).toUpperCase() + v.status.slice(1) : '']
+      ],
+      columns: ['S.No.', 'Particulars', 'Amount'],
+      rows,
+      summary,
+      notes: v.narration || '',
+      notesLabel: 'Narration',
+      signatures: ['(Approved By)', '(Verified By)', '(Posted By)'],
+      signedBy: this.exportService.userName(),
+      orientation: 'portrait',
+      fileName: `${title} ${v.voucher_number || ''}`.trim()
+    }, action);
+  }
+
+  private pdfAmt(n: number | undefined): string {
+    return Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  private pdfDate(d?: string): string {
+    if (!d) return '';
+    const date = new Date(d);
+    return isNaN(date.getTime()) ? d : formatDate(date, 'dd-MMM-yyyy', 'en-US');
+  }
+
   save(): void {
     const party = this.selectedParty();
     if (!party) { this.saveError.set('Select a ' + this.partyLabel().toLowerCase() + ' first.'); return; }
@@ -692,6 +788,12 @@ export class PaymentReceiptVoucherComponent {
             life: 4500
           });
           this.clearAllocations();
+          // Re-fetch cheque lists so the leaf just used is no longer offered.
+          this.bankDetailsRequested.clear();
+          this.bankDetailsByBankId.set({});
+          this.modeRows.update(rows => rows.map(r =>
+            r.details.bankSubType === 'CHEQUE' ? { ...r, details: { ...r.details, refNumber: '' } } : r));
+          this.modeRows().forEach(r => this.loadBankDetails(r.details.bankId));
           this.narration.set('');
           this.loadVouchers();
           if (this.selectedPartyId()) this.onPartyChange(this.selectedPartyId());

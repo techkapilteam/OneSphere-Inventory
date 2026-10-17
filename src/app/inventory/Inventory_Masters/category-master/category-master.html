@@ -95,8 +95,6 @@
             <button type="button" class="erp-btn btn-white btn-sm" title="Print"><i class="pi pi-print"></i></button>
             <button type="button" class="erp-btn btn-white btn-sm" title="Export PDF"><i class="pi pi-file-pdf"></i></button>
             <button type="button" class="erp-btn btn-white btn-sm" title="Export Excel"><i class="pi pi-file-excel"></i></button>
-            <button type="button" class="erp-btn btn-white btn-sm" title="Mail"><i class="pi pi-envelope"></i></button>
-            <button type="button" class="erp-btn btn-white btn-sm" title="WhatsApp"><i class="pi pi-whatsapp"></i></button>
           </div>
         </div>
             <div class="tbl-wrap">
@@ -406,6 +404,7 @@
               <div class="inventory-fieldset-title">Category Default Policies</div>
               <div class="inventory-form-grid inventory-config-grid">
                 <div class="erp-form-group">
+                  <!-- Previous: <label class="erp-label">Serial No. Policy Applicable <span class="text-danger">*</span></label> -->
                   <label class="erp-label">Serial No. Policy Applicable</label>
                   <label class="inventory-labeled-switch yes-no">
                     <input type="checkbox" [checked]="categorySerialApplicable()" (change)="setCategorySerialApplicable($any($event.target).checked)" />
@@ -413,7 +412,7 @@
                   </label>
                   @if (categorySerialApplicable()) {
                     <div class="inventory-switch-reveal">
-                      <label class="erp-label">Default Serial Number Policy</label>
+                      <label class="erp-label">Default Serial Number Policy <span class="text-danger">*</span></label>
                       <div class="inventory-field-with-add">
                         <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
                           [items]="serialPolicyOptions" [searchable]="true" [clearable]="true"
@@ -422,6 +421,54 @@
                           placeholder="Select Serial Policy"></ng-select>
                         <button type="button" class="erp-btn btn-white btn-icon" title="Add Serial Number Policy" (click)="openAddMaster('Serial Number Policy', 'serialPolicyName')"><i class="pi pi-plus"></i></button>
                       </div>
+                    </div>
+                    <!-- UIN: government registration number per serial (e.g. drones). Only with serial tracking. -->
+                    <div class="inventory-switch-reveal">
+                      <label class="erp-label">UIN Required</label>
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <label class="inventory-labeled-switch yes-no">
+                          <input type="checkbox"
+                            [checked]="formValues()['uinRequired'] === true"
+                            (change)="collectFormField('uinRequired', $any($event.target).checked)" />
+                          <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
+                        </label>
+                        <button type="button" class="erp-btn btn-white btn-icon" title="UIN Required Guide"
+                          [class.active]="uinGuideVisible()"
+                          (click)="uinGuideVisible.set(!uinGuideVisible())">
+                          <i class="pi pi-info-circle"></i>
+                        </button>
+                      </div>
+                      <!-- Previous: always-visible hint, now shown only via the (i) guide toggle.
+                      <div class="inventory-optional-hint">
+                        Yes = each serial must get a UIN (Manufacturing &gt; UIN Registration) before it can be sold.
+                      </div> -->
+                      @if (uinGuideVisible()) {
+                        <div class="product-nature-guide" style="margin-top:8px;">
+                          <div class="product-nature-guide-title">
+                            <div>
+                              <strong>UIN Required Guide</strong>
+                            </div>
+                            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Close"
+                              (click)="uinGuideVisible.set(false)">
+                              <i class="pi pi-times"></i>
+                            </button>
+                          </div>
+                          <div class="product-nature-guide-list" style="grid-template-columns:1fr;">
+                            <div class="product-nature-guide-item" style="grid-template-columns:1fr;" [class.active]="formValues()['uinRequired'] === true">
+                              <div class="product-nature-guide-main">
+                                <strong>Yes</strong>
+                                <span>Each serial must get a UIN (Manufacturing &gt; UIN Registration) before it can be sold.</span>
+                              </div>
+                            </div>
+                            <div class="product-nature-guide-item" style="grid-template-columns:1fr;" [class.active]="formValues()['uinRequired'] !== true">
+                              <div class="product-nature-guide-main">
+                                <strong>No</strong>
+                                <span>No UIN registration needed; serials can be sold directly.</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      }
                     </div>
                   }
                 </div>
@@ -1247,6 +1294,12 @@
 
         @if (config.key !== 'warehouseMaster' || warehouseRequired()) {
         <div class="inventory-form-actions">
+          @if (saveMsg()) {
+            <span class="inventory-save-tooltip save-ok"><i class="pi pi-check-circle"></i> {{ saveMsg() }}</span>
+          }
+          @if (saveError()) {
+            <span class="inventory-save-tooltip save-err"><i class="pi pi-times-circle"></i> {{ saveError() }}</span>
+          }
           <button type="button" class="erp-btn btn-white"><i class="pi pi-times"></i> Clear</button>
           @if (isPosView()) {
             <button type="button" class="erp-btn btn-white"><i class="pi pi-pause-circle"></i> Hold Bill</button>
@@ -1301,6 +1354,12 @@
               </table>
             </div>
             <div class="inventory-form-actions inventory-final-actions">
+              @if (saveMsg()) {
+                <span class="inventory-save-tooltip save-ok"><i class="pi pi-check-circle"></i> {{ saveMsg() }}</span>
+              }
+              @if (saveError()) {
+                <span class="inventory-save-tooltip save-err"><i class="pi pi-times-circle"></i> {{ saveError() }}</span>
+              }
               <button type="button" class="erp-btn btn-white"><i class="pi pi-times"></i> Cancel</button>
               <button type="button" class="erp-btn btn-primary"><i class="pi pi-check"></i> Save</button>
             </div>
@@ -1325,8 +1384,6 @@
             <button type="button" class="erp-btn btn-white btn-sm" title="Print"><i class="pi pi-print"></i></button>
             <button type="button" class="erp-btn btn-white btn-sm" title="Export PDF"><i class="pi pi-file-pdf"></i></button>
             <button type="button" class="erp-btn btn-white btn-sm" title="Export Excel"><i class="pi pi-file-excel"></i></button>
-            <button type="button" class="erp-btn btn-white btn-sm" title="Mail"><i class="pi pi-envelope"></i></button>
-            <button type="button" class="erp-btn btn-white btn-sm" title="WhatsApp"><i class="pi pi-whatsapp"></i></button>
             <span class="inventory-grid-divider"></span>
             <div class="inventory-grid-pager">
               <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Previous page" [disabled]="!canGoPrevGridPage('records')" (click)="goPrevGridPage('records')"><i class="pi pi-chevron-left"></i></button>
@@ -1361,8 +1418,11 @@
                   <td class="text-center">
                     <div class="inventory-row-actions">
                       @if (isAdmin()) {
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit"><i class="pi pi-pencil"></i></button>
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete"><i class="pi pi-trash"></i></button>
+                        <!-- Previous: <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit"><i class="pi pi-pencil"></i></button> -->
+                        <!-- Previous: <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete"><i class="pi pi-trash"></i></button> -->
+                        <!-- Saved master records are locked: Edit/Delete always disabled. -->
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" disabled><i class="pi pi-pencil"></i></button>
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" disabled><i class="pi pi-trash"></i></button>
                       }
                     </div>
                   </td>

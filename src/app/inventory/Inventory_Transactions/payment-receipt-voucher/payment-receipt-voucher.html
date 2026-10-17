@@ -24,8 +24,9 @@
         <div class="erp-form-group">
           <label class="erp-label">Voucher Date</label>
           <div class="inventory-date-wrap">
-            <p-datepicker [ngModel]="voucherDate()" (ngModelChange)="voucherDate.set($event)" [ngModelOptions]="{ standalone: true }"
+            <p-datepicker [ngModel]="voucherDateValue()" (ngModelChange)="onVoucherDateChange($event)" [ngModelOptions]="{ standalone: true }"
               [maxDate]="maxVoucherDate"
+              [minDate]="maxVoucherDate"
               dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY" [showIcon]="false" appendTo="body"
               styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100"></p-datepicker>
             <i class="pi pi-calendar inventory-date-icon"></i>
@@ -34,7 +35,7 @@
       </div>
 
       @if (selectedParty()) {
-        <section class="inventory-kpi-grid pay-kpi-grid">
+        <section class="inventory-kpi-grid pay-kpi-grid pay-kpi-row">
           <article class="inventory-card inventory-kpi-card">
             <span class="inventory-card-icon"><i class="pi pi-file"></i></span>
             <div><small>Open {{ docLabel() }}s</small><strong>{{ outstandingInvoices().length }}</strong></div>
@@ -71,18 +72,6 @@
             <strong>Outstanding {{ docLabel() }}s</strong>
             <span>Tick invoices, edit the amount for a part payment, or auto-allocate.</span>
           </div>
-        </div>
-
-        <div class="pay-alloc-bar">
-          <span class="pay-alloc-lbl">{{ mode() === 'pay' ? 'Amount to pay' : 'Amount received' }}</span>
-          <div class="pay-amount-input">
-            <span>₹</span>
-            <input type="text" inputmode="decimal" placeholder="0.00"
-              [ngModel]="quickAmount()" (ngModelChange)="quickAmount.set(parseAmt($event))" />
-          </div>
-          <button type="button" class="erp-btn btn-primary btn-sm" (click)="autoAllocate()"><i class="pi pi-bolt"></i> Auto-allocate (oldest first)</button>
-          <button type="button" class="erp-btn btn-white btn-sm" (click)="selectAll(!allSelected())">{{ allSelected() ? 'Unselect all' : 'Select all' }}</button>
-          <button type="button" class="erp-btn btn-ghost btn-sm" (click)="clearAllocations()">Clear</button>
         </div>
 
         <div class="tbl-wrap">
@@ -126,6 +115,7 @@
                         [class.err]="allocExceeds(inv)"
                         [disabled]="!isSelected(inv)"
                         [ngModel]="allocFor(inv) ? allocFor(inv).toFixed(2) : ''"
+                        [ngModelOptions]="{ updateOn: 'blur' }"
                         (ngModelChange)="setAlloc(inv, $event)" />
                       @if (isSelected(inv)) {
                         <span class="pay-full-link" (click)="fullAlloc(inv)">pay full {{ fmt(inv.outstanding) }}</span>
@@ -181,6 +171,7 @@
                         [class.err]="noteApplyExceeds(note)"
                         [disabled]="!isNoteSelected(note)"
                         [ngModel]="noteApplyFor(note) ? noteApplyFor(note).toFixed(2) : ''"
+                        [ngModelOptions]="{ updateOn: 'blur' }"
                         (ngModelChange)="setNoteApply(note, $event)" />
                     </td>
                   </tr>
@@ -211,7 +202,7 @@
                 <div class="erp-form-group pay-mode-amount">
                   <label class="erp-label">Amount (₹)</label>
                   <input class="erp-input" type="text" inputmode="decimal" style="text-align:right;font-weight:600" placeholder="0.00"
-                    [ngModel]="row.amount ? row.amount.toFixed(2) : ''" (ngModelChange)="setModeAmount(idx, $event)" />
+                    [ngModel]="row.amount ? row.amount.toFixed(2) : ''" [ngModelOptions]="{ updateOn: 'blur' }" (ngModelChange)="setModeAmount(idx, $event)" />
                 </div>
                 <span class="pay-mode-summary">{{ row.details.summary }}</span>
                 <button type="button" class="erp-btn btn-white btn-icon btn-sm pay-mode-rm" title="Remove" (click)="removeMode(idx)"><i class="pi pi-trash"></i></button>
@@ -316,6 +307,13 @@
           <strong>Existing Saved {{ mode() === 'pay' ? 'Payments' : 'Receipts' }}</strong>
           <span>Vouchers already posted are final — they cannot be cancelled or edited.</span>
         </div>
+        @if (vouchers().length) {
+          <div class="grid-export-actions">
+            <button type="button" class="erp-btn btn-white btn-sm" title="Export PDF" (click)="exportVoucherList('Pdf')"><i class="pi pi-file-pdf"></i></button>
+            <button type="button" class="erp-btn btn-white btn-sm" title="Print" (click)="exportVoucherList('Print')"><i class="pi pi-print"></i></button>
+            <button type="button" class="erp-btn btn-white btn-sm" title="Export Excel" (click)="exportVoucherList('Excel')"><i class="pi pi-file-excel"></i></button>
+          </div>
+        }
       </div>
       <div class="tbl-wrap">
         @if (loadingVouchers()) {
@@ -332,6 +330,7 @@
                 <th class="text-right">TCS</th>
                 <th class="text-right">Net</th>
                 <th>Status</th>
+                <th class="text-center">Voucher</th>
               </tr>
             </thead>
             <tbody>
@@ -345,9 +344,13 @@
                   <td class="text-right">{{ v.tcs_amount ? fmt(v.tcs_amount) : '—' }}</td>
                   <td class="text-right">{{ fmt(v.net_amount) }}</td>
                   <td><span class="erp-badge" [class.badge-success]="v.status === 'posted'" [class.badge-danger]="v.status === 'cancelled'">{{ v.status }}</span></td>
+                <td class="text-center text-nowrap">
+                  <button type="button" class="erp-btn btn-white btn-sm" title="Export PDF" (click)="printVoucher(v, 'Pdf')"><i class="pi pi-file-pdf"></i></button>
+                  <button type="button" class="erp-btn btn-white btn-sm" title="Print" (click)="printVoucher(v, 'Print')"><i class="pi pi-print"></i></button>
+                </td>
                 </tr>
               } @empty {
-                <tr><td colspan="8"><div class="inventory-grid-empty-hint">No {{ mode() === 'pay' ? 'payments' : 'receipts' }} saved yet.</div></td></tr>
+                <tr><td colspan="9"><div class="inventory-grid-empty-hint">No {{ mode() === 'pay' ? 'payments' : 'receipts' }} saved yet.</div></td></tr>
               }
             </tbody>
           </table>
@@ -402,7 +405,7 @@
       <div class="inventory-kpi-grid pay-kpi-grid">
         <article class="inventory-card inventory-kpi-card"><span class="inventory-card-icon"><i class="pi pi-calendar"></i></span><div><small>Invoice Date</small><strong>{{ fmtDate(inv.invoice_date) }}</strong></div></article>
         <article class="inventory-card inventory-kpi-card"><span class="inventory-card-icon"><i class="pi pi-calendar-times"></i></span><div><small>Due Date</small><strong>{{ fmtDate(inv.due_date) }}</strong></div></article>
-        <article class="inventory-card inventory-kpi-card"><span class="inventory-card-icon"><i class="pi pi-info-circle"></i></span><div><small>Status</small><span class="erp-badge" [class]="agingLabel(inv).cls">{{ agingLabel(inv).text }}</span></div></article>
+        <article class="inventory-card inventory-kpi-card"><span class="inventory-card-icon"><i class="pi pi-info-circle"></i></span><div><small>Status</small><div class="erp-badge" [class]="agingLabel(inv).cls">{{ agingLabel(inv).text }}</div></div></article>
         <article class="inventory-card inventory-kpi-card"><span class="inventory-card-icon"><i class="pi pi-file"></i></span><div><small>Invoice Value</small><strong>{{ fmt(inv.total_amount) }}</strong></div></article>
         <article class="inventory-card inventory-kpi-card"><span class="inventory-card-icon"><i class="pi pi-check"></i></span><div><small>Paid Till Date</small><strong>{{ fmt(inv.paid_amount) }}</strong></div></article>
         <article class="inventory-card inventory-kpi-card pay-kpi-emphasis"><span class="inventory-card-icon"><i class="pi pi-exclamation-triangle"></i></span><div><small>Outstanding</small><strong>{{ fmt(inv.outstanding) }}</strong></div></article>

@@ -47,6 +47,13 @@ export class InventoryPartyFormComponent {
     return this.categoryOptionsByKind[this.partyKind];
   }
 
+  // Quick-add Vendor (the (+) beside Party / Vendor on transaction screens):
+  // PAN and at least one GSTIN / State row are mandatory -- enforced in
+  // host.saveQuickVendor(); this only drives the asterisks.
+  get taxIdsRequired(): boolean {
+    return this.nameCodeMode === 'quickAddSignals' && this.partyKind === 'vendor';
+  }
+
   get showPriceList(): boolean {
     return this.partyKind === 'customer';
   }

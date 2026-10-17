@@ -8,8 +8,9 @@
       </div>
       <div class="inventory-report-header-actions">
         <app-inventory-screen-shell [config]="config"></app-inventory-screen-shell>
+        <button type="button" class="erp-btn btn-white btn-sm" title="Export PDF" (click)="exportPdf()"><i class="pi pi-file-pdf"></i></button>
         <button type="button" class="erp-btn btn-white btn-sm" title="Print" (click)="printReport()"><i class="pi pi-print"></i></button>
-        <button type="button" class="erp-btn btn-primary btn-sm" title="Export CSV" (click)="exportCsv()"><i class="pi pi-file-excel"></i> Export</button>
+        <button type="button" class="erp-btn btn-white btn-sm" title="Export Excel" (click)="exportExcel()"><i class="pi pi-file-excel"></i></button>
       </div>
     </div>
 

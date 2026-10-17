@@ -1273,7 +1273,6 @@ export class MainLayoutComponent implements OnInit, AfterViewInit {
 
   toggleFlyoutGroup(groupName: string): void {
     if (this.expandedFlyoutGroups.has(groupName)) {
-      if (this.isFlyoutGroupNameActive(groupName)) return;
       this.expandedFlyoutGroups.delete(groupName);
       return;
     }
@@ -1304,11 +1303,6 @@ export class MainLayoutComponent implements OnInit, AfterViewInit {
     this.expandedFlyoutGroups.clear();
     const groupName = this.flyoutGroupNameForScreen(subModule, screen) || this.firstFlyoutGroupName(subModule);
     if (groupName) this.expandedFlyoutGroups.add(groupName);
-  }
-
-  private isFlyoutGroupNameActive(groupName: string): boolean {
-    return !!this.selectedSubModule
-      && this.flyoutGroupNameForScreen(this.selectedSubModule, this.selectedScreen) === groupName;
   }
 
   private flyoutGroupNameForScreen(subModule: SubModule, screen?: Screen | null): string | null {

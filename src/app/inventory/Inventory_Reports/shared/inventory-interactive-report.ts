@@ -1,11 +1,12 @@
 import { CommonModule } from '@angular/common';
-import { Component, Input, computed, signal } from '@angular/core';
+import { Component, Input, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { NgSelectModule } from '@ng-select/ng-select';
 import { DatePickerModule } from 'primeng/datepicker';
 import { InventoryScreenShell } from '../../Inventory_Shared/inventory-screen-shell/inventory-screen-shell';
 import { INVENTORY_OPTIONS, InventoryScreenConfig } from '../../Inventory_Shared/inventory-screen.model';
+import { InventoryExportDocument, InventoryExportService } from '../../Inventory_Shared/inventory-export.service';
 
 type ReportSectionId = 'summary' | 'lookup' | 'drilldown' | 'actions';
 
@@ -39,6 +40,7 @@ interface ReportBlock {
 })
 export class InventoryInteractiveReportComponent {
   @Input({ required: true }) config!: InventoryScreenConfig;
+  private readonly exportService = inject(InventoryExportService);
 
   readonly segmentOptions = ['All Segments', ...INVENTORY_OPTIONS.segments];
   readonly sourceOptions = ['All Sources', 'Master', 'Transaction'];
@@ -143,22 +145,31 @@ export class InventoryInteractiveReportComponent {
     this.activeRow.set(null);
   }
 
-  exportCsv(): void {
-    const headers: (keyof ReportRow)[] = ['segment', 'group', 'source', 'screen', 'document', 'product', 'location', 'qty', 'value', 'status', 'risk', 'updated'];
-    const lines = [
-      headers.join(','),
-      ...this.filteredRows().map(row => headers.map(header => `"${String(row[header]).replace(/"/g, '""')}"`).join(','))
-    ];
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${this.config.key || 'inventory'}-interactive-report.csv`;
-    link.click();
-    URL.revokeObjectURL(link.href);
+  // Accounts-style output (letterhead, #0b4093 grid, printed-on footer).
+  exportExcel(): void {
+    this.exportService.excel(this.exportDocument());
+  }
+
+  exportPdf(): void {
+    this.exportService.pdf(this.exportDocument(), 'Pdf');
   }
 
   printReport(): void {
-    window.print();
+    this.exportService.pdf(this.exportDocument(), 'Print');
+  }
+
+  private exportDocument(): InventoryExportDocument {
+    const headers: Array<[keyof ReportRow, string]> = [
+      ['segment', 'Segment'], ['group', 'Group'], ['source', 'Source'], ['screen', 'Screen'],
+      ['document', 'Document'], ['product', 'Product'], ['location', 'Location'], ['qty', 'Qty'],
+      ['value', 'Value'], ['status', 'Status'], ['risk', 'Risk'], ['updated', 'Updated']
+    ];
+    return {
+      title: this.config.title || 'Inventory Report',
+      columns: headers.map(([, label]) => label),
+      rows: this.filteredRows().map(row => headers.map(([key]) => String(row[key] ?? ''))),
+      fileName: this.config.title || 'Inventory Report'
+    };
   }
 
   dragStart(id: ReportSectionId): void {

@@ -473,26 +473,37 @@ describe('InventoryScreenShell — Stock Transfer (item 12)', () => {
       return (component as any).locationGroupsForField(field);
     }
 
-    it('offers every Warehouse and Branch on both sides when neither is picked yet', () => {
+    it('offers every Warehouse and Branch on From, but only Branches on To, when neither is picked yet', () => {
       component.formValues.set({});
       expect(optionsFor('fromWarehouse')).toEqual(['Secunderabad', 'Warangal', 'Kukatpally', 'Head Office']);
-      expect(optionsFor('toWarehouse')).toEqual(['Secunderabad', 'Warangal', 'Kukatpally', 'Head Office']);
+      expect(optionsFor('toWarehouse')).toEqual(['Kukatpally', 'Head Office']);
+      expect(groupedOptionsFor('toWarehouse').every(option => option.type === 'branch')).toBe(true);
     });
 
-    it('removes the Warehouse picked on To from the From options, and vice versa', () => {
-      component.formValues.set({ toWarehouse: 'Warangal' });
-      expect(optionsFor('fromWarehouse')).not.toContain('Warangal');
-      expect(optionsFor('fromWarehouse')).toEqual(['Secunderabad', 'Kukatpally', 'Head Office']);
+    it('removes the location picked on To from the From options', () => {
+      component.formValues.set({ toWarehouse: 'Head Office' });
+      expect(optionsFor('fromWarehouse')).not.toContain('Head Office');
+      expect(optionsFor('fromWarehouse')).toEqual(['Secunderabad', 'Warangal', 'Kukatpally']);
 
       component.formValues.set({ fromWarehouse: 'Secunderabad' });
-      expect(optionsFor('toWarehouse')).not.toContain('Secunderabad');
+      expect(optionsFor('toWarehouse')).toEqual(['Kukatpally', 'Head Office']);
+    });
+
+    it('removes a Branch picked on From from the To options', () => {
+      component.formValues.set({ fromWarehouse: 'Head Office' });
+      expect(optionsFor('toWarehouse')).not.toContain('Head Office');
+      expect(optionsFor('toWarehouse')).toEqual(['Kukatpally']);
+    });
+
+    it('keeps a saved transfer\'s Warehouse on To so it still shows when opened for edit', () => {
+      component.formValues.set({ toWarehouse: 'Warangal' });
       expect(optionsFor('toWarehouse')).toEqual(['Warangal', 'Kukatpally', 'Head Office']);
     });
 
-    it('removes a Branch picked on one side from the other, same as a Warehouse', () => {
-      component.formValues.set({ fromWarehouse: 'Head Office' });
-      expect(optionsFor('toWarehouse')).not.toContain('Head Office');
-      expect(optionsFor('toWarehouse')).toEqual(['Secunderabad', 'Warangal', 'Kukatpally']);
+    it('resolves a To label shared by a Warehouse and a Branch to the Branch', () => {
+      const resolved = (component as any).resolveStockTransferToLocation('Kukatpally');
+      expect(resolved.type).toBe('branch');
+      expect(resolved.branch?.branch_id).toBe(60);
     });
 
     it('removes the selected location from the grouped ng-select options the template renders', () => {
@@ -508,9 +519,9 @@ describe('InventoryScreenShell — Stock Transfer (item 12)', () => {
     // must not remove the label "Kukatpally" from the other side entirely --
     // the BRANCH "Kukatpally" is a different location and must stay pickable.
     it('does not exclude a same-named Branch when the Warehouse of that name was picked (and vice versa)', () => {
-      component.formValues.set({ toWarehouse: 'Kukatpally' }); // resolves to the WAREHOUSE (id 50) -- warehouses win name ties
+      component.formValues.set({ toWarehouse: 'Kukatpally' }); // To is branch-only, so this resolves to the BRANCH (id 60)
       const fromOptions = optionsFor('fromWarehouse');
-      // "Kukatpally" is still offered on From -- it now refers to the BRANCH (id 60), a distinct location from the Warehouse chosen on To.
+      // "Kukatpally" is still offered on From -- there it refers to the WAREHOUSE (id 50), a distinct location from the Branch chosen on To.
       expect(fromOptions).toContain('Kukatpally');
       expect(fromOptions).toEqual(['Secunderabad', 'Warangal', 'Kukatpally', 'Head Office']);
     });
