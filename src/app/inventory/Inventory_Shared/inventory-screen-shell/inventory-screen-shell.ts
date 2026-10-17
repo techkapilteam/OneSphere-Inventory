@@ -12,6 +12,7 @@ import { AvailableStock, InventoryTransactionsService, PurchaseRefDoc, ServiceBu
 import { applyInventoryTextCase, inventoryTextCaseForField, inventoryTextCaseForLineColumn, toInventoryTitleCase } from '../inventory-text-case.util';
 import { InventoryExportService } from '../inventory-export.service';
 import { InvoiceBankDetails, PaymentsService } from '../payments.service';
+import { attachInventorySaveToast } from '../inventory-save-toast/inventory-save-toast.component';
 import {
   INVENTORY_KPIS,
   INVENTORY_OPTIONS,
@@ -1503,6 +1504,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   });
 
   constructor() {
+    // Vendor Payment style top-right toast for every save / post / delete
+    // message on all screens built on this shell.
+    attachInventorySaveToast(this.saveMsg, this.saveError);
+
     // Safety net for startLineGridColumnResize(): if the component is
     // destroyed mid-drag (route navigation while a resize handle is still
     // held down), drop the document-level listeners rather than leaking them.
