@@ -465,6 +465,8 @@ export interface SerialPolicyItem {
   policy_code: string;
   policy_name: string;
   serial_format?: string;
+  used_in_categories?: number;
+  used_in?: string;
   capture_stage?: string;
   allow_duplicate: boolean;
   warranty_applicable: boolean;
@@ -1521,6 +1523,8 @@ export class InventoryConfigService {
       policy_code: this.value(item, 'policy_code', 'policyCode', ''),
       policy_name: this.value(item, 'policy_name', 'policyName', ''),
       serial_format: this.value(item, 'serial_format', 'serialFormat'),
+      used_in_categories: Number(this.value(item, 'used_in_categories', 'usedInCategories', 0)) || 0,
+      used_in: this.value(item, 'used_in', 'usedIn', ''),
       capture_stage: this.value(item, 'capture_stage', 'captureStage'),
       allow_duplicate: this.value(item, 'allow_duplicate', 'allowDuplicate', false),
       warranty_applicable: this.value(item, 'warranty_applicable', 'warrantyApplicable', false),

@@ -6846,31 +6846,21 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     });
   }
 
-  saveQuickSerialPolicy(): void {
+   saveQuickSerialPolicy(): void {
     const name = this.quickAddName().trim();
     if (!name) { this.quickAddError.set('Policy name is required.'); return; }
     if (this.isSavingQuickAdd()) return;
     const v = this.formValues();
-    if (!String(v['quickCaptureStage'] || '').trim()) { this.quickAddError.set('Capture stage is required.'); return; }
     const code = this.quickAddCode().trim() || null;
-    const categoryName = String(v['quickApplicableCategory'] || '').trim() || null;
-    // sp_upsert_serial_policy links the category by id only — category_name is
-    // read-only (used on the way out to join the display label back), so the
-    // auto-filled category from context has to be resolved to an id here or
-    // it silently never links, same fix as the main Serial Number Policy screen.
-    const categoryId = categoryName
-      ? this.loadedCategoryObjects().find(item => this.optionEquals(item.category_name, categoryName))?.id ?? null
-      : null;
     this.isSavingQuickAdd.set(true);
     this.quickAddError.set('');
+    // Policy library only (migration 265): capture stage, mandatory and
+    // Unique Identifier are set per category in Category Master.
     this.inventoryConfigService.saveSerialPolicy({
       segment_id: this.selectedSegmentId(),
       policy_code: code,
       policy_name: name,
-      category_id: categoryId,
-      category_name: categoryName,
       serial_format: v['quickSerialFormat'] || null,
-      capture_stage: this.normalizeCaptureStage(v['quickCaptureStage']),
       status: 'active'
     }, null).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res: ApiResponse<any>) => {
@@ -6885,12 +6875,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           this.restoreParentModal();
           this.loadLookupOptions();
         } else {
-          this.quickAddError.set(res.message || 'Failed to save serial policy.');
+          this.quickAddError.set(res.message || 'Failed to save policy.');
         }
       },
       error: (err: any) => {
         this.isSavingQuickAdd.set(false);
-        this.quickAddError.set(this.apiErrorMessage(err, 'Failed to save serial policy.'));
+        this.quickAddError.set(this.apiErrorMessage(err, 'Failed to save policy.'));
       }
     });
   }
@@ -15844,6 +15834,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return isDuplicateText ? `${option.serial_no} (Unit #${option.id})` : option.serial_no;
   }
 
+  // The name of the policy that identifies a product's units (its category's
+  // Unique Identifier), e.g. "IMEI 1", "Chassis No". Falls back to "Serial No.".
+  protected unitIdentifierLabel(productId: number | null | undefined): string {
+    const product: any = productId
+      ? this.loadedProductObjects?.().find((p: any) => Number(p?.id) === Number(productId))
+      : null;
+    return String(product?.serial_policy_name || product?.serialPolicyName || '').trim() || 'Serial No.';
+  }
   // Local-only "already entered" check (same row's draft list) runs first —
   // instant, no round trip. Once that passes, sp_check_serial_duplicate asks
   // whether this serial already exists anywhere else in the system for this
@@ -15880,8 +15878,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const exists = !!res.data?.exists;
           const allowDuplicate = !!res.data?.allowDuplicate;
           if (exists && !allowDuplicate) {
+            const label = this.unitIdentifierLabel(picker.productId);
             this.serialPickerError.set(
-              `This serial no. already exists: "${text}". Remove the duplicate, or enable "Allow Duplicate" on its Serial Number Policy if repeats are expected.`
+              `${label} "${text}" already exists. Each unit's ${label} must be unique; please check and enter the correct one.`
             );
             return;
           }
@@ -20011,8 +20010,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           this.entryLineRows.set(rows.length ? rows : [this.blankLineRow()]);
         }
         break;
-      case 'serialNumberPolicy':
-        this.formValues.set({ policyCode: record.policy_code || '', policyName: record.policy_name || '', applicableCategory: record.category_name || '', serialFormat: record.serial_format || '', captureStage: record.capture_stage || '', allowDuplicate: record.allow_duplicate ? 'Yes' : 'No', warrantyApplicable: record.warranty_applicable ? 'Yes' : 'No', status: cap(record.status || 'active') });
+        case 'serialNumberPolicy':
+        this.formValues.set({
+          policyCode: record.policy_code || '',
+          policyName: record.policy_name || '',
+          serialFormat: record.serial_format || '',
+          status: cap(record.status || 'active')
+        });
         break;
       case 'batchLotPolicy':
         this.formValues.set({ policyCode: record.policy_code || '', policyName: record.policy_name || '', applicableCategory: record.category_name || '', batchFormat: record.batch_format || '', expiryRequired: record.expiry_required ? 'Yes' : 'No', qcRequired: record.qc_required ? 'Yes' : 'No', status: cap(record.status || 'active') });
@@ -21033,17 +21037,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
   }
 
-  private normalizeCaptureStage(s: any): string | null {
-    const raw = String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-    return raw.includes('both') ? 'both' : raw || null;
-  }
-
   protected buildPayload(): Record<string, any> {
     const v = this.formValues();
     const lc = (s: string) => (s || 'Active').toLowerCase();
     const bool = (s: any) => s === true || s === 'Yes';
     const productType = (s: any) => String(s || '').trim() || 'Physical Stock';
-    const captureStage = (s: any) => this.normalizeCaptureStage(s);
     const selectedSegmentName = String(v['segment'] || this.selectedSegment() || '').trim() || null;
     const selectedSegmentId = this.segmentIdByName(selectedSegmentName);
     const idsFromSelection = <T extends { id: number }>(
@@ -21326,13 +21324,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             status: lc(v['status'] || 'active')
           };
         }
-      case 'serialNumberPolicy': {
-        const categoryName = v['applicableCategory'] || null;
-        const categoryId = categoryName
-          ? this.loadedCategoryObjects().find(item => this.optionEquals(item.category_name, categoryName))?.id ?? null
-          : null;
-        return { segment_id: selectedSegmentId, policy_code: v['policyCode'] || null, policy_name: v['policyName'] || '', category_id: categoryId, category_name: categoryName, serial_format: v['serialFormat'] || null, capture_stage: captureStage(v['captureStage']), allow_duplicate: bool(v['allowDuplicate']), warranty_applicable: bool(v['warrantyApplicable']), status: lc(v['status']) };
-      }
+        case 'serialNumberPolicy':
+        // Library fields only: stage / mandatory / Unique Identifier are set per category (migration 265)
+        return {
+          segment_id: selectedSegmentId,
+          policy_code: v['policyCode'] || null,
+          policy_name: v['policyName'] || '',
+          serial_format: v['serialFormat'] || null,
+          status: lc(v['status'])
+        };
       case 'batchLotPolicy': {
         const categoryName = v['applicableCategory'] || v['applicableFor'] || null;
         const categoryId = categoryName
@@ -24021,8 +24021,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             : [r.attribute_name, r.attribute_value].filter(Boolean).join(': '),
           cap(r.status || 'active')
         ]);
-      case 'serialNumberPolicy':
-        return records.map(r => [r.policy_code || '', r.policy_name || '', r.category_name || '', r.serial_format || '', r.capture_stage || '', r.allow_duplicate ? 'Yes' : 'No', r.warranty_applicable ? 'Yes' : 'No', cap(r.status || 'active')]);
+        case 'serialNumberPolicy':
+        return records.map(r => {
+          const usedCount = Number(r.used_in_categories ?? r.usedInCategories ?? 0) || 0;
+          const usedNames = r.used_in || r.usedIn || '';
+          return [
+            r.policy_code || '',
+            r.policy_name || '',
+            r.serial_format || '',
+            usedCount > 0 ? `${usedCount}: ${usedNames}` : 'Not used yet',
+            cap(r.status || 'active')
+          ];
+        });
       case 'batchLotPolicy':
         return records.map(r => [r.policy_code || '', r.policy_name || '', r.category_name || '', r.batch_format || '', r.expiry_required ? 'Yes' : 'No', r.qc_required ? 'Yes' : 'No', cap(r.status || 'active')]);
       case 'barcodeConfiguration':
