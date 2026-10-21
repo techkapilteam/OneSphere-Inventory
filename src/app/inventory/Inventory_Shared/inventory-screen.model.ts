@@ -866,8 +866,7 @@ export const categoryMasterConfig: InventoryScreenConfig = {
     { key: 'description', label: 'Description', type: 'textarea' },
     { key: 'status', label: 'Status', type: 'select', options: INVENTORY_OPTIONS.status }
   ],
-  columns: ['Category Code', 'Category Name', 'Parent Category', 'Serial Policy','UIN Required', 'Batch / Lot Policy', 'Description', 'Applicable UOMs', 'Status'],
- 
+  columns: ['Category Code', 'Category Name', 'Parent Category', 'Policies', 'Batch / Lot Policy', 'Description', 'Applicable UOMs', 'Status'], 
 };
 
 export const brandMasterConfig: InventoryScreenConfig = {

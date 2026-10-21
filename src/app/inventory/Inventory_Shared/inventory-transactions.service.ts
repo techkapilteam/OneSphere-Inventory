@@ -134,6 +134,9 @@ export interface GrnItem {
   batch_no?: string;
   serial_no?: string;
   serial_numbers?: string[] | null;
+  serial_warranty?: any | null;
+  serial_identifiers?: any[] | null;
+  line_identifiers?: any[] | null;
   expiry_date?: string;
   remarks?: string;
 }
@@ -257,6 +260,8 @@ export interface ProductionEntryItem extends ManufacturingMaterialItem {
   rejected_qty?: number;
   wastage_qty?: number;
   production_cost?: number;
+  serial_identifiers?: any[] | null;
+  line_identifiers?: any[] | null;
 }
 
 export interface ProductionEntry {
@@ -507,6 +512,9 @@ export interface PiItem {
   batch_no?: string;
   serial_no?: string;
   serial_numbers?: string[] | null;
+  serial_warranty?: any | null;          // per-serial warranty (migration 237)
+  serial_identifiers?: any[] | null;     // Phase 2: policy values per unit
+  line_identifiers?: any[] | null;   
   expiry_date?: string;
   amount: number;
   remarks?: string;
@@ -1170,7 +1178,10 @@ export class InventoryTransactionsService {
         produced_qty: Number(i?.producedQty ?? i?.produced_qty ?? 0),
         rejected_qty: Number(i?.rejectedQty ?? i?.rejected_qty ?? 0),
         wastage_qty: Number(i?.wastageQty ?? i?.wastage_qty ?? 0),
-        production_cost: Number(i?.productionCost ?? i?.production_cost ?? 0)
+        production_cost: Number(i?.productionCost ?? i?.production_cost ?? 0),
+        // Phase 2: policy values of the produced units
+        serial_identifiers: i?.serialIdentifiers ?? i?.serial_identifiers ?? null,
+        line_identifiers: i?.lineIdentifiers ?? i?.line_identifiers ?? null
       }))
     };
   }
@@ -1355,6 +1366,9 @@ export class InventoryTransactionsService {
         amount: Number(i.amount || 0),
         batch_no: i.batchNo || i.batch_no, serial_no: i.serialNo || i.serial_no,
         serial_numbers: i.serialNumbers ?? i.serial_numbers ?? null,
+        serial_warranty: i.serialWarranty ?? i.serial_warranty ?? null,
+        serial_identifiers: i.serialIdentifiers ?? i.serial_identifiers ?? null,
+        line_identifiers: i.lineIdentifiers ?? i.line_identifiers ?? null,
         expiry_date: i.expiryDate || i.expiry_date, remarks: i.remarks
       }))
     };
@@ -1405,6 +1419,9 @@ export class InventoryTransactionsService {
         batch_no: i.batchNo || i.batch_no,
         serial_no: i.serialNo || i.serial_no,
         serial_numbers: i.serialNumbers ?? i.serial_numbers ?? null,
+        serial_warranty: i.serialWarranty ?? i.serial_warranty ?? null,
+        serial_identifiers: i.serialIdentifiers ?? i.serial_identifiers ?? null,
+        line_identifiers: i.lineIdentifiers ?? i.line_identifiers ?? null,
         expiry_date: i.expiryDate || i.expiry_date,
         amount: Number(i.amount || 0), remarks: i.remarks
       }))
@@ -2338,6 +2355,22 @@ export class InventoryTransactionsService {
     const httpParams = new HttpParams().set('productId', String(productId)).set('serialNo', serialNo);
     return this.http.get<ApiResponse<any>>(this.salesUrl('serials/check-duplicate'), { headers: this.headers(), params: httpParams }).pipe(
       map(res => ({ ...res, data: { exists: !!res?.data?.exists, allowDuplicate: !!(res?.data?.allowDuplicate ?? res?.data?.allow_duplicate) } }))
+    );
+  }
+
+    // Phase 2 (migration 266): live check of one policy value (IMEI 1, Chassis No, ...).
+  // enforceUnique = the existing value is protected (it was mandatory when captured).
+  checkIdentifierDuplicate(policyId: number, value: string): Observable<ApiResponse<{ exists: boolean; enforceUnique: boolean; usedOn: { productName?: string; docNo?: string } | null }>> {
+    const httpParams = new HttpParams().set('policyId', String(policyId)).set('value', value);
+    return this.http.get<ApiResponse<any>>(this.salesUrl('serials/check-identifier'), { headers: this.headers(), params: httpParams }).pipe(
+      map(res => ({
+        ...res,
+        data: {
+          exists: !!res?.data?.exists,
+          enforceUnique: !!(res?.data?.enforceUnique ?? res?.data?.enforce_unique),
+          usedOn: res?.data?.usedOn ?? res?.data?.used_on ?? null
+        }
+      }))
     );
   }
 

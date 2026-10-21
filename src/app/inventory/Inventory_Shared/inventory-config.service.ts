@@ -88,6 +88,18 @@ export interface SegmentItem {
   uoms: { id: number; uom_code: string; uom_name: string; uom_symbol?: string }[];
 }
 
+// One policy row of a category (migration 265)
+export interface CategoryPolicyRow {
+  id?: number;
+  policy_id: number | null;
+  policy_code?: string;
+  policy_name: string;
+  capture_stage: string;          // stock_inward | sales_invoice | both_inward_sale | registration_before_sale | warranty_registration
+  is_mandatory: boolean;
+  is_unique_identifier: boolean;
+  display_order?: number;
+}
+
 export interface CategoryItem {
   id: number;
   segment_id?: number;
@@ -99,6 +111,9 @@ export interface CategoryItem {
   description?: string;
   serial_applicable?: boolean;
   uin_required?: boolean; 
+  policy_applicable?: boolean;
+  policies?: CategoryPolicyRow[];
+  policies_text?: string | null;  // e.g. "Serial No. (ID), UIN" for the grid
   serial_policy_id?: number | null;
   serial_policy_name?: string | null;
   batch_applicable?: boolean;
@@ -893,6 +908,18 @@ export class InventoryConfigService {
       description: this.value(item, 'description', 'description'),
       serial_applicable: !!(this.value(item, 'serial_applicable', 'serialApplicable', false)),
       uin_required: !!this.value(item, 'uin_required', 'uinRequired', false),
+      policy_applicable: !!this.value(item, 'policy_applicable', 'policyApplicable', false),
+      policies: (this.value<any[]>(item, 'policies', 'policies', []) ?? []).map(p => ({
+        id: p?.id,
+        policy_id: this.value(p, 'policy_id', 'policyId'),
+        policy_code: this.value(p, 'policy_code', 'policyCode', ''),
+        policy_name: this.value(p, 'policy_name', 'policyName', ''),
+        capture_stage: this.value(p, 'capture_stage', 'captureStage', 'stock_inward'),
+        is_mandatory: !!this.value(p, 'is_mandatory', 'isMandatory', false),
+        is_unique_identifier: !!this.value(p, 'is_unique_identifier', 'isUniqueIdentifier', false),
+        display_order: this.value(p, 'display_order', 'displayOrder', 1)
+      })),
+      policies_text: this.value(item, 'policies_text', 'policiesText', null),
       serial_policy_id: this.value(item, 'serial_policy_id', 'serialPolicyId', null),
       serial_policy_name: this.value(item, 'serial_policy_name', 'serialPolicyName', null),
       batch_applicable: !!(this.value(item, 'batch_applicable', 'batchApplicable', false)),

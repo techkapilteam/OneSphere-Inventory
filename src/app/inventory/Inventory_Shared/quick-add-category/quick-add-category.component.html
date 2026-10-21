@@ -53,7 +53,7 @@
   <!-- Serial No. Policy Applicable -->
   <div class="erp-form-group">
     <!-- Previous: <label class="erp-label">Serial No. Policy Applicable <span class="text-danger">*</span></label> -->
-    <label class="erp-label">Serial No. Policy Applicable</label>
+    <label class="erp-label">Policy Applicable</label>
     <label class="inventory-labeled-switch yes-no">
       <input type="checkbox" [checked]="serialApplicable()"
         (change)="setSerialApplicable($any($event.target).checked)" />
@@ -64,16 +64,16 @@
     </label>
     @if (serialApplicable()) {
       <div class="inventory-switch-reveal">
-        <label class="erp-label">Default Serial Number Policy <span class="text-danger">*</span></label>
+        <label class="erp-label">Policy <span class="text-danger">*</span></label>
         <div class="inventory-field-with-add">
           <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
             [items]="localSerialPolicies()" [searchable]="true" [clearable]="true"
             [ngModel]="serialPolicyName()" (ngModelChange)="serialPolicyName.set($event)"
-            placeholder="Select Serial Policy"></ng-select>
+            placeholder="e.g. Serial No, IMEI"></ng-select>
           <button type="button" class="erp-btn btn-icon"
             [class.btn-white]="!showInlineSerialAdd()"
             [class.btn-primary]="showInlineSerialAdd()"
-            [title]="showInlineSerialAdd() ? 'Close' : 'Add Serial Number Policy'"
+            [title]="showInlineSerialAdd() ? 'Close' : 'Add Policy'"
             (click)="toggleInlineSerialAdd()">
             <i [class]="showInlineSerialAdd() ? 'pi pi-times' : 'pi pi-plus'"></i>
           </button>
@@ -82,7 +82,7 @@
           <div class="qac-inline-add">
             <div class="erp-form-group qac-inline-field">
               <label class="erp-label">Policy Name <span class="text-danger">*</span></label>
-              <input class="erp-input" type="text" placeholder="e.g. IMEI Required"
+                <input class="erp-input" type="text" placeholder="e.g. Serial No, IMEI"
                 [ngModel]="inlineSerialName()" (ngModelChange)="onInlineSerialNameChange($event)" />
             </div>
             <div class="erp-form-group qac-inline-field">
@@ -118,16 +118,52 @@
           </div>
         }
       </div>
-      <!-- UIN Required: same as Product Category form. Only with serial tracking. -->
+              <!-- The category's policy row (same choices as a row in Category Master) -->
       <div class="inventory-switch-reveal">
-        <label class="erp-label">UIN Required</label>
+        <label class="erp-label">Unique Identifier</label>
         <label class="inventory-labeled-switch yes-no">
-          <input type="checkbox" [checked]="uinRequired()" (change)="uinRequired.set($any($event.target).checked)" />
+          <input type="checkbox" [checked]="policyIsIdentifier()"
+            (change)="setPolicyIsIdentifier($any($event.target).checked)" />
           <span class="inventory-switch-track">
             <span class="switch-text switch-on">Yes</span>
             <span class="switch-text switch-off">No</span>
           </span>
         </label>
+
+        @if (policyIsIdentifier()) {
+          <div class="inventory-optional-hint" style="margin-top:6px;">
+            Identifies each unit in stock: always captured at <strong>Stock Inward</strong> and mandatory. Stock is kept <strong>per unit</strong>.
+          </div>
+        } @else {
+          <div style="display:flex; gap:12px; margin-top:8px; flex-wrap:wrap;">
+            <div class="erp-form-group" style="flex:1; min-width:180px;">
+              <label class="erp-label">Capture Stage</label>
+              <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+                [items]="policyStageLabels" [searchable]="false" [clearable]="false"
+                [ngModel]="policyStageLabel(policyStage())"
+                (ngModelChange)="setPolicyStage($event)"
+                placeholder="Select Stage"></ng-select>
+            </div>
+            <div class="erp-form-group">
+              <label class="erp-label">Mandatory</label>
+              <label class="inventory-labeled-switch yes-no">
+                <input type="checkbox" [checked]="policyMandatory()"
+                  (change)="policyMandatory.set($any($event.target).checked)" />
+                <span class="inventory-switch-track">
+                  <span class="switch-text switch-on">Yes</span>
+                  <span class="switch-text switch-off">No</span>
+                </span>
+              </label>
+            </div>
+          </div>
+          <div class="inventory-optional-hint" style="margin-top:6px;">
+            No Unique Identifier: stock is kept <strong>by quantity</strong>.
+          </div>
+        }
+
+        <div class="inventory-optional-hint" style="margin-top:4px;">
+          More policies (UIN, IMEI 2 ...) can be added in Category Master.
+        </div>
       </div>
     }
   </div>
