@@ -866,8 +866,7 @@ export const categoryMasterConfig: InventoryScreenConfig = {
     { key: 'description', label: 'Description', type: 'textarea' },
     { key: 'status', label: 'Status', type: 'select', options: INVENTORY_OPTIONS.status }
   ],
-  columns: ['Category Code', 'Category Name', 'Parent Category', 'Serial Policy','UIN Required', 'Batch / Lot Policy', 'Description', 'Applicable UOMs', 'Status'],
- 
+  columns: ['Category Code', 'Category Name', 'Parent Category', 'Policies', 'Batch / Lot Policy', 'Description', 'Applicable UOMs', 'Status'], 
 };
 
 export const brandMasterConfig: InventoryScreenConfig = {
@@ -965,34 +964,55 @@ export const variantMasterConfig: InventoryScreenConfig = {
   lineColumns: ['Attribute Name', 'Attribute Value']
 };
 
+// export const serialNumberPolicyConfig: InventoryScreenConfig = {
+//   key: 'serialNumberPolicy',
+//   title: 'Serial Number Policy Master',
+//   subtitle: 'Define serial/IMEI policy defaults that can be mapped category-wise and overridden in Product Master.',
+//   kind: 'master',
+//   icon: 'pi pi-qrcode',
+//   dependsOn: [
+//     { name: 'Category Master', status: 'Ready' },
+//     { name: 'Product Master override', status: 'Pending Setup' }
+//   ],
+//   outputImpact: 'Serial policy controls whether products require IMEI, serial number, warranty tracking or unique item scanning.',
+//   screenMode: 'Master setup',
+//   fields: [
+//     { key: 'policyName', label: 'Policy Name' },
+//     { key: 'policyCode', label: 'Policy Code' },
+//     { key: 'applicableCategory', label: 'Applicable Category', type: 'select', options: INVENTORY_OPTIONS.categories, addMaster: 'Category' },
+//     { key: 'serialFormat', label: 'Format Notes (optional)' },
+//     { key: 'captureStage', label: 'Capture Stage', type: 'select', options: ['Purchase Inward', 'Sales Invoice', 'Both Inward and Sale', 'Warranty Registration'] },
+//     { key: 'allowDuplicate', label: 'Allow Duplicate Serial No.', type: 'select', options: ['Yes', 'No'] },
+//     { key: 'warrantyApplicable', label: 'Warranty Applicable', type: 'select', options: ['Yes', 'No'] },
+//     { key: 'status', label: 'Status', type: 'select', options: INVENTORY_OPTIONS.status }
+//   ],
+//   columns: ['Policy Code', 'Policy Name', 'Applicable Category', 'Serial Format', 'Capture Stage', 'Allow Duplicate', 'Warranty Applicable', 'Status'],
+//   rows: [
+//     ['SNP-IMEI', 'IMEI Required', 'Mobile & Accessories', '15 digit IMEI', 'Both Inward and Sale', 'No', 'Yes', 'Active'],
+//     ['SNP-SERIAL', 'Serial No Required', 'Computers & Devices', 'Brand serial number', 'Purchase Inward', 'No', 'No', 'Active'],
+//     ['SNP-WAR', 'Warranty Serial Tracking', 'Electronics', 'Alphanumeric', 'Warranty Registration', 'No', 'Yes', 'Active']
+//   ]
+// };
+
 export const serialNumberPolicyConfig: InventoryScreenConfig = {
   key: 'serialNumberPolicy',
-  title: 'Serial Number Policy Master',
-  subtitle: 'Define serial/IMEI policy defaults that can be mapped category-wise and overridden in Product Master.',
+  title: 'Policy Master',
+  subtitle: 'Define the identifiers your business captures per unit (Serial No, IMEI, Chassis No, UIN ...). Categories choose which policies apply, when they are captured and whether they are mandatory.',
   kind: 'master',
   icon: 'pi pi-qrcode',
   dependsOn: [
-    { name: 'Category Master', status: 'Ready' },
-    { name: 'Product Master override', status: 'Pending Setup' }
+    { name: 'Category Master (policies per category)', status: 'Ready' }
   ],
-  outputImpact: 'Serial policy controls whether products require IMEI, serial number, warranty tracking or unique item scanning.',
+  outputImpact: 'A policy is a reusable identifier type. Its capture stage, mandatory flag and Unique Identifier are set per category in Category Master.',
   screenMode: 'Master setup',
   fields: [
     { key: 'policyName', label: 'Policy Name' },
     { key: 'policyCode', label: 'Policy Code' },
-    { key: 'applicableCategory', label: 'Applicable Category', type: 'select', options: INVENTORY_OPTIONS.categories, addMaster: 'Category' },
     { key: 'serialFormat', label: 'Format Notes (optional)' },
-    { key: 'captureStage', label: 'Capture Stage', type: 'select', options: ['Purchase Inward', 'Sales Invoice', 'Both Inward and Sale', 'Warranty Registration'] },
-    { key: 'allowDuplicate', label: 'Allow Duplicate Serial No.', type: 'select', options: ['Yes', 'No'] },
-    { key: 'warrantyApplicable', label: 'Warranty Applicable', type: 'select', options: ['Yes', 'No'] },
     { key: 'status', label: 'Status', type: 'select', options: INVENTORY_OPTIONS.status }
   ],
-  columns: ['Policy Code', 'Policy Name', 'Applicable Category', 'Serial Format', 'Capture Stage', 'Allow Duplicate', 'Warranty Applicable', 'Status'],
-  rows: [
-    ['SNP-IMEI', 'IMEI Required', 'Mobile & Accessories', '15 digit IMEI', 'Both Inward and Sale', 'No', 'Yes', 'Active'],
-    ['SNP-SERIAL', 'Serial No Required', 'Computers & Devices', 'Brand serial number', 'Purchase Inward', 'No', 'No', 'Active'],
-    ['SNP-WAR', 'Warranty Serial Tracking', 'Electronics', 'Alphanumeric', 'Warranty Registration', 'No', 'Yes', 'Active']
-  ]
+  columns: ['Policy Code', 'Policy Name', 'Format Notes', 'Used In', 'Status'],
+  rows: []
 };
 
 export const batchLotPolicyConfig: InventoryScreenConfig = {

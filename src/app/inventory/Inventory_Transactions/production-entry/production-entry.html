@@ -219,7 +219,7 @@
                           <span class="inventory-grid-na">N/A</span>
                         } @else if (lineGridCellReadonly(rowIndex, row, column)) {
                           <span class="inventory-grid-static-value">{{ lineGridReadonlyCellText(rowIndex, row, column, cellView, rowView) || '-' }}</span>
-                        } @else if (lineGridColumnIsSerialPicker(column) && isSerialApplicableRow(row)) {
+                        } @else if (lineGridColumnIsSerialPicker(column) && (isSerialApplicableRow(row) || rowHasLinePolicies(row))) {
                           <button type="button" class="erp-btn btn-white btn-sm inventory-serial-trigger" (click)="openSerialPicker(rowIndex, row)">
                             {{ serialPickerSummaryForRow(rowIndex, row) }}
                           </button>

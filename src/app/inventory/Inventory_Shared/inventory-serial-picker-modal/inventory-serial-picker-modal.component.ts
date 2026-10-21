@@ -18,6 +18,11 @@ export class InventorySerialPickerModalComponent {
   rangeTo = '';
   rangeError = '';
 
+    // Phase 2 (2.6h): paste from Excel
+  pasteOpen = false;
+  pasteText = '';
+  pasteSkipped: string[] = [];
+
   addCaptureValue(input?: HTMLInputElement): void {
     const value = this.captureDraft.trim();
     if (!value) return;
@@ -50,6 +55,24 @@ export class InventorySerialPickerModalComponent {
     } else {
       this.rangeFrom = '';
       this.rangeTo = '';
+    }
+  }
+
+
+    togglePaste(): void {
+    this.pasteOpen = !this.pasteOpen;
+    this.pasteSkipped = [];
+    if (!this.pasteOpen) this.pasteText = '';
+  }
+
+  applyPaste(): void {
+    if (!this.pasteText.trim()) return;
+    const result = this.host.applySerialPickerPaste(this.pasteText);
+    // Keep the box open only when lines were skipped, so the user can read why
+    this.pasteSkipped = result?.skipped || [];
+    if (!this.pasteSkipped.length) {
+      this.pasteText = '';
+      this.pasteOpen = false;
     }
   }
 

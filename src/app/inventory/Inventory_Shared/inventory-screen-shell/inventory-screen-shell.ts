@@ -129,6 +129,39 @@ interface UinDraft {
 }
 type UinField = keyof UinDraft;
 
+// Category Master: one policy row being edited (migration 265)
+// Category Master: one policy row being edited (migration 265)
+interface CategoryPolicyDraft {
+  policyId: number | null;
+  policyName: string;
+  captureStage: string;          // stage code
+  isMandatory: boolean;
+  isUniqueIdentifier: boolean;
+  // While a row is the Unique Identifier its stage/mandatory are forced;
+  // these keep the user's own values to restore when it stops being one.
+  savedStage?: string | null;
+  savedMandatory?: boolean | null;
+}
+// Phase 2 (migration 266): a policy captured at Stock Inward (not the Unique Identifier)
+interface InwardPolicy {
+  policyId: number;
+  policyName: string;
+  isMandatory: boolean;
+}
+
+// rowIndex -> serial -> policyId -> value
+type LineSerialIdentifiers = Record<number, Record<string, Record<number, string>>>;
+// rowIndex -> policyId -> value (quantity products: one value per line)
+type LineIdentifierValues = Record<number, Record<number, string>>;
+
+const POLICY_CAPTURE_STAGES: { code: string; label: string }[] = [
+  { code: 'stock_inward',             label: 'Stock Inward' },
+  { code: 'sales_invoice',            label: 'Sales Invoice' },
+  { code: 'both_inward_sale',         label: 'Both Inward and Sale' },
+  { code: 'registration_before_sale', label: 'Registration before Sale' },
+  { code: 'warranty_registration',    label: 'Warranty Registration' }
+];
+
 
 interface GlobalContactOption {
   id?: number;
@@ -420,12 +453,23 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // ── API form-capture state ────────────────────────────────────────────────
   readonly genericNameValue = signal('');
 
-  readonly existingRowMatches = computed(() => {
+     readonly existingRowMatches = computed(() => {
     const q = this.genericNameValue().trim().toLowerCase();
     if (q.length < 2) return [];
-    return this.liveRows().filter(row =>
-      row.some(cell => cell.toLowerCase().includes(q))
-    ).slice(0, 6);
+
+    // While a saved record is open, leave that record itself out of the hint.
+    const editingId = this.editingId();
+    const editingRecord = editingId
+      ? this.savedRecordObjects().find((r: any) => Number(r?.id) === Number(editingId))
+      : null;
+    const editingRow = editingRecord ? this.mapToGridRows([editingRecord])[0] : null;
+
+    // Match on what the hint shows (code and name), not on every column:
+    // text like "Not used yet" in other columns would match almost anything.
+    return this.liveRows()
+      .filter(row => !(editingRow && row[0] === editingRow[0]))
+      .filter(row => [row[0], row[1]].some(cell => String(cell ?? '').toLowerCase().includes(q)))
+      .slice(0, 6);
   });
 
   // A row in the "existing" panel is only a real duplicate when one of its
@@ -579,7 +623,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // shows already-captured serials (e.g. a GRN-linked PI line) with no
   // add/remove affordances, distinct from 'inherited' (which is specifically
   // the DC/SI cross-reference flow with its own "reserved via ..." copy).
-  readonly activeSerialPicker = signal<{ rowIndex: number; mode: 'capture' | 'select' | 'inherited' | 'view'; qtyNeeded: number; productId: number | null; productName: string; warrantyApplicable: boolean; saleWarrantyApplicable?: boolean } | null>(null);
+  // readonly activeSerialPicker = signal<{ rowIndex: number; mode: 'capture' | 'select' | 'inherited' | 'view'; qtyNeeded: number; productId: number | null; productName: string; warrantyApplicable: boolean; saleWarrantyApplicable?: boolean } | null>(null);
+
+    readonly activeSerialPicker = signal<{ rowIndex: number; mode: 'capture' | 'select' | 'inherited' | 'view' | 'lineValues'; qtyNeeded: number; productId: number | null; productName: string; warrantyApplicable: boolean; saleWarrantyApplicable?: boolean; inwardPolicies?: InwardPolicy[] } | null>(null);
   // Sales Invoice serial popup: warranty dates added with "+" for units of a
   // Warranty Applicable product that got no warranty at purchase, keyed by
   // serial no. Saved on the SI line as serial_warranty (same shape as GRN/PI)
@@ -591,6 +637,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // screens that actually create new serial units). Populated by the shared
   // default below unless a specific serial has been individually overridden.
   readonly lineSerialWarrantyMap = signal<Record<number, Record<string, SerialWarrantyEntry>>>({});
+    // Phase 2: policy values per unit / per line, saved from the serial popup
+  readonly lineSerialIdentifiersMap = signal<LineSerialIdentifiers>({});
+  readonly lineIdentifierValuesMap = signal<LineIdentifierValues>({});
+  // The popup's working copy: serial -> policyId -> value
+  readonly serialPickerIdentifierDraft = signal<Record<string, Record<number, string>>>({});
+    // Phase 2 (2.6g): quantity products, the popup's working copy: policyId -> value
+  readonly serialPickerLineValuesDraft = signal<Record<number, string>>({});
+    // Phase 2: live warnings per cell, key "serial|policyId"
+  readonly serialPickerIdentifierWarnings = signal<Record<string, string>>({});
   // The picker's own working state while open: one shared default applied to
   // every serial that hasn't been overridden, plus the set of per-serial
   // overrides entered so far. "Same for all" is simply never overriding
@@ -2126,6 +2181,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   onProductCategoryChange(value: string | null): void {
     this.selectedProductCategory.set(value || '');
+    this.syncProductSerialFromCategory();
 
     if (!value) {
       // Clear the stale id too, so UIN / locks don't follow the old category.
@@ -2917,6 +2973,57 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (serials.length) serialMap[startIndex + index] = serials;
     });
     return serialMap;
+  }
+
+   // Phase 2: a line's policy values in the format the API expects (lists, fixed keys)
+  protected lineIdentifierPayload(index: number): { serial_identifiers: any[] | null; line_identifiers: any[] | null } {
+    const toValues = (values: Record<number, string> | undefined) =>
+      Object.entries(values || {})
+        .map(([policyId, value]) => ({ policy_id: Number(policyId), value: String(value ?? '').trim() }))
+        .filter(v => v.policy_id > 0 && v.value);
+
+    const serials = this.lineSerialUnitsMap()[index] || [];
+    const perSerial = this.lineSerialIdentifiersMap()[index] || {};
+    const serialIdentifiers = serials
+      .map(serial => ({ serial, values: toValues(perSerial[serial]) }))
+      .filter(entry => entry.values.length);
+
+    const lineValues = toValues(this.lineIdentifierValuesMap()[index]);
+
+    return {
+      serial_identifiers: serialIdentifiers.length ? serialIdentifiers : null,
+      line_identifiers: lineValues.length ? lineValues : null
+    };
+  }
+
+    // Phase 2: rebuild the policy-value maps from saved items (reopened draft / record)
+  protected lineIdentifierMapsFromItems(items: any[] | null | undefined, startIndex = 0): { serial: LineSerialIdentifiers; line: LineIdentifierValues } {
+    const serial: LineSerialIdentifiers = {};
+    const line: LineIdentifierValues = {};
+    const toMap = (values: any[] | null | undefined): Record<number, string> => {
+      const out: Record<number, string> = {};
+      for (const v of values || []) {
+        const policyId = Number(v?.policy_id ?? v?.policyId);
+        const value = String(v?.value ?? '').trim();
+        if (policyId > 0 && value) out[policyId] = value;
+      }
+      return out;
+    };
+    (items || []).forEach((item: any, index: number) => {
+      const row = startIndex + index;
+      const perSerial = item?.serial_identifiers ?? item?.serialIdentifiers;
+      if (Array.isArray(perSerial) && perSerial.length) {
+        const bySerial: Record<string, Record<number, string>> = {};
+        for (const entry of perSerial) {
+          const key = String(entry?.serial ?? '').trim();
+          if (key) bySerial[key] = toMap(entry?.values);
+        }
+        if (Object.keys(bySerial).length) serial[row] = bySerial;
+      }
+      const lineValues = toMap(item?.line_identifiers ?? item?.lineIdentifiers);
+      if (Object.keys(lineValues).length) line[row] = lineValues;
+    });
+    return { serial, line };
   }
 
   protected productStockLimitsForLine(
@@ -4501,6 +4608,39 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   categoryRequiresSerialPolicy(): boolean {
     return !!this.selectedProductCategoryObject()?.serial_applicable;
+  }
+    // Product Master (migration 265): unit identification comes from the category.
+  productCategoryPolicies(): any[] {
+    const category: any = this.selectedProductCategoryObject();
+    return [...(category?.policies || [])]
+      .sort((a: any, b: any) => (Number(a.display_order) || 0) - (Number(b.display_order) || 0));
+  }
+
+  productCategoryIdentifier(): any | null {
+    return this.productCategoryPolicies().find((p: any) => p.is_unique_identifier) || null;
+  }
+    // The product's policies captured at Stock Inward: its category's rows with
+  // stage Stock Inward or Both Inward and Sale, except the Unique Identifier
+  // (that one is the serial itself).
+  productInwardPolicies(product: any): InwardPolicy[] {
+    if (!product) return [];
+    const categoryId = Number(product.category_id ?? product.categoryId) || null;
+    const categoryName = product.category_name ?? product.categoryName;
+    const category: any = this.loadedCategoryObjects().find((c: any) =>
+      (categoryId && Number(c.id) === categoryId) || (!categoryId && this.optionEquals(c.category_name, categoryName)));
+    return [...(category?.policies || [])]
+      .filter((p: any) => !p.is_unique_identifier && ['stock_inward', 'both_inward_sale'].includes(p.capture_stage))
+      .sort((a: any, b: any) => (Number(a.display_order) || 0) - (Number(b.display_order) || 0))
+      .map((p: any) => ({ policyId: Number(p.policy_id), policyName: p.policy_name, isMandatory: !!p.is_mandatory }));
+  }
+
+  // New product / category changed: follow the category (the database does the
+  // same through trg_product_follow_category, whatever the screen sends).
+  private syncProductSerialFromCategory(): void {
+    const identifier = this.productCategoryIdentifier();
+    this.productSerialApplicable.set(!!identifier);
+    this.collectFormField('serialPolicyName', identifier?.policy_name || null);
+    if (identifier) this.productTrackingRequired.set(true);
   }
 
   // Category's UIN Required, shown read-only in Product Master's Tracking Policies.
@@ -6854,31 +6994,21 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     });
   }
 
-  saveQuickSerialPolicy(): void {
+   saveQuickSerialPolicy(): void {
     const name = this.quickAddName().trim();
     if (!name) { this.quickAddError.set('Policy name is required.'); return; }
     if (this.isSavingQuickAdd()) return;
     const v = this.formValues();
-    if (!String(v['quickCaptureStage'] || '').trim()) { this.quickAddError.set('Capture stage is required.'); return; }
     const code = this.quickAddCode().trim() || null;
-    const categoryName = String(v['quickApplicableCategory'] || '').trim() || null;
-    // sp_upsert_serial_policy links the category by id only — category_name is
-    // read-only (used on the way out to join the display label back), so the
-    // auto-filled category from context has to be resolved to an id here or
-    // it silently never links, same fix as the main Serial Number Policy screen.
-    const categoryId = categoryName
-      ? this.loadedCategoryObjects().find(item => this.optionEquals(item.category_name, categoryName))?.id ?? null
-      : null;
     this.isSavingQuickAdd.set(true);
     this.quickAddError.set('');
+    // Policy library only (migration 265): capture stage, mandatory and
+    // Unique Identifier are set per category in Category Master.
     this.inventoryConfigService.saveSerialPolicy({
       segment_id: this.selectedSegmentId(),
       policy_code: code,
       policy_name: name,
-      category_id: categoryId,
-      category_name: categoryName,
       serial_format: v['quickSerialFormat'] || null,
-      capture_stage: this.normalizeCaptureStage(v['quickCaptureStage']),
       status: 'active'
     }, null).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res: ApiResponse<any>) => {
@@ -6893,12 +7023,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           this.restoreParentModal();
           this.loadLookupOptions();
         } else {
-          this.quickAddError.set(res.message || 'Failed to save serial policy.');
+          this.quickAddError.set(res.message || 'Failed to save policy.');
         }
       },
       error: (err: any) => {
         this.isSavingQuickAdd.set(false);
-        this.quickAddError.set(this.apiErrorMessage(err, 'Failed to save serial policy.'));
+        this.quickAddError.set(this.apiErrorMessage(err, 'Failed to save policy.'));
       }
     });
   }
@@ -7357,6 +7487,126 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.formValues.update(v => ({ ...v, uinRequired: false }));
     }
   }
+    // ── Category Master: policies (migration 265) ─────────────────────────
+  readonly categoryPolicyApplicable = signal(false);
+  readonly categoryPolicyRows = signal<CategoryPolicyDraft[]>([]);
+  readonly policyStageLabels = POLICY_CAPTURE_STAGES.map(s => s.label);
+
+  policyStageLabel(code: string | null | undefined): string {
+    return POLICY_CAPTURE_STAGES.find(s => s.code === code)?.label || '';
+  }
+
+  private policyStageCode(label: string | null | undefined): string {
+    return POLICY_CAPTURE_STAGES.find(s => this.optionEquals(s.label, label))?.code || '';
+  }
+
+  private blankCategoryPolicyRow(isFirst: boolean): CategoryPolicyDraft {
+    // The first row is offered as the Unique Identifier: the usual setup (e.g. Serial No.)
+    return {
+      policyId: null,
+      policyName: '',
+      captureStage: 'stock_inward',
+      isMandatory: true,
+      isUniqueIdentifier: isFirst
+    };
+  }
+
+    // Rows hidden by switching Policies to No, kept so that switching back to Yes
+  // restores them (until the form is saved, cleared or another record is opened).
+  private categoryPolicyRowsBackup: CategoryPolicyDraft[] = [];
+
+  setCategoryPolicyApplicable(on: boolean): void {
+    if (on) {
+      const restored = this.categoryPolicyRowsBackup.length
+        ? this.categoryPolicyRowsBackup
+        : (this.categoryPolicyRows().length ? this.categoryPolicyRows() : [this.blankCategoryPolicyRow(true)]);
+      this.categoryPolicyRows.set(restored);
+      this.categoryPolicyRowsBackup = [];
+    } else {
+      if (this.categoryPolicyRows().length) this.categoryPolicyRowsBackup = this.categoryPolicyRows();
+      this.categoryPolicyRows.set([]);
+    }
+    this.categoryPolicyApplicable.set(on);
+  }
+
+  addCategoryPolicyRow(): void {
+    this.categoryPolicyRows.update(rows => [...rows, this.blankCategoryPolicyRow(false)]);
+  }
+
+  removeCategoryPolicyRow(index: number): void {
+    this.categoryPolicyRows.update(rows => rows.filter((_, i) => i !== index));
+    if (!this.categoryPolicyRows().length) this.categoryPolicyApplicable.set(false);
+  }
+
+    // For each row: the policies not used in another row (plus the row's own choice).
+  // A computed signal, so ng-select gets the same array until the rows change
+  // (a method returning a new array on every refresh breaks selection).
+  readonly categoryPolicyRowOptions = computed((): string[][] => {
+    const rows = this.categoryPolicyRows();
+    const all = this.serialPolicyOptions || [];
+    return rows.map((_, index) => {
+      const usedElsewhere = rows
+        .filter((__, i) => i !== index)
+        .map(r => this.normalizeKey(r.policyName))
+        .filter(Boolean);
+      return all.filter(name => !usedElsewhere.includes(this.normalizeKey(name)));
+    });
+  });
+
+  setCategoryPolicyRowPolicy(index: number, name: string | null): void {
+    this.categoryPolicyRows.update(rows => rows.map((r, i) =>
+      i === index ? { ...r, policyName: String(name || '').trim(), policyId: null } : r));
+  }
+
+  setCategoryPolicyRowStage(index: number, label: string | null): void {
+    this.categoryPolicyRows.update(rows => rows.map((r, i) =>
+      i === index && !r.isUniqueIdentifier ? { ...r, captureStage: this.policyStageCode(label) } : r));
+  }
+
+  setCategoryPolicyRowMandatory(index: number, mandatory: boolean): void {
+    this.categoryPolicyRows.update(rows => rows.map((r, i) =>
+      i === index && !r.isUniqueIdentifier ? { ...r, isMandatory: mandatory } : r));
+  }
+
+   // Radio: one row is the Unique Identifier. It is always mandatory and
+  // captured at Stock Inward, so those two are fixed on that row while it is
+  // the identifier; its own values come back when another row takes over.
+  setCategoryPolicyUniqueIdentifier(index: number): void {
+    this.categoryPolicyRows.update(rows => rows.map((r, i) => {
+      if (i === index) {
+        if (r.isUniqueIdentifier) return r;
+        return {
+          ...r,
+          savedStage: r.captureStage,
+          savedMandatory: r.isMandatory,
+          isUniqueIdentifier: true,
+          isMandatory: true,
+          captureStage: 'stock_inward'
+        };
+      }
+      return r.isUniqueIdentifier ? this.releaseCategoryPolicyIdentifier(r) : r;
+    }));
+  }
+
+  // Clicking the selected radio again: no Unique Identifier (stock by quantity)
+  clearCategoryPolicyUniqueIdentifier(): void {
+    this.categoryPolicyRows.update(rows => rows.map(r =>
+      r.isUniqueIdentifier ? this.releaseCategoryPolicyIdentifier(r) : r));
+  }
+
+  private releaseCategoryPolicyIdentifier(r: CategoryPolicyDraft): CategoryPolicyDraft {
+    return {
+      ...r,
+      isUniqueIdentifier: false,
+      captureStage: r.savedStage || r.captureStage,
+      isMandatory: r.savedMandatory ?? r.isMandatory,
+      savedStage: null,
+      savedMandatory: null
+    };
+  }
+
+  readonly categoryHasUniqueIdentifier = computed(() =>
+    this.categoryPolicyRows().some(r => r.isUniqueIdentifier));
 
   setCategoryBatchApplicable(required: boolean): void {
     this.categoryBatchApplicable.set(required);
@@ -10054,12 +10304,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return this.lineColumnIndex(column);
   }
 
-  lineGridColumnHeader(column: string): string {
-    // The header stays the generic column name ("Serial No") — one header can
-    // only ever name one policy, but a grid holds rows for different products,
-    // each with its own policy (IMEI Number, Chassis No, …). The policy is
-    // per-row information, so it belongs on the row's own button, which is
-    // where serialPickerSummaryForRow() now puts it.
+   lineGridColumnHeader(column: string): string {
+    // The header stays generic — one header can only ever name one policy, but
+    // a grid holds rows for different products, each with its own policy (IMEI
+    // Number, Chassis No, ...). The policy is per-row information, so it belongs
+    // on the row's own button (serialPickerSummaryForRow).
+    // Phase 2 (2.6g): on Stock Inward screens this column carries every policy
+    // value (per unit or per line), so it is titled "Policy" there.
+    if (this.lineGridColumnIsSerialPicker(column) && this.serialPickerModeForKey() === 'capture') return 'Policy';
     return column;
   }
 
@@ -10569,8 +10821,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       }
       return next;
     });
-    this.lineSerialWarrantyMap.update(map => {
-      const next: Record<number, Record<string, SerialWarrantyEntry>> = {};
+    // Phase 2: policy values move up with their rows too
+    this.lineSerialIdentifiersMap.update(map => {
+      const next: LineSerialIdentifiers = {};
+      for (const [key, val] of Object.entries(map)) {
+        const idx = Number(key);
+        if (idx < rowIndex) next[idx] = val;
+        else if (idx > rowIndex) next[idx - 1] = val;
+      }
+      return next;
+    });
+    this.lineIdentifierValuesMap.update(map => {
+      const next: LineIdentifierValues = {};
       for (const [key, val] of Object.entries(map)) {
         const idx = Number(key);
         if (idx < rowIndex) next[idx] = val;
@@ -11085,6 +11347,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
     const product = this.findProductBySelection(productName);
     if (!product) return false;
+
+    // Phase 2 (2.6g): quantity product with Stock Inward policies -> its Policy cell applies
+    if (this.lineGridColumnIsSerialPicker(column) && this.rowHasLinePolicies(row)) return true;
 
     return this.productSupportsLinePolicy(product, column);
   }
@@ -12412,8 +12677,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // screen not in that set, is always visible — this only ever hides
   // columns that are structurally irrelevant right now, never one the user
   // could otherwise type into (Rate/GST/Qty/etc. are untouched).
-  isLineColumnVisible(column: string): boolean {
+    isLineColumnVisible(column: string): boolean {
     if (!this.isPolicyColumnHidingScreen()) return true;
+    // Phase 2 (2.6g): the Policy column is also needed for quantity products
+    // that capture policy values at Stock Inward
+    if (this.lineGridColumnIsSerialPicker(column) && this.anyRowHasLinePolicies()) return true;
     return this.shouldShowPolicyLineColumn(column);
   }
 
@@ -14044,6 +14312,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.boundReferenceFields.set({});
     this.lineRefItemIdMap.set({});
     this.lineSerialUnitsMap.set({});
+    this.lineSerialIdentifiersMap.set({});
+    this.lineIdentifierValuesMap.set({});
     this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
     this.entryLineRowsKey.set(key);
     this.entryLineRows.set([this.blankLineRow()]);
@@ -14116,6 +14386,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.entryLineRowsKey.set('productionPlanning');
     this.lineRefItemIdMap.set({});
     this.lineSerialUnitsMap.set({});
+    this.lineSerialIdentifiersMap.set({});
+    this.lineIdentifierValuesMap.set({});
     this.lineSerialWarrantyMap.set({});
     this.lineSalesWarrantyBoundMap.set({});
 
@@ -14362,6 +14634,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.entryLineRows.set(rows.length ? rows : [this.blankLineRow()]);
     this.lineRefItemIdMap.set(refMap);
     this.lineSerialUnitsMap.set({});
+    this.lineSerialIdentifiersMap.set({});
+    this.lineIdentifierValuesMap.set({});
     this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
     this.boundReferenceLabels.set([doc.doc_number]);
     this.boundReferenceFields.set(patch);
@@ -15526,10 +15800,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.lineSerialUnitsMap.update(map => ({ ...map, [rowIndex]: serials.slice(0, qtyNeeded) }));
   }
 
-  serialPickerSummaryForRow(rowIndex: number, row: string[]): string {
+   serialPickerSummaryForRow(rowIndex: number, row: string[]): string {
     const count = (this.lineSerialUnitsMap()[rowIndex] || []).length;
     const productName = this.lineValue(row, ['product', 'item', 'sku', 'material']);
     const product = this.findProductBySelection(productName);
+    // Phase 2 (2.6g): quantity product with Stock Inward policies, e.g. "Batch Ref (1/1)"
+    if (product && !product.serial_applicable) {
+      const linePolicies = this.productInwardPolicies(product);
+      if (linePolicies.length) {
+        const values = this.lineIdentifierValuesMap()[rowIndex] || {};
+        const filled = linePolicies.filter(p => String(values[p.policyId] ?? '').trim()).length;
+        const lineLabel = linePolicies.length === 1 ? linePolicies[0].policyName : 'Policy Values';
+        return `${lineLabel} (${filled}/${linePolicies.length})`;
+      }
+    }
     const qty = this.serialPickerBaseQtyForRow(row, product);
     const inheritedSource = this.inheritedSalesSerialSource(rowIndex);
     const dcItemId = inheritedSource?.dcItemId ?? null;
@@ -15547,6 +15831,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
     if (siItemId) return count ? `${count} ${label}(s) from SI` : 'Loading...';
     return `${label} (${count}/${qty || 0})`;
+  }
+
+    // Phase 2 (2.6g): a quantity product whose category captures policies at Stock Inward
+  rowHasLinePolicies(row: string[]): boolean {
+    if (this.serialPickerModeForKey() !== 'capture') return false;
+    const product = this.findProductBySelection(this.lineValue(row, ['product', 'item', 'sku', 'material']));
+    return !!product && !product.serial_applicable && this.productInwardPolicies(product).length > 0;
+  }
+
+    // Phase 2 (2.6g): at least one line is a quantity product with Stock Inward policies
+  anyRowHasLinePolicies(): boolean {
+    return this.entryLineRows().some(row => this.rowHasLinePolicies(row));
   }
 
   // Compact "{policy name} · {count}" badge text for a row whose serial cell
@@ -15640,7 +15936,24 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   openSerialPicker(rowIndex: number, row: string[]): void {
     const productName = this.lineValue(row, ['product', 'item', 'sku', 'material']);
     const product = this.findProductBySelection(productName);
-    if (!product?.serial_applicable) return;
+    if (!product) return;
+
+     // Phase 2 (2.6g): a quantity product (no Unique Identifier) whose category
+    // captures policies at Stock Inward: one value per policy for the whole line.
+    if (!product.serial_applicable) {
+      if (this.serialPickerModeForKey() !== 'capture') return;
+      const linePolicies = this.productInwardPolicies(product);
+      if (!linePolicies.length) return;
+      this.activeSerialPicker.set({
+        rowIndex, mode: 'lineValues', qtyNeeded: 0, productId: product.id,
+        productName: product.product_name || productName, warrantyApplicable: false, inwardPolicies: linePolicies
+      });
+      this.serialPickerLineValuesDraft.set({ ...(this.lineIdentifierValuesMap()[rowIndex] || {}) });
+      this.serialPickerIdentifierWarnings.set({});
+      this.serialPickerError.set('');
+      this.serialPickerMessage.set('');
+      return;
+    }
 
     const qtyNeeded = this.serialPickerBaseQtyForRow(row, product);
     const inheritedSource = this.inheritedSalesSerialSource(rowIndex);
@@ -15677,7 +15990,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const warrantyApplicable = mode === 'capture' && !!product.warranty_applicable;
     // Sales Invoice: a unit with no purchase warranty can get one added here.
     const saleWarrantyApplicable = mode === 'select' && this.config?.key === 'salesInvoice' && !!product.warranty_applicable;
-    this.activeSerialPicker.set({ rowIndex, mode, qtyNeeded, productId: product.id, productName: product.product_name || productName, warrantyApplicable, saleWarrantyApplicable });
+    
+    // Phase 2: other Stock Inward policies are entered where units are created (capture mode)
+    const inwardPolicies = mode === 'capture' ? this.productInwardPolicies(product) : [];
+    this.activeSerialPicker.set({ rowIndex, mode, qtyNeeded, productId: product.id, productName: product.product_name || productName, warrantyApplicable, saleWarrantyApplicable, inwardPolicies });
+    this.serialPickerIdentifierDraft.set(JSON.parse(JSON.stringify(this.lineSerialIdentifiersMap()[rowIndex] || {})));
+    this.serialPickerIdentifierWarnings.set({});
     const savedSaleWarranty: Record<string, string> = {};
     if (saleWarrantyApplicable) {
       for (const [serial, entry] of Object.entries(this.lineSerialWarrantyMap()[rowIndex] || {})) {
@@ -15852,6 +16170,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return isDuplicateText ? `${option.serial_no} (Unit #${option.id})` : option.serial_no;
   }
 
+  // The name of the policy that identifies a product's units (its category's
+  // Unique Identifier), e.g. "IMEI 1", "Chassis No". Falls back to "Serial No.".
+  protected unitIdentifierLabel(productId: number | null | undefined): string {
+    const product: any = productId
+      ? this.loadedProductObjects?.().find((p: any) => Number(p?.id) === Number(productId))
+      : null;
+    return String(product?.serial_policy_name || product?.serialPolicyName || '').trim() || 'Serial No.';
+  }
   // Local-only "already entered" check (same row's draft list) runs first —
   // instant, no round trip. Once that passes, sp_check_serial_duplicate asks
   // whether this serial already exists anywhere else in the system for this
@@ -15888,8 +16214,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const exists = !!res.data?.exists;
           const allowDuplicate = !!res.data?.allowDuplicate;
           if (exists && !allowDuplicate) {
+            const label = this.unitIdentifierLabel(picker.productId);
             this.serialPickerError.set(
-              `This serial no. already exists: "${text}". Remove the duplicate, or enable "Allow Duplicate" on its Serial Number Policy if repeats are expected.`
+              `${label} "${text}" already exists. Each unit's ${label} must be unique; please check and enter the correct one.`
             );
             return;
           }
@@ -15914,9 +16241,126 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.serialPickerMessageTimer = setTimeout(() => this.serialPickerMessage.set(''), 1800);
   }
 
-  removeSerialPickerCaptureValue(value: string): void {
+    removeSerialPickerCaptureValue(value: string): void {
     this.serialPickerDraftValues.set(this.serialPickerDraftValues().filter(s => s !== value));
     this.clearSerialPickerWarrantyOverride(value);
+    this.serialPickerIdentifierWarnings.update(w => {
+        const next: Record<string, string> = {};
+        for (const [key, msg] of Object.entries(w)) if (!key.startsWith(`${value}|`)) next[key] = msg;
+        return next;
+      });
+  }
+    serialPickerIdentifierValue(serial: string, policyId: number): string {
+    return this.serialPickerIdentifierDraft()[serial]?.[policyId] ?? '';
+  }
+
+  setSerialPickerIdentifierValue(serial: string, policyId: number, value: string): void {
+    this.serialPickerIdentifierDraft.update(draft => ({
+      ...draft,
+      [serial]: { ...(draft[serial] || {}), [policyId]: String(value ?? '') }
+    }));
+    this.clearSerialPickerIdentifierWarning(serial, policyId);
+  }
+
+  // Units still missing a mandatory value (shown in the popup footer)
+  serialPickerMissingMandatoryCount(): number {
+    const policies = (this.activeSerialPicker()?.inwardPolicies || []).filter(p => p.isMandatory);
+    if (!policies.length) return 0;
+    return this.serialPickerDraftValues().filter(serial =>
+      policies.some(p => !String(this.serialPickerIdentifierValue(serial, p.policyId)).trim())).length;
+  }
+
+    serialPickerIdentifierWarning(serial: string, policyId: number): string {
+    return this.serialPickerIdentifierWarnings()[`${serial}|${policyId}`] || '';
+  }
+
+  private clearSerialPickerIdentifierWarning(serial: string, policyId: number): void {
+    const key = `${serial}|${policyId}`;
+    if (!this.serialPickerIdentifierWarnings()[key]) return;
+    this.serialPickerIdentifierWarnings.update(w => { const next = { ...w }; delete next[key]; return next; });
+  }
+
+  private setSerialPickerIdentifierWarning(serial: string, policyId: number, message: string): void {
+    this.serialPickerIdentifierWarnings.update(w => ({ ...w, [`${serial}|${policyId}`]: message }));
+  }
+
+  // Called when the user leaves a policy cell. Only mandatory values are
+  // protected (optional ones may repeat), matching the posting rule (266).
+  checkSerialPickerIdentifierValue(serial: string, policy: InwardPolicy): void {
+    if (!policy?.isMandatory) return;
+    const value = String(this.serialPickerIdentifierValue(serial, policy.policyId) || '').trim();
+    this.clearSerialPickerIdentifierWarning(serial, policy.policyId);
+    if (!value) return;
+
+    // 1. The same value in another unit of this popup
+    const sameHere = this.serialPickerDraftValues().find(other =>
+      other !== serial &&
+      String(this.serialPickerIdentifierValue(other, policy.policyId) || '').trim().toUpperCase() === value.toUpperCase());
+    if (sameHere) {
+      this.setSerialPickerIdentifierWarning(serial, policy.policyId,
+        `${policy.policyName} "${value}" is also entered for unit ${sameHere}.`);
+      return;
+    }
+
+    // 2. Already stored (and protected) in the company
+    this.txService.checkIdentifierDuplicate(policy.policyId, value)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: res => {
+          // The user may have changed the value meanwhile
+          const current = String(this.serialPickerIdentifierValue(serial, policy.policyId) || '').trim();
+          if (current.toUpperCase() !== value.toUpperCase()) return;
+          if (res.data?.exists && res.data?.enforceUnique) {
+            const on = res.data.usedOn;
+            this.setSerialPickerIdentifierWarning(serial, policy.policyId,
+              `${policy.policyName} "${value}" is already used` +
+              (on?.docNo ? ` on ${on.docNo}` : '') +
+              (on?.productName ? ` (${on.productName})` : '') + '.');
+          }
+        },
+        // A failed lookup must not block entry; posting checks again anyway
+        error: () => { }
+      });
+  }
+
+  serialPickerIdentifierWarningCount(): number {
+    return Object.keys(this.serialPickerIdentifierWarnings()).length;
+  }
+
+    serialPickerLineValue(policyId: number): string {
+    return this.serialPickerLineValuesDraft()[policyId] ?? '';
+  }
+
+  setSerialPickerLineValue(policyId: number, value: string): void {
+    this.serialPickerLineValuesDraft.update(draft => ({ ...draft, [policyId]: String(value ?? '') }));
+    this.clearSerialPickerIdentifierWarning('__line__', policyId);
+  }
+
+  serialPickerLineMissingMandatoryCount(): number {
+    return (this.activeSerialPicker()?.inwardPolicies || [])
+      .filter(p => p.isMandatory && !String(this.serialPickerLineValue(p.policyId)).trim()).length;
+  }
+
+  // Live check for a line value (mandatory values only, like the per-unit cells)
+  checkSerialPickerLineValue(policy: InwardPolicy): void {
+    if (!policy?.isMandatory) return;
+    const value = String(this.serialPickerLineValue(policy.policyId) || '').trim();
+    this.clearSerialPickerIdentifierWarning('__line__', policy.policyId);
+    if (!value) return;
+    this.txService.checkIdentifierDuplicate(policy.policyId, value)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: res => {
+          if (String(this.serialPickerLineValue(policy.policyId) || '').trim().toUpperCase() !== value.toUpperCase()) return;
+          if (res.data?.exists && res.data?.enforceUnique) {
+            const on = res.data.usedOn;
+            this.setSerialPickerIdentifierWarning('__line__', policy.policyId,
+              `${policy.policyName} "${value}" is already used` +
+              (on?.docNo ? ` on ${on.docNo}` : '') + (on?.productName ? ` (${on.productName})` : '') + '.');
+          }
+        },
+        error: () => { }
+      });
   }
 
   // Bulk counterpart to addSerialPickerCaptureValue — adds a whole
@@ -15948,15 +16392,137 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return toAdd.length;
   }
 
-  closeSerialPicker(save: boolean): void {
+    // Phase 2 (2.6h): paste rows from Excel into the capture popup.
+  // With a header row: columns are matched by NAME (Unique Identifier and each
+  // Stock Inward policy, any order; unknown columns are ignored).
+  // Without a header: by POSITION (identifier first, then the policies in order).
+  // Tab-separated (Excel) or comma-separated.
+  applySerialPickerPaste(text: string): { added: number; updated: number; skipped: string[]; ignoredColumns: string[] } {
+    const result = { added: 0, updated: 0, skipped: [] as string[], ignoredColumns: [] as string[] };
     const picker = this.activeSerialPicker();
-    if (picker && save) {
+    if (!picker || picker.mode !== 'capture') return result;
+
+    const policies = picker.inwardPolicies || [];
+    const label = this.unitIdentifierLabel(picker.productId);
+    const split = (line: string) => (line.includes('\t') ? line.split('\t') : line.split(',')).map(cell => cell.trim());
+    const lines = String(text || '').split(/\r?\n/).filter(line => line.trim()).map(split);
+    if (!lines.length) return result;
+
+    // Column map: index -> 'id' (the Unique Identifier) or a policy id
+    let columnMap: Array<'id' | number | null>;
+    let firstDataLine = 0;
+    const first = lines[0];
+    const nameToTarget = (name: string): 'id' | number | null => {
+      const key = this.normalizeKey(name);
+      if (!key) return null;
+      if (key === this.normalizeKey(label)) return 'id';
+      const policy = policies.find(p => this.normalizeKey(p.policyName) === key);
+      return policy ? policy.policyId : null;
+    };
+    const looksLikeHeader = first.some(cell => nameToTarget(cell) !== null);
+
+    if (looksLikeHeader) {
+      columnMap = first.map(nameToTarget);
+      first.forEach((cell, i) => { if (cell && columnMap[i] === null) result.ignoredColumns.push(cell); });
+      if (!columnMap.includes('id')) {
+        result.skipped.push(`The header has no "${label}" column, so no rows were added.`);
+        return result;
+      }
+      firstDataLine = 1;
+    } else {
+      columnMap = first.map((_, i) => i === 0 ? 'id' : (policies[i - 1]?.policyId ?? null));
+      // Columns beyond the policies are ignored
+      const maxCols = Math.max(...lines.map(l => l.length));
+      if (maxCols > policies.length + 1) result.ignoredColumns.push(`${maxCols - policies.length - 1} extra column(s)`);
+      for (let i = columnMap.length; i < maxCols; i++) columnMap.push(i === 0 ? 'id' : (policies[i - 1]?.policyId ?? null));
+    }
+
+    const idIndex = columnMap.indexOf('id');
+    const serials = [...this.serialPickerDraftValues()];
+    const draft: Record<string, Record<number, string>> = JSON.parse(JSON.stringify(this.serialPickerIdentifierDraft()));
+
+    for (let index = firstDataLine; index < lines.length; index++) {
+      const cells = lines[index];
+      const serial = cells[idIndex] || '';
+      if (!serial) {
+        result.skipped.push(`Line ${index + 1}: no ${label}.`);
+        continue;
+      }
+
+      let key = serials.find(s => s.toUpperCase() === serial.toUpperCase());
+      if (key) {
+        result.updated++;
+      } else {
+        if (serials.length >= picker.qtyNeeded) {
+          result.skipped.push(`Line ${index + 1}: ${serial} — quantity of ${picker.qtyNeeded} already complete.`);
+          continue;
+        }
+        serials.push(serial);
+        key = serial;
+        result.added++;
+      }
+
+      cells.forEach((value, i) => {
+        const target = columnMap[i];
+        if (typeof target === 'number' && value) {
+          draft[key!] = { ...(draft[key!] || {}), [target]: value };
+        }
+      });
+    }
+
+    this.serialPickerDraftValues.set(serials);
+    this.serialPickerIdentifierDraft.set(draft);
+
+    // Same live checks as typing (mandatory values only)
+    for (const serial of serials) {
+      for (const policy of policies) {
+        if (policy.isMandatory && String(this.serialPickerIdentifierValue(serial, policy.policyId)).trim()) {
+          this.checkSerialPickerIdentifierValue(serial, policy);
+        }
+      }
+    }
+
+    this.serialPickerMessage.set(
+      `${result.added} added, ${result.updated} updated` +
+      (result.skipped.length ? `, ${result.skipped.length} skipped` : '') +
+      (result.ignoredColumns.length ? `; ignored: ${result.ignoredColumns.join(', ')}` : '') + '.');
+    if (this.serialPickerMessageTimer) clearTimeout(this.serialPickerMessageTimer);
+    this.serialPickerMessageTimer = setTimeout(() => this.serialPickerMessage.set(''), 4000);
+    return result;
+  }
+
+    // The column order shown as a hint in the paste box, e.g. "IMEI ⇥ IMEI 1"
+  serialPickerPasteColumnHint(): string {
+    const picker = this.activeSerialPicker();
+    if (!picker) return '';
+    return [this.unitIdentifierLabel(picker.productId), ...(picker.inwardPolicies || []).map(p => p.policyName)].join('  ⇥  ');
+  }
+
+   closeSerialPicker(save: boolean): void {
+    const picker = this.activeSerialPicker();
+    // Phase 2 (2.6g): quantity products keep one value per policy for the line
+    if (picker && save && picker.mode === 'lineValues') {
+      const kept: Record<number, string> = {};
+      for (const [policyId, value] of Object.entries(this.serialPickerLineValuesDraft())) {
+        if (String(value ?? '').trim()) kept[Number(policyId)] = String(value).trim();
+      }
+      this.lineIdentifierValuesMap.update(map => {
+        const next = { ...map };
+        if (Object.keys(kept).length) next[picker.rowIndex] = kept; else delete next[picker.rowIndex];
+        return next;
+      });
+    }
+    // Phase 2 (2.6g): the serial logic below is for per-unit products only
+    if (picker && save && picker.mode !== 'lineValues') {
       this.lineSerialUnitsMap.update(map => ({ ...map, [picker.rowIndex]: [...this.serialPickerDraftValues()] }));
-      if (picker.mode === 'select' || picker.mode === 'inherited') {
-        // Sales Invoice: Warranty Upto from the chosen units' purchase warranty.
-        const chosen = new Set(this.serialPickerDraftValues());
-        this.bindSalesInvoiceWarrantyFromSerials(picker.rowIndex,
-          this.serialPickerAvailableOptions().filter(option => chosen.has(option.serial_no)));
+      // Phase 2: keep the policy values of the units that are still on the line
+      if (picker.mode === 'capture' && (picker.inwardPolicies || []).length) {
+        const draft = this.serialPickerIdentifierDraft();
+        const kept: Record<string, Record<number, string>> = {};
+        for (const serial of this.serialPickerDraftValues()) {
+          if (draft[serial]) kept[serial] = draft[serial];
+        }
+        this.lineSerialIdentifiersMap.update(map => ({ ...map, [picker.rowIndex]: kept }));
       }
       if (picker.warrantyApplicable) {
         // Every captured serial gets an entry — the shared default for
@@ -15989,6 +16555,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.serialPickerSaleWarrantyEdits.set({});
     this.activeSerialPicker.set(null);
     this.serialPickerDraftValues.set([]);
+    this.serialPickerIdentifierDraft.set({});
+    this.serialPickerLineValuesDraft.set({});
+    this.serialPickerIdentifierWarnings.set({});
     this.serialPickerAvailableOptions.set([]);
     this.serialPickerSelectedIds.set(new Set());
     this.serialPickerWarrantyOverrides.set({});
@@ -16114,6 +16683,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.isLineGridFullscreen.set(false);
     this._autoCodeFields.clear();
     this.genericNameValue.set('');
+    this.categoryPolicyApplicable.set(false);
+    this.categoryPolicyRows.set([]);
+    this.categoryPolicyRowsBackup = [];
+    this.categoryPolicyRows.set([]);
     this.isCurrentProductLocked.set(false);
     this.editingId.set(null);
     this.txDocId.set(null);
@@ -16137,6 +16710,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.lineAttrValueMap.set({});
     this.lineSerialValueMap.set({});
     this.lineSerialUnitsMap.set({});
+    this.lineSerialIdentifiersMap.set({});
+    this.lineIdentifierValuesMap.set({});
     this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
     this.categorySerialApplicable.set(false);
     this.categoryBatchApplicable.set(false);
@@ -16190,6 +16765,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.lineSerialValueMap.set({});
       this.lineRefItemIdMap.set({});
       this.lineSerialUnitsMap.set({});
+      this.lineSerialIdentifiersMap.set({});
+      this.lineIdentifierValuesMap.set({});
       this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
       this.applyDefaultLocationToCurrentTransaction(true);
       return;
@@ -16205,6 +16782,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.lineSerialValueMap.set({});
       this.lineRefItemIdMap.set({});
       this.lineSerialUnitsMap.set({});
+      this.lineSerialIdentifiersMap.set({});
+      this.lineIdentifierValuesMap.set({});
       this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
       this.applyDefaultLocationToCurrentTransaction(true);
       return;
@@ -17062,9 +17641,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   //   return this.config?.kind === 'transaction' ? [] : (this.config?.rows || []);
   // });
 
-  private readonly _stableLiveRows = computed((): string[][] => {
+   private readonly _stableLiveRows = computed((): string[][] => {
     if (this.isApiWired()) {
-      return this.mapToGridRows(this.newestFirstRecords(this.segmentFilteredRecords(this.savedRecordObjects())));
+      const records = this.savedRecordObjects();
+      // Policies are a company-wide library (migration 265): Policy Master lists
+      // every policy of the company, whatever segment it was created in.
+      const visible = this.config?.key === 'serialNumberPolicy'
+        ? records
+        : this.segmentFilteredRecords(records);
+      return this.mapToGridRows(this.newestFirstRecords(visible));
     }
     return this.config?.kind === 'transaction' ? [] : (this.config?.rows || []);
   });
@@ -19791,7 +20376,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.saveError.set('Only admin can edit Product Master records.');
       return;
     }
-    const record = this.findRecordByRow(row);
+    // const record = this.findRecordByRow(row);
+        // Policies are a company-wide library (migration 265): look the record up
+    // among ALL of the company's policies by its code (column 1 of the grid),
+    // not only the selected segment's. Other masters keep findRecordByRow.
+    const record = this.config?.key === 'serialNumberPolicy'
+      ? this.savedRecordObjects().find((r: any) => this.optionEquals(r?.policy_code, row[0]))
+      : this.findRecordByRow(row);
     const cap = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Active';
     if (!record) {
       // Never fail silently here. A dead Edit button sends the user back to the
@@ -19802,6 +20393,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.saveError.set('Could not open that record for editing. Refresh the list and try again.');
       return;
     }
+    this.genericNameValue.set('');
+        // ...and an error from the previous record no longer applies.
+    this.saveError.set('');
+    this.saveMsg.set('');
     this.editingId.set(record.id ?? null);
     this._autoCodeFields.clear();
     this.loadTransportDetailsForRecord(record.id ?? null);
@@ -19955,20 +20550,32 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       case 'uomMaster':
         this.applyUomRecordToForm(record, true);
         break;
-      case 'categoryMaster':
+        case 'categoryMaster': {
         this.categorySerialApplicable.set(!!record.serial_applicable);
         this.categoryBatchApplicable.set(!!record.batch_applicable);
+        // Policies (migration 265)
+        const policyRows: CategoryPolicyDraft[] = [...(record.policies || [])]
+          .sort((a: any, b: any) => (Number(a.display_order) || 0) - (Number(b.display_order) || 0))
+          .map((p: any) => ({
+            policyId: p.policy_id ?? null,
+            policyName: p.policy_name || '',
+            captureStage: p.capture_stage || 'stock_inward',
+            isMandatory: !!p.is_mandatory,
+            isUniqueIdentifier: !!p.is_unique_identifier
+          }));
+        this.categoryPolicyApplicable.set(!!record.policy_applicable && policyRows.length > 0);
+        this.categoryPolicyRows.set(policyRows);
+        this.categoryPolicyRowsBackup = [];
         this.formValues.set({
           categoryCode: record.category_code || '',
           categoryName: record.category_name || '',
           description: record.description || '',
-          serialPolicyName: record.serial_policy_name || '',
-          uinRequired: !!(record.uin_required ?? record.uinRequired),
           batchPolicyName: record.batch_policy_name || '',
           applicableUoms: (record.uoms || []).map((u: any) => u.uom_symbol || u.uom_name || u.uom_code).filter(Boolean),
           status: cap(record.status || 'active')
         });
         break;
+      }
       case 'hsnSacMapping':
         this.hsnSacCode.set(record.code || '');
         this.hsnSacDescription.set(record.description || '');
@@ -20052,8 +20659,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           this.entryLineRows.set(rows.length ? rows : [this.blankLineRow()]);
         }
         break;
-      case 'serialNumberPolicy':
-        this.formValues.set({ policyCode: record.policy_code || '', policyName: record.policy_name || '', applicableCategory: record.category_name || '', serialFormat: record.serial_format || '', captureStage: record.capture_stage || '', allowDuplicate: record.allow_duplicate ? 'Yes' : 'No', warrantyApplicable: record.warranty_applicable ? 'Yes' : 'No', status: cap(record.status || 'active') });
+        case 'serialNumberPolicy':
+        this.formValues.set({
+          policyCode: record.policy_code || '',
+          policyName: record.policy_name || '',
+          serialFormat: record.serial_format || '',
+          status: cap(record.status || 'active')
+        });
         break;
       case 'batchLotPolicy':
         this.formValues.set({ policyCode: record.policy_code || '', policyName: record.policy_name || '', applicableCategory: record.category_name || '', batchFormat: record.batch_format || '', expiryRequired: record.expiry_required ? 'Yes' : 'No', qcRequired: record.qc_required ? 'Yes' : 'No', status: cap(record.status || 'active') });
@@ -20284,9 +20896,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // .set() (never merge) so switching to edit a different record can't leak
   // a previously-edited record's serials into the new one.
   private hydrateLineSerialUnitsFromRecord(record: any): void {
-    this.lineSerialUnitsMap.set(this.lineSerialMapFromItems(record?.items || []));
+    const items = record?.items || [];
+    this.lineSerialUnitsMap.set(this.lineSerialMapFromItems(items));
+    // Phase 2: the policy values (IMEI 1, ...) of the same lines
+    const identifiers = this.lineIdentifierMapsFromItems(items);
+    this.lineSerialIdentifiersMap.set(identifiers.serial);
+    this.lineIdentifierValuesMap.set(identifiers.line);
   }
-
   // Restores each line's per-serial warranty capture (migration 237) when
   // reopening a saved GRN/Direct PI draft before it posts — a no-op for any
   // other document type, since those items simply carry no serial_warranty.
@@ -21074,17 +21690,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
   }
 
-  private normalizeCaptureStage(s: any): string | null {
-    const raw = String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-    return raw.includes('both') ? 'both' : raw || null;
-  }
-
   protected buildPayload(): Record<string, any> {
     const v = this.formValues();
     const lc = (s: string) => (s || 'Active').toLowerCase();
     const bool = (s: any) => s === true || s === 'Yes';
     const productType = (s: any) => String(s || '').trim() || 'Physical Stock';
-    const captureStage = (s: any) => this.normalizeCaptureStage(s);
     const selectedSegmentName = String(v['segment'] || this.selectedSegment() || '').trim() || null;
     const selectedSegmentId = this.segmentIdByName(selectedSegmentName);
     const idsFromSelection = <T extends { id: number }>(
@@ -21240,15 +21850,29 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           status: lc(v['status'])
         };
       }
-      case 'categoryMaster':
+           case 'categoryMaster': {
+        // Policies (migration 265): serial applicable, serial policy and UIN are
+        // derived from these rows on the server.
+        const policyApplicable = this.categoryPolicyApplicable();
+        const policies = policyApplicable
+          ? this.categoryPolicyRows()
+              .filter(r => String(r.policyName || '').trim())
+              .map((r, index) => ({
+                policy_id: r.policyId,
+                policy_name: r.policyName,
+                capture_stage: r.isUniqueIdentifier ? 'stock_inward' : r.captureStage,
+                is_mandatory: r.isUniqueIdentifier ? true : r.isMandatory,
+                is_unique_identifier: r.isUniqueIdentifier,
+                display_order: index + 1
+              }))
+          : [];
         return {
           segment_id: selectedSegmentId,
           category_code: v['categoryCode'] || '',
           category_name: v['categoryName'] || '',
           description: v['description'] || '',
-          serial_applicable: this.categorySerialApplicable(),
-          serial_policy_name: v['serialPolicyName'] || null,
-          uin_required: this.categorySerialApplicable() && (v['uinRequired'] === true || v['uinRequired'] === 'true'),
+          policy_applicable: policyApplicable,
+          policies,
           batch_applicable: this.categoryBatchApplicable(),
           batch_policy_name: v['batchPolicyName'] || null,
           uom_ids: idsFromSelection(v['applicableUoms'], this.loadedUomObjects(), (item, selected) =>
@@ -21256,6 +21880,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           ),
           status: lc(v['status'])
         };
+      }
       case 'hsnSacMapping': {
         const code = String(v['code'] || this.hsnSacCode()).trim();
         const gstRate = this.gstRate() ?? (v['gstRate'] !== undefined && v['gstRate'] !== '' ? Number(v['gstRate']) : 0);
@@ -21367,13 +21992,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             status: lc(v['status'] || 'active')
           };
         }
-      case 'serialNumberPolicy': {
-        const categoryName = v['applicableCategory'] || null;
-        const categoryId = categoryName
-          ? this.loadedCategoryObjects().find(item => this.optionEquals(item.category_name, categoryName))?.id ?? null
-          : null;
-        return { segment_id: selectedSegmentId, policy_code: v['policyCode'] || null, policy_name: v['policyName'] || '', category_id: categoryId, category_name: categoryName, serial_format: v['serialFormat'] || null, capture_stage: captureStage(v['captureStage']), allow_duplicate: bool(v['allowDuplicate']), warranty_applicable: bool(v['warrantyApplicable']), status: lc(v['status']) };
-      }
+        case 'serialNumberPolicy':
+        // Library fields only: stage / mandatory / Unique Identifier are set per category (migration 265)
+        return {
+          segment_id: selectedSegmentId,
+          policy_code: v['policyCode'] || null,
+          policy_name: v['policyName'] || '',
+          serial_format: v['serialFormat'] || null,
+          status: lc(v['status'])
+        };
       case 'batchLotPolicy': {
         const categoryName = v['applicableCategory'] || v['applicableFor'] || null;
         const categoryId = categoryName
@@ -22462,6 +23089,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         expiry_date: this.isoDateValue(this.lineValue(row, ['expiry']) || v['expiryDate']) || null,
         serial_no: this.lineValue(row, ['serial']) || null,
         serial_numbers: product?.serial_applicable ? (this.serialNumbersForLine(row, index).length ? this.serialNumbersForLine(row, index) : null) : null,
+        ...this.lineIdentifierPayload(index),
         remarks: this.lineValue(row, ['remarks']) || null
       };
     });
@@ -23115,6 +23743,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         serial_no: this.transactionLineSerialText(row, index),
         serial_numbers: this.lineSerialUnitsMap()[index] || null,
         serial_warranty: this.lineSerialWarrantyMap()[index] || null,
+        ...this.lineIdentifierPayload(index),
         expiry_date: this.lineValue(row, ['expiry']) || null,
         warehouse_name: this.lineValue(row, ['warehouse', 'location']) || defaultWarehouse || null,
         amount: this.lineNumber(row, ['amount']) || taxPayload.amount,
@@ -23177,6 +23806,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         serial_no: this.transactionLineSerialText(row, index),
         serial_numbers: this.lineSerialUnitsMap()[index] || null,
         serial_warranty: this.lineSerialWarrantyMap()[index] || null,
+        ...this.lineIdentifierPayload(index),
         expiry_date: this.lineValue(row, ['expiry']) || null,
         warranty_upto: this.isoDateValue(this.lineValue(row, ['warranty'])) || null,
         amount: this.lineNumber(row, ['amount']) || taxPayload.amount,
@@ -23703,13 +24333,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (!hasValue(payload['uom_name'])) return 'UOM name is required.';
     }
 
-    if (this.config?.key === 'categoryMaster') {
+      if (this.config?.key === 'categoryMaster') {
       if (!hasValue(payload['category_name'])) return 'Category name is required.';
-      // Previous (Serial No. Policy forced on every category):
-      // if (!payload['serial_applicable']) return 'Serial No. Policy is mandatory. Set Serial No. Policy Applicable to Yes and select a policy.';
-      // if (!hasValue(payload['serial_policy_name'])) return 'Select or add a Serial Number Policy.';
-      // Serial is optional now; a policy is only required when it is switched on.
-      if (payload['serial_applicable'] && !hasValue(payload['serial_policy_name'])) return 'Select or add a Serial Number Policy.';
+      // Policies (migration 265): optional; when switched on, every row needs a policy and a stage.
+      if (this.categoryPolicyApplicable()) {
+        const rows = this.categoryPolicyRows();
+        if (!rows.length) return 'Policy Applicable is Yes: add at least one policy, or set it to No.';
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i];
+          if (!String(row.policyName || '').trim()) return `Policy row ${i + 1}: select a policy.`;
+          if (!row.isUniqueIdentifier && !row.captureStage) return `Policy "${row.policyName}": select the Capture Stage.`;
+        }
+      }
     }
 
     if (this.config?.key === 'variantMaster') {
@@ -23895,7 +24530,6 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // Tax Details: Tax Category is mandatory too (HSN/SAC and GST Rate above).
     if (!hasValue(payload['tax_category'])) return 'Tax Category is mandatory.';
     if (this.categoryRequiresBatchPolicy() && !hasValue(payload['batch_policy_name'])) return 'Selected category requires Batch / Lot Policy.';
-    if (this.categoryRequiresSerialPolicy() && !hasValue(payload['serial_policy_name'])) return 'Selected category requires Serial Number Policy.';
     const variantRows = payload['applicable_variants'] || [];
     if (this.productVariantRequired() && (!Array.isArray(variantRows) || !variantRows.length)) {
       return 'Map at least one product Variant with its attributes.';
@@ -24011,13 +24645,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           r.decimal_allowed ? 'Yes' : 'No',
           cap(r.status || 'active')
         ]);
-      case 'categoryMaster':
+        case 'categoryMaster':
         return records.map(r => [
           r.category_code || '',
           r.category_name || '',
           r.parent_name || '',
-          r.serial_applicable ? (r.serial_policy_name || 'Yes') : 'No',
-          (r.uin_required ?? r.uinRequired) ? 'Yes' : 'No',
+          r.policies_text || (r.policy_applicable ? '' : 'No'),
           r.batch_applicable ? (r.batch_policy_name || 'Yes') : 'No',
           r.description || '',
           (r.uoms || []).map((u: any) => u.uom_symbol || u.uom_name || u.uom_code).filter(Boolean).join(', ')
@@ -24062,8 +24695,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             : [r.attribute_name, r.attribute_value].filter(Boolean).join(': '),
           cap(r.status || 'active')
         ]);
-      case 'serialNumberPolicy':
-        return records.map(r => [r.policy_code || '', r.policy_name || '', r.category_name || '', r.serial_format || '', r.capture_stage || '', r.allow_duplicate ? 'Yes' : 'No', r.warranty_applicable ? 'Yes' : 'No', cap(r.status || 'active')]);
+        case 'serialNumberPolicy':
+        return records.map(r => {
+          const usedCount = Number(r.used_in_categories ?? r.usedInCategories ?? 0) || 0;
+          const usedNames = r.used_in || r.usedIn || '';
+          return [
+            r.policy_code || '',
+            r.policy_name || '',
+            r.serial_format || '',
+            usedCount > 0 ? `${usedCount}: ${usedNames}` : 'Not used yet',
+            cap(r.status || 'active')
+          ];
+        });
       case 'batchLotPolicy':
         return records.map(r => [r.policy_code || '', r.policy_name || '', r.category_name || '', r.batch_format || '', r.expiry_required ? 'Yes' : 'No', r.qc_required ? 'Yes' : 'No', cap(r.status || 'active')]);
       case 'barcodeConfiguration':

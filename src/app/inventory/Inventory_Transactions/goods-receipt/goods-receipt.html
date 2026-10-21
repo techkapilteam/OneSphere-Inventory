@@ -269,7 +269,7 @@
                           } @else {
                             <span class="inventory-grid-empty-hint"></span>
                           }
-                        } @else if (lineGridColumnIsSerialPicker(column) && isSerialApplicableRow(row)) {
+                        } @else if (lineGridColumnIsSerialPicker(column) && (isSerialApplicableRow(row) || rowHasLinePolicies(row))) {
                           <button type="button" class="erp-btn btn-white btn-sm inventory-serial-trigger" (click)="openSerialPicker(rowIndex, row)">
                             {{ serialPickerSummaryForRow(rowIndex, row) }}
                           </button>
