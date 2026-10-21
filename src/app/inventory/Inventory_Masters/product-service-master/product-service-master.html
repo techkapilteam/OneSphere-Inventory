@@ -1152,6 +1152,54 @@
                   <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
                 </label>
               </div>
+              <!-- Unit identification (migration 265): read-only, from the category's policies -->
+                <div class="erp-form-group span-2">
+                  <label class="erp-label">Unit Identification <span class="erp-label-hint">from category</span></label>
+                  @if (!selectedProductCategory()) {
+                    <div class="inventory-optional-hint">Select a category first.</div>
+                  } @else if (!productCategoryPolicies().length) {
+                    <div class="inventory-optional-hint">
+                      None: category <strong>{{ selectedProductCategory() }}</strong> has no policies, so stock is kept <strong>by quantity</strong>.
+                    </div>
+                  } @else {
+                    <div class="tbl-wrap">
+                      <table class="erp-table compact">
+                        <thead>
+                          <tr><th>Policy</th><th>Capture Stage</th><th class="text-center">Mandatory</th></tr>
+                        </thead>
+                        <tbody>
+                          @for (p of productCategoryPolicies(); track p.policy_id) {
+                            <tr>
+                              <td>
+                                {{ p.policy_name }}
+                                @if (p.is_unique_identifier) { <span class="erp-badge badge-info" title="Identifies each unit in stock">ID</span> }
+                              </td>
+                              <td>{{ policyStageLabel(p.capture_stage) }}</td>
+                              <td class="text-center">{{ p.is_mandatory ? 'Yes' : 'No' }}</td>
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                    <div class="inventory-optional-hint" style="margin-top:6px;">
+                      @if (productCategoryIdentifier(); as identifier) {
+                        @if (productSerialApplicable()) {
+                          Stock is kept <strong>per unit</strong>, identified by <strong>{{ identifier.policy_name }}</strong>.
+                        } @else {
+                          <span class="text-danger">
+                            This product is still kept <strong>by quantity</strong>: it holds stock without {{ identifier.policy_name }} values.
+                            It follows the category once that stock is sold or adjusted to zero.
+                          </span>
+                        }
+                      } @else {
+                        No Unique Identifier: stock is kept <strong>by quantity</strong>; the values are recorded on the documents.
+                      }
+                    </div>
+                  }
+                  <div class="inventory-optional-hint" style="margin-top:4px;">
+                    To change these, edit the category in <strong>Category Master</strong>.
+                  </div>
+                </div>
               @if (productTrackingRequired()) {
               <div class="inventory-optional-hint">
                 Category can auto-suggest default policies. Select Yes only for product-specific override.
@@ -1173,35 +1221,7 @@
                   </div>
                   }
                 </div>
-                <div class="erp-form-group">
-                  <!-- Previous: <label class="erp-label">Serial Number Applicable @if (categoryRequiresSerialPolicy()) {<span class="text-danger">*</span>}</label> -->
-                  <label class="erp-label">Serial Number Applicable</label>
-                  <label class="inventory-labeled-switch yes-no">
-                    <!-- Previous: <input type="checkbox" [checked]="productSerialApplicable()" (change)="setProductSerialApplicable($any($event.target).checked)" /> -->
-                    <!-- Locked when Serial No comes from the selected category. -->
-                    <input type="checkbox" [checked]="productSerialApplicable()" [disabled]="categoryRequiresSerialPolicy()" (change)="setProductSerialApplicable($any($event.target).checked)" />
-                    <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
-                  </label>
-                  @if (productSerialApplicable()) {
-                  <div class="mt-2">
-                    <label class="erp-label">Serial Number Policy <span class="text-danger">*</span></label>
-                    <div class="inventory-field-with-add">
-                  <ng-select class="erp-ng-select inventory-ng-select" appendTo="body" [items]="serialPolicyOptions" [searchable]="true" [clearable]="true" [ngModel]="formValues()['serialPolicyName'] || null" (ngModelChange)="onSerialPolicyChange($event)" placeholder="Select Serial Policy"></ng-select>
-                      <button type="button" class="erp-btn btn-white btn-icon" title="Add Serial Number Policy" (click)="openAddMaster('Serial Number Policy', 'serialPolicyName')"><i class="pi pi-plus"></i></button>
-                    </div>
-                  </div>
-                  }
-                </div>
-                <!-- UIN Required: from the selected category (read-only), shown when the category binds Serial No. -->
-                @if (productSerialApplicable() && categoryRequiresSerialPolicy() && categoryUinRequired()) {
-                <div class="erp-form-group">
-                  <label class="erp-label">UIN Required</label>
-                  <label class="inventory-labeled-switch yes-no">
-                    <input type="checkbox" [checked]="categoryUinRequired()" disabled />
-                    <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
-                  </label>
-                </div>
-                }
+                
                 <div class="erp-form-group">
                   <label class="erp-label">Expiry Applicable</label>
                   <label class="inventory-labeled-switch yes-no">
@@ -1212,12 +1232,15 @@
                   <div class="mt-2"><label class="erp-label">Expiry Alert Days</label><input class="erp-input" type="number" placeholder="30" /></div>
                   }
                 </div>
-                <div class="erp-form-group">
+                  <div class="erp-form-group">
                   <label class="erp-label">Warranty Applicable</label>
                   <label class="inventory-labeled-switch yes-no">
                     <input type="checkbox" [checked]="productWarrantyApplicable()" (change)="setProductWarrantyApplicable($any($event.target).checked)" />
                     <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
                   </label>
+                  @if (productWarrantyApplicable() && !productCategoryIdentifier()) {
+                    <span class="inventory-variant-attr-hint">Warranty is tracked per unit: the category needs a Unique Identifier (e.g. Serial No.).</span>
+                  }
                 </div>
                 <div class="erp-form-group">
                   <label class="erp-label">QC Required</label>
@@ -1240,7 +1263,7 @@
                    nothing on screen to say how to get them back. -->
               <div class="inventory-optional-hint">
                 <i class="pi pi-info-circle"></i>
-                Serial Number, Batch / Lot, Expiry, Warranty and QC options are part of this section.
+                Batch / Lot, Expiry, Warranty and QC options are part of this section.
                 Set <strong>Tracking Policies</strong> to <strong>Yes</strong> above to add or change them.
               </div>
               }

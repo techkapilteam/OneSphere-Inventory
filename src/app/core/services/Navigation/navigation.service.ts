@@ -87,7 +87,7 @@ export class NavigationService {
                 { id: 'uom-master', name: 'UOM Master', route: '/dashboard/inventory/masters/uom-master', group: 'Product Config' },
                 { id: 'hsn-sac-mapping', name: 'Tax Classification Master', route: '/dashboard/inventory/masters/hsn-sac-mapping', group: 'Product Config' },
                 { id: 'barcode-configuration', name: 'Barcode Configuration', route: '/dashboard/inventory/masters/barcode-configuration', group: 'Product Config' },
-                { id: 'serial-number-policy', name: 'Serial Number Policy', route: '/dashboard/inventory/masters/serial-number-policy', group: 'Product Config' },
+                { id: 'serial-number-policy', name: 'Policy Master', route: '/dashboard/inventory/masters/serial-number-policy', group: 'Product Config' },
                 { id: 'batch-lot-policy', name: 'Batch / Lot Policy', route: '/dashboard/inventory/masters/batch-lot-policy', group: 'Product Config' },
                 { id: 'vendor-master', name: 'Vendor Master', route: '/dashboard/inventory/masters/vendor-master', group: 'Party & Commercial Master' },
                 { id: 'customer-master', name: 'Customer Master', route: '/dashboard/inventory/masters/customer-master', group: 'Party & Commercial Master' },
