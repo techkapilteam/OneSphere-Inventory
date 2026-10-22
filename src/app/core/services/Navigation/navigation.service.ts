@@ -132,7 +132,7 @@ export class NavigationService {
                 { id: 'production-planning', name: 'Production Planning', route: '/dashboard/inventory/transactions/production-planning', group: 'Manufacturing' },
                 { id: 'material-issue-production', name: 'Material Issue for Production', route: '/dashboard/inventory/transactions/material-issue-production', group: 'Manufacturing' },
                 { id: 'production-entry', name: 'Production Entry', route: '/dashboard/inventory/transactions/production-entry', group: 'Manufacturing' },
-                { id: 'uin-registration', name: 'UIN Registration', route: '/dashboard/inventory/transactions/uin-registration', group: 'Manufacturing' },
+                { id: 'uin-registration', name: 'Identifier Registration', route: '/dashboard/inventory/transactions/uin-registration', group: 'Manufacturing' },
                 { id: 'production-return', name: 'Production Return', route: '/dashboard/inventory/transactions/production-return', group: 'Manufacturing' },
                 // Consumption
                 { id: 'material-consumption', name: 'Material Consumption', route: '/dashboard/inventory/transactions/material-consumption', group: 'Consumption', disabled: true },

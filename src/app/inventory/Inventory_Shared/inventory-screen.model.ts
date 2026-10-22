@@ -2314,16 +2314,16 @@ export const productionEntryConfig = transaction(
 
 export const uinRegistrationConfig = transaction(
   'uinRegistration',
-  'UIN Registration',
-  'Register the government UIN for each unit (e.g. drones) before it can be sold',
+  'Identifier Registration',
+  'Register the per-unit values a category needs before sale (UIN, RTO No, ...). A unit with a mandatory registration missing cannot be sold.',
   'pi pi-id-card',
   [
-    { name: 'Category: UIN Required = Yes', status: 'Required' },
-    { name: 'Production Entry (serials)', status: 'Ready' }
+    { name: 'Category policy with stage "Registration before Sale"', status: 'Required' },
+    { name: 'Units with a Unique Identifier (Production Entry / GRN / PI)', status: 'Ready' }
   ],
-  'A unit of a UIN-required category can be sold only after its UIN Number is saved.',
+  'A unit can be sold only after its mandatory registration values are saved.',
   {
-    screenMode: 'UIN registration',
+    screenMode: 'Identifier registration',
     fields: [],
     columns: []
   }

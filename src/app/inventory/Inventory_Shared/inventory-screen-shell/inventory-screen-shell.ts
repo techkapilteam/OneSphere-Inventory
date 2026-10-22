@@ -8,7 +8,7 @@ import { DatePickerModule } from 'primeng/datepicker';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Observable, Subject, catchError, concatMap, debounceTime, distinctUntilChanged, forkJoin, from, map, of, switchMap, tap } from 'rxjs';
 import { ApiResponse, AttributeItem, BomItem, BomLineItem, PriceListItem, WorkCenterItem, AttributeValueItem, BranchInvItem, CategoryItem, ChannelPartnerItem, ContactItem, CustomerItem, GstRateGuide, HsnSacItem, InventoryConfigService, PaymentTermItem, ProductApplicableVariant, ProductBundleItem, ProductItem, ProductTypeItem, ProductUomConversion, ProductVariantStockAttribute, ProductVariantStockControl, SegmentItem, SerialPolicyItem, TaxCodeSuggestion, UomItem, VariantCombinationRow, VariantItem, VendorItem, WarehouseItem } from '../inventory-config.service';
-import { AvailableStock, InventoryTransactionsService, PurchaseRefDoc, ServiceBundleConsumption, TransportDetails,UinRegistrationRow, UinRegistrationSaveItem } from '../inventory-transactions.service';
+import { AvailableStock, InventoryTransactionsService, PurchaseRefDoc, ServiceBundleConsumption, TransportDetails,UinRegistrationRow, UinRegistrationSaveItem, IdentifierRegistrationRow, IdentifierRegistrationSaveItem, RegistrationPolicyOption } from '../inventory-transactions.service';
 import { applyInventoryTextCase, inventoryTextCaseForField, inventoryTextCaseForLineColumn, toInventoryTitleCase } from '../inventory-text-case.util';
 import { InventoryExportService } from '../inventory-export.service';
 import { InvoiceBankDetails, PaymentsService } from '../payments.service';
@@ -121,11 +121,11 @@ export interface BomMaterialLine {
 }
 
 const NO_BOM_LINES: BomMaterialLine[] = [];
-// UIN Registration: what the user typed on a row (not saved yet)
+// Identifier Registration: what the user typed on a row (not saved yet)
 interface UinDraft {
-  uin_number: string;
-  uin_date: string;          // yyyy-MM-dd
-  uin_certificate_no: string;
+  value: string;
+  registration_date: string;   // yyyy-MM-dd
+  reference_no: string;
 }
 type UinField = keyof UinDraft;
 
@@ -1723,8 +1723,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.loadGstGuide();
     }
     // UIN Registration: load the units waiting for a UIN when the screen opens
-    if (this.config?.key === 'uinRegistration') {
-      this.loadUinRegistrations();
+        if (this.config?.key === 'uinRegistration') {
+      this.loadRegistrationPolicies();
     }
   }
 
@@ -5159,22 +5159,30 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return '';
   }
 
-    // ── UIN Registration ──────────────────────────────────────────────────
-  // Units of products whose category has UIN Required = Yes (e.g. drones).
-  // The user types the UIN per serial; only changed rows are saved.
-  // Editable until the unit is sold; the server blocks a sale without UIN.
+    // ── Identifier Registration (Phase 3, migration 267) ─────────────────
+  // Units whose category has a Registration before Sale policy (UIN, RTO
+  // No, ...). The user picks the policy, types the value per unit; only
+  // changed rows are saved. Editable until the unit is sold; the server
+  // blocks a sale while a MANDATORY registration is missing.
 
   readonly uinStatusOptions = [
-    { label: 'Pending (no UIN yet)', value: 'pending' },
+    { label: 'Pending (not registered yet)', value: 'pending' },
     { label: 'Registered', value: 'registered' },
     { label: 'Sold', value: 'sold' },
     { label: 'All', value: 'all' }
   ];
 
+  readonly registrationPolicies = signal<RegistrationPolicyOption[]>([]);
+  readonly registrationPolicyId = signal<number | null>(null);
+  readonly registrationPolicyName = computed(() =>
+    this.registrationPolicies().find(p => p.policy_id === this.registrationPolicyId())?.policy_name || 'Registration');
+  readonly registrationPolicyMandatory = computed(() =>
+    !!this.registrationPolicies().find(p => p.policy_id === this.registrationPolicyId())?.is_mandatory);
+
   readonly uinStatus = signal<string>('pending');
   readonly uinProductFilter = signal<string | null>(null);
   readonly uinSearchText = signal<string>('');
-  readonly uinRows = signal<UinRegistrationRow[]>([]);
+  readonly uinRows = signal<IdentifierRegistrationRow[]>([]);
   readonly uinDrafts = signal<Record<number, UinDraft>>({});
   readonly uinLoading = signal(false);
   readonly uinSaving = signal(false);
@@ -5189,7 +5197,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       (!product || r.product_name === product) &&
       (!text
         || r.serial_no.toLowerCase().includes(text)
-        || (r.uin_number || '').toLowerCase().includes(text)
+        || (r.value || '').toLowerCase().includes(text)
         || (r.source_doc_no || '').toLowerCase().includes(text)));
   });
 
@@ -5198,10 +5206,47 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return this.uinRows().filter(r => this.uinIsChanged(r));
   });
 
-  loadUinRegistrations(): void {
+  // The policies in use (dropdown). Keeps the current choice, else UIN, else the first.
+  loadRegistrationPolicies(): void {
     this.uinLoading.set(true);
     this.saveError.set('');
-    this.txService.getUinRegistrations({ status: this.uinStatus() }).subscribe({
+    this.txService.getRegistrationPolicies().subscribe({
+      next: res => {
+        const policies = res?.data || [];
+        this.registrationPolicies.set(policies);
+        const current = this.registrationPolicyId();
+        const keep = policies.find(p => p.policy_id === current);
+        const uin = policies.find(p => this.normalizeKey(p.policy_name) === 'uin');
+        this.registrationPolicyId.set((keep || uin || policies[0])?.policy_id ?? null);
+        this.loadUinRegistrations();
+      },
+      error: err => {
+        this.uinLoading.set(false);
+        this.saveError.set(this.uinErrorText(err, 'Could not load the registration policies.'));
+      }
+    });
+  }
+
+  setRegistrationPolicy(policyId: number | null): void {
+    if (policyId === this.registrationPolicyId()) return;
+    if (this.uinChangedRows().length && !confirm('You have unsaved changes. Discard them?')) return;
+    this.registrationPolicyId.set(policyId);
+    this.uinProductFilter.set(null);
+    this.saveMsg.set('');
+    this.loadUinRegistrations();
+  }
+
+  loadUinRegistrations(): void {
+    const policyId = this.registrationPolicyId();
+    if (!policyId) {
+      this.uinRows.set([]);
+      this.uinDrafts.set({});
+      this.uinLoading.set(false);
+      return;
+    }
+    this.uinLoading.set(true);
+    this.saveError.set('');
+    this.txService.getIdentifierRegistrations(policyId, { status: this.uinStatus() }).subscribe({
       next: res => {
         this.uinRows.set(res?.data || []);
         this.uinDrafts.set({});
@@ -5216,36 +5261,36 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   setUinStatus(value: string): void {
-    if (this.uinChangedRows().length && !confirm('You have unsaved UIN changes. Discard them?')) return;
+    if (this.uinChangedRows().length && !confirm('You have unsaved changes. Discard them?')) return;
     this.uinStatus.set(value || 'pending');
     this.saveMsg.set('');
     this.loadUinRegistrations();
   }
 
-  uinValue(row: UinRegistrationRow, field: UinField): string {
+  uinValue(row: IdentifierRegistrationRow, field: UinField): string {
     const draft = this.uinDrafts()[row.serial_unit_id];
     return draft ? draft[field] : this.uinSavedValue(row, field);
   }
 
-  setUinValue(row: UinRegistrationRow, field: UinField, value: string): void {
+  setUinValue(row: IdentifierRegistrationRow, field: UinField, value: string): void {
     const current: UinDraft = this.uinDrafts()[row.serial_unit_id] || {
-      uin_number: this.uinSavedValue(row, 'uin_number'),
-      uin_date: this.uinSavedValue(row, 'uin_date'),
-      uin_certificate_no: this.uinSavedValue(row, 'uin_certificate_no')
+      value: this.uinSavedValue(row, 'value'),
+      registration_date: this.uinSavedValue(row, 'registration_date'),
+      reference_no: this.uinSavedValue(row, 'reference_no')
     };
     this.uinDrafts.update(all => ({ ...all, [row.serial_unit_id]: { ...current, [field]: value ?? '' } }));
     this.saveError.set('');
     this.saveMsg.set('');
   }
 
-  uinIsChanged(row: UinRegistrationRow): boolean {
+  uinIsChanged(row: IdentifierRegistrationRow): boolean {
     const draft = this.uinDrafts()[row.serial_unit_id];
     if (!draft) return false;
-    return (['uin_number', 'uin_date', 'uin_certificate_no'] as UinField[])
+    return (['value', 'registration_date', 'reference_no'] as UinField[])
       .some(f => (draft[f] || '').trim() !== this.uinSavedValue(row, f).trim());
   }
 
-  undoUinRow(row: UinRegistrationRow): void {
+  undoUinRow(row: IdentifierRegistrationRow): void {
     this.uinDrafts.update(all => {
       const next = { ...all };
       delete next[row.serial_unit_id];
@@ -5260,64 +5305,67 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   saveUinRegistrations(): void {
+    const policyId = this.registrationPolicyId();
+    const label = this.registrationPolicyName();
     const changed = this.uinChangedRows();
+    if (!policyId) return;
     if (!changed.length) {
-      this.saveError.set('Nothing to save. Type a UIN Number on at least one row.');
+      this.saveError.set(`Nothing to save. Type a ${label} on at least one row.`);
       return;
     }
 
-    const items: UinRegistrationSaveItem[] = [];
+    const items: IdentifierRegistrationSaveItem[] = [];
     const seen = new Map<string, string>();
     for (const row of changed) {
-      const uin = this.uinValue(row, 'uin_number').trim();
-      const date = this.uinValue(row, 'uin_date').trim();
-      const cert = this.uinValue(row, 'uin_certificate_no').trim();
+      const value = this.uinValue(row, 'value').trim();
+      const date = this.uinValue(row, 'registration_date').trim();
+      const ref = this.uinValue(row, 'reference_no').trim();
 
-      if (!uin && (date || cert)) {
-        this.saveError.set(`Serial ${row.serial_no}: enter the UIN Number (UIN Date and Certificate No alone are not enough).`);
+      if (!value && (date || ref)) {
+        this.saveError.set(`Unit ${row.serial_no}: enter the ${label} (Registration Date and Reference No alone are not enough).`);
         return;
       }
-      if (uin) {
-        const key = uin.toUpperCase();
+      if (value && row.is_mandatory) {
+        const key = value.toUpperCase();
         if (seen.has(key)) {
-          this.saveError.set(`UIN Number ${uin} is typed on both ${seen.get(key)} and ${row.serial_no}.`);
+          this.saveError.set(`${label} ${value} is typed on both ${seen.get(key)} and ${row.serial_no}.`);
           return;
         }
         seen.set(key, row.serial_no);
       }
       items.push({
         serial_unit_id: row.serial_unit_id,
-        uin_number: uin || null,
-        uin_date: uin ? (date || null) : null,
-        uin_certificate_no: uin ? (cert || null) : null
+        value: value || null,
+        registration_date: value ? (date || null) : null,
+        reference_no: value ? (ref || null) : null
       });
     }
 
     this.uinSaving.set(true);
     this.saveError.set('');
-    this.txService.saveUinRegistrations(items).subscribe({
+    this.txService.saveIdentifierRegistrations(policyId, items).subscribe({
       next: () => {
         this.uinSaving.set(false);
-        this.saveMsg.set(`UIN saved for ${items.length} serial(s).`);
+        this.saveMsg.set(`${label} saved for ${items.length} unit(s).`);
         this.loadUinRegistrations();
       },
       error: err => {
         this.uinSaving.set(false);
-        this.saveError.set(this.uinErrorText(err, 'Could not save the UIN details.'));
+        this.saveError.set(this.uinErrorText(err, `Could not save the ${label} details.`));
       }
     });
   }
 
-  uinStatusLabel(row: UinRegistrationRow): string {
-    if (row.uin_status === 'sold') return 'Sold';
+  uinStatusLabel(row: IdentifierRegistrationRow): string {
+    if (row.registration_status === 'sold') return 'Sold';
     if (this.uinIsChanged(row)) return 'Changed';
-    return row.uin_status === 'registered' ? 'Registered' : 'Pending';
+    return row.registration_status === 'registered' ? 'Registered' : 'Pending';
   }
 
-  uinStatusClass(row: UinRegistrationRow): string {
-    if (row.uin_status === 'sold') return 'erp-badge';
+  uinStatusClass(row: IdentifierRegistrationRow): string {
+    if (row.registration_status === 'sold') return 'erp-badge';
     if (this.uinIsChanged(row)) return 'erp-badge badge-info';
-    return row.uin_status === 'registered' ? 'erp-badge badge-success' : 'erp-badge badge-warning';
+    return row.registration_status === 'registered' ? 'erp-badge badge-success' : 'erp-badge badge-warning';
   }
 
   uinDateText(value: string | null | undefined): string {
@@ -5327,13 +5375,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
   }
 
-    private uinSavedValue(row: UinRegistrationRow, field: UinField): string {
+  private uinSavedValue(row: IdentifierRegistrationRow, field: UinField): string {
     let raw: string | null | undefined;
-    if (field === 'uin_number') raw = row.uin_number;
-    else if (field === 'uin_date') raw = row.uin_date;
-    else raw = row.uin_certificate_no;
+    if (field === 'value') raw = row.value;
+    else if (field === 'registration_date') raw = row.registration_date;
+    else raw = row.reference_no;
     if (!raw) return '';
-    return field === 'uin_date' ? String(raw).slice(0, 10) : String(raw);
+    return field === 'registration_date' ? String(raw).slice(0, 10) : String(raw);
   }
 
   private uinErrorText(err: any, fallback: string): string {
