@@ -47,9 +47,16 @@ const NUMERIC_CELL =/^-?(rs\.?\s*|₹\s*)?-?[\d,]+(\.\d+)?\s*%?$/i;
 @Injectable({ providedIn: 'root' })
 export class InventoryExportService {
 
-  pdf(document: InventoryExportDocument, mode: 'Pdf' | 'Print'): void {
+  // 'Open': show the PDF in a new browser tab (the browser's own PDF viewer).
+  // If the browser blocks the new tab, the PDF is downloaded instead.
+  // Previous: pdf(document: InventoryExportDocument, mode: 'Pdf' | 'Print'): void {
+  pdf(document: InventoryExportDocument, mode: 'Pdf' | 'Print' | 'Open'): void {
     const doc = this.buildPdf(document);
-    if (mode === 'Pdf') {
+    if (mode === 'Open') {
+      const tab = window.open(String(doc.output('bloburl')), '_blank');
+      if (!tab) doc.save(`${this.fileSafeName(document.fileName || document.title)}.pdf`);
+    } else if (mode === 'Pdf') {
+    // Previous: if (mode === 'Pdf') {
       doc.save(`${this.fileSafeName(document.fileName || document.title)}.pdf`);
     } else {
       this.printDoc(doc);
