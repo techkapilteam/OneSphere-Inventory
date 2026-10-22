@@ -318,6 +318,49 @@ export interface UinRegistrationSaveItem {
   uin_certificate_no: string | null;
 }
 
+
+// Phase 3 (migration 267): Registration before Sale, any policy
+export interface RegistrationPolicyOption {
+  policy_id: number;
+  policy_name: string;
+  policy_code?: string | null;
+  is_mandatory: boolean;
+  categories?: string | null;
+}
+
+export interface IdentifierRegistrationRow {
+  serial_unit_id: number;
+  serial_no: string;
+  identifier_label?: string | null;   // the unit's own ID policy, e.g. "Drone Serial"
+  product_id: number;
+  product_name: string;
+  product_code?: string | null;
+  category_name?: string | null;
+  branch_id?: number | null;
+  branch_name?: string | null;
+  warehouse_id?: number | null;
+  warehouse_name?: string | null;
+  source_doc_type?: string | null;
+  source_doc_no?: string | null;
+  source_doc_date?: string | null;
+  unit_status: string;
+  policy_id: number;
+  policy_name: string;
+  is_mandatory: boolean;
+  value?: string | null;
+  registration_date?: string | null;  // yyyy-MM-dd
+  reference_no?: string | null;
+  registration_status: 'pending' | 'registered' | 'sold' | string;
+  can_edit: boolean;
+}
+
+export interface IdentifierRegistrationSaveItem {
+  serial_unit_id: number;
+  value: string | null;
+  registration_date: string | null;   // yyyy-MM-dd
+  reference_no: string | null;
+}
+
 export interface ProductionReturn {
   id: number;
   return_number: string;
@@ -1610,6 +1653,68 @@ export class InventoryTransactionsService {
       this.http.post<ApiResponse<any>>(this.url('uin-registrations'), this.toApiValue({ items }), { headers: this.headers() }),
       r => r
     );
+  }
+
+    // ── Identifier Registration (Registration before Sale, any policy) ─────────
+  getRegistrationPolicies(): Observable<ApiResponse<RegistrationPolicyOption[]>> {
+    return this.mapArray(
+      this.http.get<ApiResponse<any[]>>(this.url('identifier-registrations/policies'), { headers: this.headers() }),
+      r => ({
+        policy_id: Number(r?.policyId ?? r?.policy_id) || 0,
+        policy_name: r?.policyName ?? r?.policy_name ?? '',
+        policy_code: r?.policyCode ?? r?.policy_code ?? null,
+        is_mandatory: !!(r?.isMandatory ?? r?.is_mandatory),
+        categories: r?.categories ?? null
+      })
+    );
+  }
+
+  getIdentifierRegistrations(policyId: number, filters: { status?: string; branchId?: number | null; warehouseId?: number | null; productId?: number | null; segmentId?: number | null } = {}): Observable<ApiResponse<IdentifierRegistrationRow[]>> {
+    let params = new HttpParams().set('policyId', String(policyId));
+    if (filters.status) params = params.set('status', filters.status);
+    if (filters.branchId) params = params.set('branchId', String(filters.branchId));
+    if (filters.warehouseId) params = params.set('warehouseId', String(filters.warehouseId));
+    if (filters.productId) params = params.set('productId', String(filters.productId));
+    if (filters.segmentId) params = params.set('segmentId', String(filters.segmentId));
+    return this.mapArray(
+      this.http.get<ApiResponse<any[]>>(this.url('identifier-registrations'), { headers: this.headers(), params }),
+      r => this.normIdentifierRegistration(r)
+    );
+  }
+
+  saveIdentifierRegistrations(policyId: number, items: IdentifierRegistrationSaveItem[]): Observable<ApiResponse<any>> {
+    return this.mapItem(
+      this.http.post<ApiResponse<any>>(this.url('identifier-registrations'), this.toApiValue({ policy_id: policyId, items }), { headers: this.headers() }),
+      r => r
+    );
+  }
+
+  private normIdentifierRegistration(r: any): IdentifierRegistrationRow {
+    return {
+      serial_unit_id: Number(r?.serialUnitId ?? r?.serial_unit_id) || 0,
+      serial_no: r?.serialNo ?? r?.serial_no ?? '',
+      identifier_label: r?.identifierLabel ?? r?.identifier_label ?? null,
+      product_id: Number(r?.productId ?? r?.product_id) || 0,
+      product_name: r?.productName ?? r?.product_name ?? '',
+      product_code: r?.productCode ?? r?.product_code ?? null,
+      category_name: r?.categoryName ?? r?.category_name ?? null,
+      branch_id: r?.branchId ?? r?.branch_id ?? null,
+      branch_name: r?.branchName ?? r?.branch_name ?? null,
+      warehouse_id: r?.warehouseId ?? r?.warehouse_id ?? null,
+      warehouse_name: r?.warehouseName ?? r?.warehouse_name ?? null,
+      source_doc_type: r?.sourceDocType ?? r?.source_doc_type ?? null,
+      source_doc_no: r?.sourceDocNo ?? r?.source_doc_no ?? null,
+      source_doc_date: r?.sourceDocDate ?? r?.source_doc_date ?? null,
+      unit_status: r?.unitStatus ?? r?.unit_status ?? 'in_stock',
+      policy_id: Number(r?.policyId ?? r?.policy_id) || 0,
+      policy_name: r?.policyName ?? r?.policy_name ?? '',
+      is_mandatory: !!(r?.isMandatory ?? r?.is_mandatory),
+      value: r?.value ?? null,
+      registration_date: r?.registrationDate ?? r?.registration_date ?? null,
+      reference_no: r?.referenceNo ?? r?.reference_no ?? null,
+      registration_status: r?.registrationStatus ?? r?.registration_status ?? 'pending',
+      can_edit: !!(r?.canEdit ?? r?.can_edit)
+    };
   }
 
   private normUinRegistration(r: any): UinRegistrationRow {
