@@ -20,6 +20,8 @@ export interface InventoryExportDocument {
   summary?: Array<[string, string]>;
   notes?: string;
   notesLabel?: string;
+  /** "Amount in Words :" line printed under the totals (vouchers). */
+  amountInWords?: string;
   /** "Terms & Conditions :" lines printed under the totals (Sales Invoice). */
   terms?: string[];
   /** Bank label/value pairs for the Bank Details | Certified / For <Company> |
@@ -501,6 +503,27 @@ export class InventoryExportService {
       }
     }
 
+    const amountInWords = String(document.amountInWords || '').trim();
+    if (amountInWords) {
+      const label = 'Amount in Words : ';
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      const labelWidth = doc.getTextWidth(label);
+      doc.setFont('helvetica', 'normal');
+      const wordLines = doc.splitTextToSize(amountInWords, pageWidth - L_MARGIN - R_MARGIN - labelWidth) as string[];
+      let wordsY = blockEnd + 6;
+      if (wordsY + wordLines.length * 4 > pageHeight - 15) {
+        doc.addPage();
+        wordsY = 18;
+      }
+      doc.setFont('helvetica', 'bold');
+      doc.text(label, L_MARGIN, wordsY);
+      doc.setFont('helvetica', 'normal');
+      doc.text(wordLines, L_MARGIN + labelWidth, wordsY);
+      blockEnd = wordsY + (wordLines.length - 1) * 4 + 2;
+      y = blockEnd;
+    }
+
     const terms = document.terms || [];
     if (terms.length || document.bankDetails) {
       y = blockEnd + 5;
@@ -647,6 +670,39 @@ export class InventoryExportService {
     iframe.onload = () => iframe.contentWindow?.print();
     iframe.src = String(doc.output('bloburl'));
     document.body.appendChild(iframe);
+  }
+
+  /** Amount in Indian words, rounded to the nearest rupee, e.g. 147956.66 ->
+   *  "Rupees One Lakh Forty Seven Thousand Nine Hundred Fifty Seven Only". */
+  amountInWords(amount: number | undefined): string {
+    const rupees = Math.round(Math.abs(Number(amount || 0)));
+    return `Rupees ${rupees ? this.indianWords(rupees) : 'Zero'} Only`;
+  }
+
+  private indianWords(num: number): string {
+    const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+      'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+    const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+    const belowThousand = (n: number): string => {
+      const parts: string[] = [];
+      if (n >= 100) { parts.push(`${ones[Math.floor(n / 100)]} Hundred`); n %= 100; }
+      if (n >= 20) { parts.push(tens[Math.floor(n / 10)]); n %= 10; }
+      if (n > 0) parts.push(ones[n]);
+      return parts.join(' ');
+    };
+    const parts: string[] = [];
+    const crore = Math.floor(num / 10000000);
+    // Crores above 999 read as "One Thousand Crore" etc.
+    if (crore) parts.push(`${this.indianWords(crore)} Crore`);
+    num %= 10000000;
+    const lakh = Math.floor(num / 100000);
+    if (lakh) parts.push(`${belowThousand(lakh)} Lakh`);
+    num %= 100000;
+    const thousand = Math.floor(num / 1000);
+    if (thousand) parts.push(`${belowThousand(thousand)} Thousand`);
+    num %= 1000;
+    if (num) parts.push(belowThousand(num));
+    return parts.join(' ');
   }
 
   private filledFields(document: InventoryExportDocument): Array<[string, string]> {

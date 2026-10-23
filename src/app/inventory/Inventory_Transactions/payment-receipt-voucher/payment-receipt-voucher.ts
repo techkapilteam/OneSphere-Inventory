@@ -696,7 +696,7 @@ export class PaymentReceiptVoucherComponent {
     if (v.tds_amount) summary.push(['TDS', this.pdfAmt(v.tds_amount)]);
     if (v.tcs_amount) summary.push([`TCS${v.tcs_percentage ? ` (${v.tcs_percentage}%)` : ''}`, this.pdfAmt(v.tcs_amount)]);
     summary.push(['Net Amount', this.pdfAmt(v.net_amount)]);
-    const title = isPay ? 'Payment Voucher' : 'Receipt Voucher';
+    const title = isPay ? 'Payment Voucher' : 'Customer Receipt';
     this.exportService.pdf({
       title,
       fields: [
@@ -712,6 +712,7 @@ export class PaymentReceiptVoucherComponent {
       columns: ['S.No.', 'Particulars', 'Amount'],
       rows,
       summary,
+      amountInWords: this.exportService.amountInWords(v.net_amount),
       // Always print the Narration line, even when none was entered.
       notes: v.narration || '-',
       notesLabel: 'Narration',
