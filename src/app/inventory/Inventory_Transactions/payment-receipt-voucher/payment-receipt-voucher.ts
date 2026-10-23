@@ -130,6 +130,8 @@ export class PaymentReceiptVoucherComponent {
   readonly bankDetailsByBankId = signal<Record<string, { chequeNumbers: PaymentModeOption[]; upiNames: PaymentModeOption[] }>>({});
   private readonly bankDetailsRequested = new Set<string>();
   readonly narration = signal('');
+  // Matches the Accounts payment voucher narration column (varchar(250)).
+  readonly narrationMaxLength = 250;
   readonly tdsSection = signal<string>('');
   // Stored as a local-date 'YYYY-MM-DD' string (what the save API expects).
   // p-datepicker can't parse that string against dateFormat="dd-M-yy" and
@@ -417,8 +419,10 @@ export class PaymentReceiptVoucherComponent {
 
   onPartyChange(partyId: number | null): void {
     this.selectedPartyId.set(partyId);
+    // Drop the previous vendor's invoice numbers from the narration before
+    // its invoice list is cleared.
+    this.setSelectedInvoices(new Set());
     this.outstandingInvoices.set([]);
-    this.selectedInvoiceIds.set(new Set());
     this.allocAmounts.set({});
     this.availableNotes.set([]);
     this.selectedNoteIds.set(new Set());
@@ -464,8 +468,49 @@ export class PaymentReceiptVoucherComponent {
       ids.delete(inv.invoice_id);
       alloc[inv.invoice_id] = 0;
     }
-    this.selectedInvoiceIds.set(ids);
+    this.setSelectedInvoices(ids);
     this.allocAmounts.set(alloc);
+  }
+
+  // Vendor Payment: keep the selected Purchase Invoice numbers bound into
+  // the narration — added on check, removed on uncheck — without touching
+  // any text the user typed around them.
+  private setSelectedInvoices(next: Set<number>): void {
+    if (this.mode() === 'pay') {
+      const prev = this.selectedInvoiceIds();
+      const numberOf = new Map(this.outstandingInvoices().map(i => [i.invoice_id, i.invoice_number]));
+      let text = this.narration();
+      for (const id of prev) {
+        const no = numberOf.get(id);
+        if (no && !next.has(id)) text = this.removeNarrationToken(text, no);
+      }
+      let skipped = 0;
+      for (const id of next) {
+        const no = numberOf.get(id);
+        if (!no || prev.has(id) || this.findNarrationToken(text, no)) continue;
+        const candidate = text.trim() ? `${text.trim()}, ${no}` : no;
+        // Accounts tbl_trans_payment_voucher.narration is varchar(250);
+        // stop binding numbers once the narration would overflow it.
+        if (candidate.length > this.narrationMaxLength) { skipped++; continue; }
+        text = candidate;
+      }
+      this.narration.set(text);
+      if (skipped > 0) {
+        this.saveMsg.set(`Narration limit (${this.narrationMaxLength} characters) reached — ${skipped} invoice number(s) not added to narration.`);
+      }
+    }
+    this.selectedInvoiceIds.set(next);
+  }
+
+  private narrationTokenRegex(no: string): RegExp {
+    const esc = no.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|,\\s*)${esc}(?![\\w/-])`);
+  }
+
+  private findNarrationToken(text: string, no: string): boolean { return this.narrationTokenRegex(no).test(text); }
+
+  private removeNarrationToken(text: string, no: string): string {
+    return text.replace(this.narrationTokenRegex(no), '').replace(/^\s*,\s*/, '').trim();
   }
 
   isSelected(inv: OutstandingInvoice): boolean { return this.selectedInvoiceIds().has(inv.invoice_id); }
@@ -482,7 +527,7 @@ export class PaymentReceiptVoucherComponent {
   fullAlloc(inv: OutstandingInvoice): void {
     const ids = new Set(this.selectedInvoiceIds());
     ids.add(inv.invoice_id);
-    this.selectedInvoiceIds.set(ids);
+    this.setSelectedInvoices(ids);
     this.allocAmounts.update(a => ({ ...a, [inv.invoice_id]: inv.outstanding }));
   }
 
@@ -493,7 +538,7 @@ export class PaymentReceiptVoucherComponent {
       if (on) { ids.add(inv.invoice_id); alloc[inv.invoice_id] = inv.outstanding; }
       else alloc[inv.invoice_id] = 0;
     }
-    this.selectedInvoiceIds.set(ids);
+    this.setSelectedInvoices(ids);
     this.allocAmounts.set(alloc);
   }
 
@@ -528,7 +573,7 @@ export class PaymentReceiptVoucherComponent {
   noteApplyExceeds(note: AvailableNote): boolean { return this.noteApplyFor(note) > note.outstanding + 0.005; }
 
   clearAllocations(): void {
-    this.selectedInvoiceIds.set(new Set());
+    this.setSelectedInvoices(new Set());
     this.allocAmounts.set({});
     this.selectedNoteIds.set(new Set());
     this.noteApplyAmounts.set({});
@@ -558,7 +603,7 @@ export class PaymentReceiptVoucherComponent {
       alloc[inv.invoice_id] = take;
       amt -= take;
     }
-    this.selectedInvoiceIds.set(ids);
+    this.setSelectedInvoices(ids);
     this.allocAmounts.set(alloc);
     this.saveError.set('');
     if (amt > 0.005) this.saveMsg.set(`${this.fmt(amt)} left unallocated after auto-allocating.`);
@@ -783,6 +828,10 @@ export class PaymentReceiptVoucherComponent {
     if (modes.length === 0 && this.referenceTotal() > 0.005) { this.saveError.set('Add at least one ' + (this.mode() === 'pay' ? 'payment' : 'receipt') + ' mode.'); return; }
     if (this.mode() === 'pay' && this.tdsApplicable() && !this.tdsSection()) {
       this.saveError.set('This payment includes a Service invoice — select the applicable TDS section.');
+      return;
+    }
+    if (this.narration().trim().length > this.narrationMaxLength) {
+      this.saveError.set(`Narration cannot exceed ${this.narrationMaxLength} characters — shorten it before saving.`);
       return;
     }
 

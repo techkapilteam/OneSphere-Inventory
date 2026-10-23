@@ -247,6 +247,7 @@
           <div class="erp-form-group span-2">
             <label class="erp-label">Narration / Remarks</label>
             <input class="erp-input" type="text" placeholder="e.g. Part settlement against March supplies"
+              [attr.maxlength]="narrationMaxLength"
               [ngModel]="narration()" (ngModelChange)="narration.set($event)" />
           </div>
           @if (mode() === 'pay' && tdsApplicable()) {
