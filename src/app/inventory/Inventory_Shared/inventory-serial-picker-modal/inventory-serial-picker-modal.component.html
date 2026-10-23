@@ -327,6 +327,7 @@
       <div class="inventory-serial-select-list">
         @for (option of host.serialPickerAvailableOptions(); track option.id) {
         @let isChecked = host.isSerialPickerOptionChecked(option.id);
+        @let blockedReason = host.serialPickerOptionBlockedReason(option);
         <!-- Once the line quantity is covered, the remaining rows are
                      disabled rather than merely refused by the handler. A plain
                      (change) refusal leaves the browser's own tick in place —
@@ -334,12 +335,19 @@
                      never changed — so the list would show more ticks than the
                      quantity allows and Save would silently keep only the first
                      few. Already-ticked rows stay enabled so a selection can
-                     still be swapped. -->
-        <label class="inventory-serial-select-row" [class.inventory-serial-select-row--disabled]="!isChecked && atCap"
-          [title]="!isChecked && atCap ? 'Quantity of ' + picker.qtyNeeded + ' already selected — untick one to choose a different serial number.' : ''">
-          <input type="checkbox" [checked]="isChecked" [disabled]="!isChecked && atCap"
+                     still be swapped. Phase 3: a unit still missing a mandatory
+                     registration (e.g. UIN) is shown disabled with the reason. -->
+        <label class="inventory-serial-select-row"
+          [class.inventory-serial-select-row--disabled]="!isChecked && (atCap || !!blockedReason)"
+          [title]="!isChecked && blockedReason ? blockedReason : (!isChecked && atCap ? 'Quantity of ' + picker.qtyNeeded + ' already selected — untick one to choose a different serial number.' : '')">
+          <input type="checkbox" [checked]="isChecked" [disabled]="!isChecked && (atCap || !!blockedReason)"
             (change)="host.toggleSerialPickerOption(option)" />
           <span>{{ host.serialPickerOptionLabel(option) }}</span>
+          @if (blockedReason && !isChecked) {
+          <small class="text-danger" style="margin-left:8px;">
+            <i class="pi pi-exclamation-triangle"></i> {{ blockedReason }}
+          </small>
+          }
           @if (option.warranty_upto) {
           <!-- The warranty this exact unit already carries from when
                          it was received (migration 237) — read-only here,
