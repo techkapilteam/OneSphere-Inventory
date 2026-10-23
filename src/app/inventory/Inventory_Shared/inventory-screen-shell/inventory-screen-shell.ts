@@ -2001,7 +2001,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   onProductNameChange(value: string): void {
-    const name = toInventoryTitleCase(value ?? '');
+    // Previous: const name = toInventoryTitleCase(value ?? '');
+    const name = value ?? '';
     this.productName.set(name);
     if (!name || !name.trim()) {
       if (this.editingId() !== null || this.editingPendingIndex() !== null) {
@@ -20852,6 +20853,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         this.productName.set(record.product_name || '');
         this.selectedProductCategory.set(record.category_name || '');
         this.hsnSacCode.set(record.hsn_sac_code || '');
+        const savedHsn = this.loadedHsnSacObjects().find(item => this.optionEquals(item.code, record.hsn_sac_code));
+        this.hsnSacDescription.set(savedHsn?.description || '');
         this.gstRate.set(record.gst_rate ?? null);
         this.productBatchApplicable.set(!!record.batch_applicable);
         this.productSerialApplicable.set(!!record.serial_applicable);

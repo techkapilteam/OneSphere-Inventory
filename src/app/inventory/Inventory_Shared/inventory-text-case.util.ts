@@ -49,7 +49,8 @@ export function inventoryTextCaseForLineColumn(column?: string | null): Inventor
   if (/\b(email|e mail|mail id)\b/.test(text)) return 'lower';
   if (/\b(code|sku|hsn|sac|pan|gstin|gst no|gst number|symbol|prefix|serial no|batch no|lot no)\b/.test(text)) return 'upper';
   if (/\b(description|remarks?|notes?|address|purpose|reason|terms)\b/.test(text)) return 'sentence';
-  if (/\b(product|item|service|brand|variant|category|uom|segment|warehouse|branch|location|group|policy|attribute|manufacturer|department|city|district|state|country|name|title|type)\b/.test(text)) return 'title';
+  // Previous: if (/\b(product|item|service|brand|variant|category|uom|segment|warehouse|branch|location|group|policy|attribute|manufacturer|department|city|district|state|country|name|title|type)\b/.test(text)) return 'title';
+  if (/\b(brand|variant|category|uom|segment|warehouse|branch|location|group|policy|attribute|manufacturer|department|city|district|state|country|name|title|type)\b/.test(text)) return 'title';
   return 'none';
 }
 
