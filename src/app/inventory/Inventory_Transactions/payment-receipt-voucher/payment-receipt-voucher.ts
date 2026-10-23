@@ -650,17 +650,26 @@ export class PaymentReceiptVoucherComponent {
     const title = this.mode() === 'pay' ? 'Vendor Payments' : 'Customer Receipts';
     const exportDoc: InventoryExportDocument = {
       title,
-      columns: ['Voucher No', 'Date', this.partyLabel(), 'Allocated', 'TDS', 'TCS', 'Net', 'Status'],
+      columns: ['Voucher No', 'Date', this.partyLabel(), 'Cheque No', 'Allocated', 'TDS', 'TCS', 'Net', 'Narration', 'Status'],
       rows: list.map(v => [
         v.voucher_number || '',
         this.pdfDate(v.voucher_date),
         v.party_name || '',
+        this.chequeDetails(v).numbers || '-',
         this.pdfAmt(v.total_allocated),
         v.tds_amount ? this.pdfAmt(v.tds_amount) : '-',
         v.tcs_amount ? this.pdfAmt(v.tcs_amount) : '-',
         this.pdfAmt(v.net_amount),
+        v.narration || '-',
         v.status ? v.status.charAt(0).toUpperCase() + v.status.slice(1) : ''
       ]),
+      // 10 columns would otherwise auto-switch the export to landscape.
+      orientation: 'portrait',
+      // All 10 widths fixed (sum = 180mm usable A4 portrait) so no-space values
+      // like PAY-SS-26-00005, dates, amounts and 'Cancelled' never break mid-word;
+      // TDS / TCS only hold '-' or a short amount, so they give up the space.
+      pdfColumnWidths: { 0: 27, 1: 18, 2: 28, 3: 14, 4: 19, 5: 10, 6: 10, 7: 19, 8: 20, 9: 15 },
+      pdfHeadFontSize: 8,
       fileName: title
     };
     if (action === 'Excel') this.exportService.excel(exportDoc);
@@ -682,6 +691,7 @@ export class PaymentReceiptVoucherComponent {
     const modes = (v.modes || [])
       .map(m => `${m.ref_json?.['summary'] || m.mode_key} (${this.pdfAmt(m.amount)})`)
       .join(', ');
+    const cheque = this.chequeDetails(v);
     const summary: Array<[string, string]> = [['Total Allocated', this.pdfAmt(v.total_allocated)]];
     if (v.tds_amount) summary.push(['TDS', this.pdfAmt(v.tds_amount)]);
     if (v.tcs_amount) summary.push([`TCS${v.tcs_percentage ? ` (${v.tcs_percentage}%)` : ''}`, this.pdfAmt(v.tcs_amount)]);
@@ -695,18 +705,31 @@ export class PaymentReceiptVoucherComponent {
         [isPay ? 'Paid To' : 'Received From', v.party_name || ''],
         ['GSTIN', v.party_gstin || ''],
         ['Mode of Payment', modes],
+        ['Cheque No', cheque.numbers],
+        ['Cheque Date', cheque.dates],
         ['Status', v.status ? v.status.charAt(0).toUpperCase() + v.status.slice(1) : '']
       ],
       columns: ['S.No.', 'Particulars', 'Amount'],
       rows,
       summary,
-      notes: v.narration || '',
+      // Always print the Narration line, even when none was entered.
+      notes: v.narration || '-',
       notesLabel: 'Narration',
       signatures: ['(Approved By)', '(Verified By)', '(Posted By)'],
       signedBy: this.exportService.userName(),
       orientation: 'portrait',
       fileName: `${title} ${v.voucher_number || ''}`.trim()
     }, action);
+  }
+
+  // Cheque no./date straight from the saved ref_json, so they print even when
+  // the mode's summary text is missing (older vouchers).
+  private chequeDetails(v: PaymentVoucher): { numbers: string; dates: string } {
+    const cheques = (v.modes || []).filter(m => m.mode_key === 'cheque' || m.ref_json?.['bankSubType'] === 'CHEQUE');
+    return {
+      numbers: cheques.map(m => m.ref_json?.['chequeNumber'] || '').filter(Boolean).join(', '),
+      dates: cheques.map(m => this.pdfDate(m.ref_json?.['chequeDate'])).filter(Boolean).join(', ')
+    };
   }
 
   private pdfAmt(n: number | undefined): string {

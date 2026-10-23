@@ -33,6 +33,11 @@ export interface InventoryExportDocument {
   signedBy?: string;
   fileName?: string;
   orientation?: 'portrait' | 'landscape';
+  /** PDF only: fixed width (mm) per column index, for values that can't wrap
+   *  (e.g. voucher numbers with no spaces). Unlisted columns size automatically. */
+  pdfColumnWidths?: Record<number, number>;
+  /** PDF only: table header font size (default 10) — smaller lets wide lists fit portrait. */
+  pdfHeadFontSize?: number;
 }
 
 const HEADER_COLOR = '#0b4093';
@@ -410,6 +415,10 @@ export class InventoryExportService {
         const [l2, v2] = fields[i + 1] || ['', ''];
         fieldRows.push([l1 ? `${l1} :` : '', v1 || '', l2 ? `${l2} :` : '', v2 || '']);
       }
+      // Both value columns get a fixed, equal width; left to auto-size, a long
+      // right-hand value (e.g. Mode of Payment) squeezed the left one until
+      // no-space values like PAY-SS-26-00011 overflowed into the next label.
+      const valueWidth = (pageWidth - L_MARGIN - R_MARGIN - 76) / 2;
       autoTable(doc, {
         body: fieldRows,
         theme: 'plain',
@@ -418,7 +427,9 @@ export class InventoryExportService {
         styles: { fontSize: 9, cellPadding: 0.8, overflow: 'linebreak' },
         columnStyles: {
           0: { fontStyle: 'bold', cellWidth: 38 },
-          2: { fontStyle: 'bold', cellWidth: 38 }
+          1: { cellWidth: valueWidth },
+          2: { fontStyle: 'bold', cellWidth: 38 },
+          3: { cellWidth: valueWidth }
         }
       });
       y = (doc as any).lastAutoTable.finalY + 3;
@@ -432,6 +443,9 @@ export class InventoryExportService {
         columnStyles[index] = { halign: 'center', cellWidth: 12 };
       }
     });
+    Object.entries(document.pdfColumnWidths || {}).forEach(([index, width]) => {
+      columnStyles[+index] = { ...columnStyles[+index], cellWidth: width };
+    });
 
     autoTable(doc, {
       head: [document.columns],
@@ -439,7 +453,7 @@ export class InventoryExportService {
       theme: 'grid',
       startY: y,
       margin: { left: L_MARGIN, right: R_MARGIN, top: 15, bottom: 15 },
-      headStyles: { fillColor: HEADER_COLOR, textColor: 255, halign: 'center', valign: 'middle', fontSize: 10 },
+      headStyles: { fillColor: HEADER_COLOR, textColor: 255, halign: 'center', valign: 'middle', fontSize: document.pdfHeadFontSize || 10 },
       styles: { fontSize: 8, cellPadding: 0.8, overflow: 'linebreak', valign: 'middle' } as any,
       columnStyles,
       rowPageBreak: 'avoid',
@@ -667,6 +681,7 @@ export class InventoryExportService {
     const parts: string[] = [];
     if (company?.cinNumber) parts.push(`CIN : ${company.cinNumber}`);
     if (company?.gstNumber) parts.push(`GST NO : ${company.gstNumber}`);
+    if (company?.panNumber) parts.push(`PAN : ${company.panNumber}`);
     return parts.join('   ');
   }
 
