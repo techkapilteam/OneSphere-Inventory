@@ -632,7 +632,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // and stamped onto the serial unit when the invoice posts.
   readonly serialPickerSaleWarrantyEdits = signal<Record<string, string>>({});
   readonly serialPickerDraftValues = signal<string[]>([]);
-  readonly serialPickerAvailableOptions = signal<{ id: number; serial_no: string; warranty_upto?: string | null; manufacturing_date?: string | null }[]>([]);
+  readonly serialPickerAvailableOptions = signal<{ id: number; serial_no: string; warranty_upto?: string | null; manufacturing_date?: string | null; missing_registration?: string | null }[]>([]);
   // Per-line, per-serial warranty (capture mode only — GRN / Direct PI, the
   // screens that actually create new serial units). Populated by the shared
   // default below unless a specific serial has been individually overridden.
@@ -16174,7 +16174,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return this.serialPickerSelectedIds().has(optionId);
   }
 
-  toggleSerialPickerOption(option: { id: number; serial_no: string }): void {
+  toggleSerialPickerOption(option: { id: number; serial_no: string; missing_registration?: string | null }): void {
     const picker = this.activeSerialPicker();
     if (!picker || picker.mode === 'inherited') return;
     const selected = this.serialPickerSelectedIds();
@@ -16183,11 +16183,22 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       next.delete(option.id);
     } else {
       if (next.size >= picker.qtyNeeded) return;
+      // Phase 3: a unit that still needs a mandatory registration cannot be sold
+      if (this.serialPickerOptionBlockedReason(option)) return;
       next.add(option.id);
     }
     this.serialPickerSelectedIds.set(next);
     const options = this.serialPickerAvailableOptions();
     this.serialPickerDraftValues.set(options.filter(o => next.has(o.id)).map(o => o.serial_no));
+  }
+
+  // Phase 3 (267): on selling screens, a unit with a MANDATORY Registration
+  // before Sale value missing (e.g. UIN) is shown but cannot be selected.
+  // Other screens (returns, issues, transfers) are not affected.
+  serialPickerOptionBlockedReason(option: { missing_registration?: string | null }): string {
+    if (!['salesInvoice', 'deliveryChallan'].includes(this.config?.key || '')) return '';
+    const missing = String(option?.missing_registration || '').trim();
+    return missing ? `${missing} missing — register it in Identifier Registration before selling.` : '';
   }
 
   // Sales Invoice "+" warranty for a unit with no purchase warranty.
