@@ -715,7 +715,11 @@ export class PaymentReceiptVoucherComponent {
       // Always print the Narration line, even when none was entered.
       notes: v.narration || '-',
       notesLabel: 'Narration',
-      signatures: ['(Approved By)', '(Verified By)', '(Posted By)'],
+      // Payment vouchers get a receiver's signature slot. It goes first because
+      // the export prints signedBy above the LAST caption (Posted By).
+      signatures: isPay
+        ? ["(Receiver's Signature)", '(Approved By)', '(Verified By)', '(Posted By)']
+        : ['(Approved By)', '(Verified By)', '(Posted By)'],
       signedBy: this.exportService.userName(),
       orientation: 'portrait',
       fileName: `${title} ${v.voucher_number || ''}`.trim()
