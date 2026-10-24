@@ -130,6 +130,8 @@ export class PaymentReceiptVoucherComponent {
   readonly bankDetailsByBankId = signal<Record<string, { chequeNumbers: PaymentModeOption[]; upiNames: PaymentModeOption[] }>>({});
   private readonly bankDetailsRequested = new Set<string>();
   readonly narration = signal('');
+  // Matches the Accounts payment voucher narration column (varchar(250)).
+  readonly narrationMaxLength = 250;
   readonly tdsSection = signal<string>('');
   // Stored as a local-date 'YYYY-MM-DD' string (what the save API expects).
   // p-datepicker can't parse that string against dateFormat="dd-M-yy" and
@@ -417,8 +419,10 @@ export class PaymentReceiptVoucherComponent {
 
   onPartyChange(partyId: number | null): void {
     this.selectedPartyId.set(partyId);
+    // Drop the previous vendor's invoice numbers from the narration before
+    // its invoice list is cleared.
+    this.setSelectedInvoices(new Set());
     this.outstandingInvoices.set([]);
-    this.selectedInvoiceIds.set(new Set());
     this.allocAmounts.set({});
     this.availableNotes.set([]);
     this.selectedNoteIds.set(new Set());
@@ -464,8 +468,49 @@ export class PaymentReceiptVoucherComponent {
       ids.delete(inv.invoice_id);
       alloc[inv.invoice_id] = 0;
     }
-    this.selectedInvoiceIds.set(ids);
+    this.setSelectedInvoices(ids);
     this.allocAmounts.set(alloc);
+  }
+
+  // Vendor Payment: keep the selected Purchase Invoice numbers bound into
+  // the narration — added on check, removed on uncheck — without touching
+  // any text the user typed around them.
+  private setSelectedInvoices(next: Set<number>): void {
+    if (this.mode() === 'pay') {
+      const prev = this.selectedInvoiceIds();
+      const numberOf = new Map(this.outstandingInvoices().map(i => [i.invoice_id, i.invoice_number]));
+      let text = this.narration();
+      for (const id of prev) {
+        const no = numberOf.get(id);
+        if (no && !next.has(id)) text = this.removeNarrationToken(text, no);
+      }
+      let skipped = 0;
+      for (const id of next) {
+        const no = numberOf.get(id);
+        if (!no || prev.has(id) || this.findNarrationToken(text, no)) continue;
+        const candidate = text.trim() ? `${text.trim()}, ${no}` : no;
+        // Accounts tbl_trans_payment_voucher.narration is varchar(250);
+        // stop binding numbers once the narration would overflow it.
+        if (candidate.length > this.narrationMaxLength) { skipped++; continue; }
+        text = candidate;
+      }
+      this.narration.set(text);
+      if (skipped > 0) {
+        this.saveMsg.set(`Narration limit (${this.narrationMaxLength} characters) reached — ${skipped} invoice number(s) not added to narration.`);
+      }
+    }
+    this.selectedInvoiceIds.set(next);
+  }
+
+  private narrationTokenRegex(no: string): RegExp {
+    const esc = no.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|,\\s*)${esc}(?![\\w/-])`);
+  }
+
+  private findNarrationToken(text: string, no: string): boolean { return this.narrationTokenRegex(no).test(text); }
+
+  private removeNarrationToken(text: string, no: string): string {
+    return text.replace(this.narrationTokenRegex(no), '').replace(/^\s*,\s*/, '').trim();
   }
 
   isSelected(inv: OutstandingInvoice): boolean { return this.selectedInvoiceIds().has(inv.invoice_id); }
@@ -482,7 +527,7 @@ export class PaymentReceiptVoucherComponent {
   fullAlloc(inv: OutstandingInvoice): void {
     const ids = new Set(this.selectedInvoiceIds());
     ids.add(inv.invoice_id);
-    this.selectedInvoiceIds.set(ids);
+    this.setSelectedInvoices(ids);
     this.allocAmounts.update(a => ({ ...a, [inv.invoice_id]: inv.outstanding }));
   }
 
@@ -493,7 +538,7 @@ export class PaymentReceiptVoucherComponent {
       if (on) { ids.add(inv.invoice_id); alloc[inv.invoice_id] = inv.outstanding; }
       else alloc[inv.invoice_id] = 0;
     }
-    this.selectedInvoiceIds.set(ids);
+    this.setSelectedInvoices(ids);
     this.allocAmounts.set(alloc);
   }
 
@@ -528,7 +573,7 @@ export class PaymentReceiptVoucherComponent {
   noteApplyExceeds(note: AvailableNote): boolean { return this.noteApplyFor(note) > note.outstanding + 0.005; }
 
   clearAllocations(): void {
-    this.selectedInvoiceIds.set(new Set());
+    this.setSelectedInvoices(new Set());
     this.allocAmounts.set({});
     this.selectedNoteIds.set(new Set());
     this.noteApplyAmounts.set({});
@@ -558,7 +603,7 @@ export class PaymentReceiptVoucherComponent {
       alloc[inv.invoice_id] = take;
       amt -= take;
     }
-    this.selectedInvoiceIds.set(ids);
+    this.setSelectedInvoices(ids);
     this.allocAmounts.set(alloc);
     this.saveError.set('');
     if (amt > 0.005) this.saveMsg.set(`${this.fmt(amt)} left unallocated after auto-allocating.`);
@@ -650,17 +695,26 @@ export class PaymentReceiptVoucherComponent {
     const title = this.mode() === 'pay' ? 'Vendor Payments' : 'Customer Receipts';
     const exportDoc: InventoryExportDocument = {
       title,
-      columns: ['Voucher No', 'Date', this.partyLabel(), 'Allocated', 'TDS', 'TCS', 'Net', 'Status'],
+      columns: ['Voucher No', 'Date', this.partyLabel(), 'Cheque No', 'Allocated', 'TDS', 'TCS', 'Net', 'Narration', 'Status'],
       rows: list.map(v => [
         v.voucher_number || '',
         this.pdfDate(v.voucher_date),
         v.party_name || '',
+        this.chequeDetails(v).numbers || '-',
         this.pdfAmt(v.total_allocated),
         v.tds_amount ? this.pdfAmt(v.tds_amount) : '-',
         v.tcs_amount ? this.pdfAmt(v.tcs_amount) : '-',
         this.pdfAmt(v.net_amount),
+        v.narration || '-',
         v.status ? v.status.charAt(0).toUpperCase() + v.status.slice(1) : ''
       ]),
+      // 10 columns would otherwise auto-switch the export to landscape.
+      orientation: 'portrait',
+      // All 10 widths fixed (sum = 180mm usable A4 portrait) so no-space values
+      // like PAY-SS-26-00005, dates, amounts and 'Cancelled' never break mid-word;
+      // TDS / TCS only hold '-' or a short amount, so they give up the space.
+      pdfColumnWidths: { 0: 27, 1: 18, 2: 28, 3: 14, 4: 19, 5: 10, 6: 10, 7: 19, 8: 20, 9: 15 },
+      pdfHeadFontSize: 8,
       fileName: title
     };
     if (action === 'Excel') this.exportService.excel(exportDoc);
@@ -682,11 +736,12 @@ export class PaymentReceiptVoucherComponent {
     const modes = (v.modes || [])
       .map(m => `${m.ref_json?.['summary'] || m.mode_key} (${this.pdfAmt(m.amount)})`)
       .join(', ');
+    const cheque = this.chequeDetails(v);
     const summary: Array<[string, string]> = [['Total Allocated', this.pdfAmt(v.total_allocated)]];
     if (v.tds_amount) summary.push(['TDS', this.pdfAmt(v.tds_amount)]);
     if (v.tcs_amount) summary.push([`TCS${v.tcs_percentage ? ` (${v.tcs_percentage}%)` : ''}`, this.pdfAmt(v.tcs_amount)]);
     summary.push(['Net Amount', this.pdfAmt(v.net_amount)]);
-    const title = isPay ? 'Payment Voucher' : 'Receipt Voucher';
+    const title = isPay ? 'Payment Voucher' : 'Customer Receipt';
     this.exportService.pdf({
       title,
       fields: [
@@ -695,18 +750,36 @@ export class PaymentReceiptVoucherComponent {
         [isPay ? 'Paid To' : 'Received From', v.party_name || ''],
         ['GSTIN', v.party_gstin || ''],
         ['Mode of Payment', modes],
+        ['Cheque No', cheque.numbers],
+        ['Cheque Date', cheque.dates],
         ['Status', v.status ? v.status.charAt(0).toUpperCase() + v.status.slice(1) : '']
       ],
       columns: ['S.No.', 'Particulars', 'Amount'],
       rows,
       summary,
-      notes: v.narration || '',
+      amountInWords: this.exportService.amountInWords(v.net_amount),
+      // Always print the Narration line, even when none was entered.
+      notes: v.narration || '-',
       notesLabel: 'Narration',
-      signatures: ['(Approved By)', '(Verified By)', '(Posted By)'],
+      // Payment vouchers get a receiver's signature slot. It goes first because
+      // the export prints signedBy above the LAST caption (Posted By).
+      signatures: isPay
+        ? ["(Receiver's Signature)", '(Approved By)', '(Verified By)', '(Posted By)']
+        : ['(Approved By)', '(Verified By)', '(Posted By)'],
       signedBy: this.exportService.userName(),
       orientation: 'portrait',
       fileName: `${title} ${v.voucher_number || ''}`.trim()
     }, action);
+  }
+
+  // Cheque no./date straight from the saved ref_json, so they print even when
+  // the mode's summary text is missing (older vouchers).
+  private chequeDetails(v: PaymentVoucher): { numbers: string; dates: string } {
+    const cheques = (v.modes || []).filter(m => m.mode_key === 'cheque' || m.ref_json?.['bankSubType'] === 'CHEQUE');
+    return {
+      numbers: cheques.map(m => m.ref_json?.['chequeNumber'] || '').filter(Boolean).join(', '),
+      dates: cheques.map(m => this.pdfDate(m.ref_json?.['chequeDate'])).filter(Boolean).join(', ')
+    };
   }
 
   private pdfAmt(n: number | undefined): string {
@@ -755,6 +828,10 @@ export class PaymentReceiptVoucherComponent {
     if (modes.length === 0 && this.referenceTotal() > 0.005) { this.saveError.set('Add at least one ' + (this.mode() === 'pay' ? 'payment' : 'receipt') + ' mode.'); return; }
     if (this.mode() === 'pay' && this.tdsApplicable() && !this.tdsSection()) {
       this.saveError.set('This payment includes a Service invoice — select the applicable TDS section.');
+      return;
+    }
+    if (this.narration().trim().length > this.narrationMaxLength) {
+      this.saveError.set(`Narration cannot exceed ${this.narrationMaxLength} characters — shorten it before saving.`);
       return;
     }
 

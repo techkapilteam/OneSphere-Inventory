@@ -20,7 +20,7 @@ export interface InventoryExportDocument {
   summary?: Array<[string, string]>;
   notes?: string;
   notesLabel?: string;
-  /** "Total Invoice Amount In Words" printed left of the totals (Purchase Invoice). */
+  /** "Amount in Words :" line printed under the totals (vouchers). */
   amountInWords?: string;
   /** "Terms & Conditions :" lines printed under the totals (Sales Invoice). */
   terms?: string[];
@@ -35,6 +35,11 @@ export interface InventoryExportDocument {
   signedBy?: string;
   fileName?: string;
   orientation?: 'portrait' | 'landscape';
+  /** PDF only: fixed width (mm) per column index, for values that can't wrap
+   *  (e.g. voucher numbers with no spaces). Unlisted columns size automatically. */
+  pdfColumnWidths?: Record<number, number>;
+  /** PDF only: table header font size (default 10) — smaller lets wide lists fit portrait. */
+  pdfHeadFontSize?: number;
 }
 
 const HEADER_COLOR = '#0b4093';
@@ -412,6 +417,10 @@ export class InventoryExportService {
         const [l2, v2] = fields[i + 1] || ['', ''];
         fieldRows.push([l1 ? `${l1} :` : '', v1 || '', l2 ? `${l2} :` : '', v2 || '']);
       }
+      // Both value columns get a fixed, equal width; left to auto-size, a long
+      // right-hand value (e.g. Mode of Payment) squeezed the left one until
+      // no-space values like PAY-SS-26-00011 overflowed into the next label.
+      const valueWidth = (pageWidth - L_MARGIN - R_MARGIN - 76) / 2;
       autoTable(doc, {
         body: fieldRows,
         theme: 'plain',
@@ -420,7 +429,9 @@ export class InventoryExportService {
         styles: { fontSize: 9, cellPadding: 0.8, overflow: 'linebreak' },
         columnStyles: {
           0: { fontStyle: 'bold', cellWidth: 38 },
-          2: { fontStyle: 'bold', cellWidth: 38 }
+          1: { cellWidth: valueWidth },
+          2: { fontStyle: 'bold', cellWidth: 38 },
+          3: { cellWidth: valueWidth }
         }
       });
       y = (doc as any).lastAutoTable.finalY + 3;
@@ -434,6 +445,9 @@ export class InventoryExportService {
         columnStyles[index] = { halign: 'center', cellWidth: 12 };
       }
     });
+    Object.entries(document.pdfColumnWidths || {}).forEach(([index, width]) => {
+      columnStyles[+index] = { ...columnStyles[+index], cellWidth: width };
+    });
 
     autoTable(doc, {
       head: [document.columns],
@@ -441,7 +455,7 @@ export class InventoryExportService {
       theme: 'grid',
       startY: y,
       margin: { left: L_MARGIN, right: R_MARGIN, top: 15, bottom: 15 },
-      headStyles: { fillColor: HEADER_COLOR, textColor: 255, halign: 'center', valign: 'middle', fontSize: 10 },
+      headStyles: { fillColor: HEADER_COLOR, textColor: 255, halign: 'center', valign: 'middle', fontSize: document.pdfHeadFontSize || 10 },
       styles: { fontSize: 8, cellPadding: 0.8, overflow: 'linebreak', valign: 'middle' } as any,
       columnStyles,
       rowPageBreak: 'avoid',
@@ -505,6 +519,27 @@ export class InventoryExportService {
         });
         blockEnd = Math.max(blockEnd, (doc as any).lastAutoTable.finalY);
       }
+    }
+
+    const amountInWords = String(document.amountInWords || '').trim();
+    if (amountInWords) {
+      const label = 'Amount in Words : ';
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      const labelWidth = doc.getTextWidth(label);
+      doc.setFont('helvetica', 'normal');
+      const wordLines = doc.splitTextToSize(amountInWords, pageWidth - L_MARGIN - R_MARGIN - labelWidth) as string[];
+      let wordsY = blockEnd + 6;
+      if (wordsY + wordLines.length * 4 > pageHeight - 15) {
+        doc.addPage();
+        wordsY = 18;
+      }
+      doc.setFont('helvetica', 'bold');
+      doc.text(label, L_MARGIN, wordsY);
+      doc.setFont('helvetica', 'normal');
+      doc.text(wordLines, L_MARGIN + labelWidth, wordsY);
+      blockEnd = wordsY + (wordLines.length - 1) * 4 + 2;
+      y = blockEnd;
     }
 
     const terms = document.terms || [];
@@ -655,6 +690,39 @@ export class InventoryExportService {
     document.body.appendChild(iframe);
   }
 
+  /** Amount in Indian words, rounded to the nearest rupee, e.g. 147956.66 ->
+   *  "Rupees One Lakh Forty Seven Thousand Nine Hundred Fifty Seven Only". */
+  amountInWords(amount: number | undefined): string {
+    const rupees = Math.round(Math.abs(Number(amount || 0)));
+    return `Rupees ${rupees ? this.indianWords(rupees) : 'Zero'} Only`;
+  }
+
+  private indianWords(num: number): string {
+    const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+      'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+    const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+    const belowThousand = (n: number): string => {
+      const parts: string[] = [];
+      if (n >= 100) { parts.push(`${ones[Math.floor(n / 100)]} Hundred`); n %= 100; }
+      if (n >= 20) { parts.push(tens[Math.floor(n / 10)]); n %= 10; }
+      if (n > 0) parts.push(ones[n]);
+      return parts.join(' ');
+    };
+    const parts: string[] = [];
+    const crore = Math.floor(num / 10000000);
+    // Crores above 999 read as "One Thousand Crore" etc.
+    if (crore) parts.push(`${this.indianWords(crore)} Crore`);
+    num %= 10000000;
+    const lakh = Math.floor(num / 100000);
+    if (lakh) parts.push(`${belowThousand(lakh)} Lakh`);
+    num %= 100000;
+    const thousand = Math.floor(num / 1000);
+    if (thousand) parts.push(`${belowThousand(thousand)} Thousand`);
+    num %= 1000;
+    if (num) parts.push(belowThousand(num));
+    return parts.join(' ');
+  }
+
   private filledFields(document: InventoryExportDocument): Array<[string, string]> {
     return (document.fields || [])
       .filter(([label, value]) => !!label && String(value ?? '').trim() !== '')
@@ -687,6 +755,7 @@ export class InventoryExportService {
     const parts: string[] = [];
     if (company?.cinNumber) parts.push(`CIN : ${company.cinNumber}`);
     if (company?.gstNumber) parts.push(`GST NO : ${company.gstNumber}`);
+    if (company?.panNumber) parts.push(`PAN : ${company.panNumber}`);
     return parts.join('   ');
   }
 

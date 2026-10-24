@@ -858,6 +858,9 @@ export interface SerialUnit {
   // (migration 237) — read-only display when selling it, never re-entered.
   manufacturing_date?: string | null;
   warranty_upto?: string | null;
+  // Phase 3 (267): a mandatory Registration before Sale value still missing
+  // (e.g. "UIN"); null = can be sold.
+  missing_registration?: string | null;
 }
 
 export interface SalesReturnItem {
@@ -2392,7 +2395,9 @@ export class InventoryTransactionsService {
         // already fixed on this exact unit when it was received (migration
         // 237) — "warranty should carry at sales by its serial no."
         manufacturing_date: r?.manufacturingDate || r?.manufacturing_date || null,
-        warranty_upto: r?.warrantyUpto || r?.warranty_upto || null
+        warranty_upto: r?.warrantyUpto || r?.warranty_upto || null,
+        missing_registration: r?.missingRegistration ?? r?.missing_registration ?? null
+
       }))
     };
   }
