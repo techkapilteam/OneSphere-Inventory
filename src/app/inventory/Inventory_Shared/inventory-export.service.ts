@@ -24,6 +24,9 @@ export interface InventoryExportDocument {
    *  (invoices, default), or an "Amount in Words :" line under them (vouchers). */
   amountInWords?: string;
   amountInWordsPosition?: 'left' | 'below';
+  /** Copy type printed at the top right, on the title line (Sales Invoice),
+   *  e.g. "Original for Recipient" / "Duplicate for Recipient". */
+  copyType?: string;
   /** "Terms & Conditions :" lines printed under the totals (Sales Invoice). */
   terms?: string[];
   /** Bank label/value pairs for the Bank Details | Certified / For <Company> |
@@ -400,6 +403,11 @@ export class InventoryExportService {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
     doc.text(document.title, centerX, y, { align: 'center' });
+    if (document.copyType) {
+      doc.setFont('helvetica', 'bolditalic');
+      doc.setFontSize(9);
+      doc.text(document.copyType, pageWidth - R_MARGIN, y, { align: 'right' });
+    }
     y += 7;
 
     doc.setFont('helvetica', 'normal');

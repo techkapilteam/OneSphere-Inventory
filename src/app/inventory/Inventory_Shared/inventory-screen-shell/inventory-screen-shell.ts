@@ -70,6 +70,7 @@ interface GridExportPayload {
   notes?: string;
   notesLabel?: string;
   amountInWords?: string;
+  copyType?: string;
   terms?: string[];
   bankDetails?: Array<[string, string]>;
   orientation?: 'portrait' | 'landscape';
@@ -7860,6 +7861,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
 
     if (action === 'print' || action === 'pdf') {
+      // Sales Invoice: the expanded invoice prints with its copy type
+      // (Original / Duplicate for Recipient).
+      if (tableId === 'records' && this.config?.key === 'salesInvoice') {
+        const record = this.segmentFilteredRecords(this.savedRecordObjects())
+          .find(item => Number(item.id) === Number(this.expandedGrnId()));
+        if (record) {
+          this.printSalesInvoiceWithCopyType(record, payload, action === 'pdf' ? 'Pdf' : 'Print');
+          return;
+        }
+      }
       this.printGridPayload(payload, action === 'pdf');
       return;
     }
@@ -8421,6 +8432,35 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.exportService.pdf(this.exportDocument(payload), asPdf ? 'Pdf' : 'Print');
   }
 
+  // Test point 22: a posted Sales Invoice prints "Original for Recipient" the
+  // first time (the PDF that opens on Post) and "Duplicate for Recipient" on
+  // every print after it. The count is kept on the invoice (migration 272) so it
+  // holds across users, refreshes and machines. Drafts, or a failed call, print
+  // without a copy type and are not counted.
+  private printSalesInvoiceWithCopyType(record: any, payload: GridExportPayload, mode: 'Pdf' | 'Print' | 'Open'): void {
+    const output = (copyType?: string) => this.exportService.pdf(this.exportDocument({ ...payload, copyType }), mode);
+    const id = Number(record?.id);
+    const status = this.normalizeKey(record?.status || '');
+    if (!id || (status !== 'posted' && status !== 'paid')) {
+      output();
+      return;
+    }
+    this.txService.markSalesInvoicePrinted(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: res => {
+          const data: any = res?.data;
+          const previous = data?.previousPrintCount ?? data?.previous_print_count;
+          if (previous === null || previous === undefined) {
+            output();
+            return;
+          }
+          output(Number(previous) === 0 ? 'Original for Recipient' : 'Duplicate for Recipient');
+        },
+        error: () => output()
+      });
+  }
+
   private exportDocument(payload: GridExportPayload) {
     return {
       title: payload.title,
@@ -8431,6 +8471,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       notes: payload.notes,
       notesLabel: payload.notesLabel,
       amountInWords: payload.amountInWords,
+      copyType: payload.copyType,
       terms: payload.terms,
       bankDetails: payload.bankDetails,
       orientation: payload.orientation,
@@ -18239,7 +18280,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // Challan keeps the print popup.
     // Previous: this.printGridPayload(payload, false);
     if (kind === 'salesInvoice') {
-      this.exportService.pdf(this.exportDocument(payload), 'Open');
+      // Previous: this.exportService.pdf(this.exportDocument(payload), 'Open');
+      this.printSalesInvoiceWithCopyType(record, payload, 'Open');
     } else {
       this.printGridPayload(payload, false);
     }
