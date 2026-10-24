@@ -26,6 +26,7 @@
     "bootstrap": "^5.3.8",
     "chart.js": "^4.5.1",
     "es-module-shims": "^1.5.12",
+    "exceljs": "^4.4.0",
     "file-saver": "^2.0.5",
     "jspdf": "^2.5.1",
     "jspdf-autotable": "^3.5.28",

@@ -1,6 +1,6 @@
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable, catchError, forkJoin, map, of } from 'rxjs';
+import { Observable, catchError, forkJoin, map, of, switchMap } from 'rxjs';
 import { ApiResponse } from './inventory-config.service';
 import { currentAccessToken } from './inventory-auth-token.util';
 
@@ -96,6 +96,14 @@ export interface PaymentVoucherBankDetails {
   upiNames: PaymentVoucherAccountOption[];
 }
 
+/** Bank block printed at the foot of a Sales Invoice. */
+export interface InvoiceBankDetails {
+  bankName: string;
+  branchName: string;
+  accountNo: string;
+  ifscCode: string;
+}
+
 export interface PaymentVoucher {
   id: number;
   voucher_number: string;
@@ -112,6 +120,9 @@ export interface PaymentVoucher {
   tcs_amount: number;
   tcs_percentage?: number;
   net_amount: number;
+  // Snapshot taken at save time; null on vouchers saved before it existed.
+  previous_balance?: number | null;
+  remaining_due?: number | null;
   narration?: string;
   status: string;
   created_at?: string;
@@ -276,6 +287,8 @@ export class PaymentsService {
       tcs_amount: r?.tcsAmount ?? r?.tcs_amount ?? 0,
       tcs_percentage: r?.tcsPercentage ?? r?.tcs_percentage,
       net_amount: r?.netAmount ?? r?.net_amount ?? 0,
+      previous_balance: r?.previousBalance ?? r?.previous_balance ?? null,
+      remaining_due: r?.remainingDue ?? r?.remaining_due ?? null,
       narration: r?.narration,
       status: r?.status || 'posted',
       created_at: r?.createdAt ?? r?.created_at,
@@ -367,6 +380,38 @@ export class PaymentsService {
         upiNames: this.normUpiOptions(res?.bankupilist ?? res?.bankUpiList)
       })),
       catchError(() => of(empty))
+    );
+  }
+
+  /** Bank printed on the Sales Invoice: the Primary bank of Accounts > Bank
+   *  Configuration (the first active one when none is primary), with bank
+   *  name / branch / account no / IFSC from /Accounts/ViewBankInformation.
+   *  That call needs the Bank Config view permission, so when it fails the
+   *  list row's own branch / account no are used and IFSC stays blank.
+   *  Emits null (never errors) when no bank is configured. */
+  getInvoiceBankDetails(): Observable<InvoiceBankDetails | null> {
+    const params = this.accountsParams();
+    return this.http.get<any>(this.accountsUrl('GetBankntList'), { headers: this.headers(), params }).pipe(
+      map(res => this.normBankOptions(res?.banklist ?? res?.bankList ?? res)),
+      switchMap(banks => {
+        const bank = banks.find(item => item.isPrimary) || banks[0];
+        if (!bank) return of(null);
+        return this.http.get<any>(this.accountsUrl('ViewBankInformation'), {
+          headers: this.headers(), params: params.set('precordid', String(bank.id))
+        }).pipe(
+          catchError(() => of(null)),
+          map(res => {
+            const info = Array.isArray(res) ? res[0] : res;
+            return {
+              bankName: this.readString(info, ['pBankname', 'pbankname']) || bank.label,
+              branchName: this.readString(info, ['pBankbranch', 'pbankbranch']) || bank.branchName || '',
+              accountNo: this.readString(info, ['pAccountnumber', 'paccountnumber']) || bank.accountNumber || '',
+              ifscCode: this.readString(info, ['pIfsccode', 'pifsccode'])
+            };
+          })
+        );
+      }),
+      catchError(() => of(null))
     );
   }
 

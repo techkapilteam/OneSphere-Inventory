@@ -6,6 +6,14 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { BatchPolicyItem, CategoryItem, InventoryConfigService, SerialPolicyItem } from '../inventory-config.service';
 import { applyInventoryTextCase, toInventoryTitleCase } from '../inventory-text-case.util';
 
+// Capture stages (same codes as Category Master / migration 265)
+const QAC_POLICY_STAGES: { code: string; label: string }[] = [
+  { code: 'stock_inward',             label: 'Stock Inward' },
+  { code: 'sales_invoice',            label: 'Sales Invoice' },
+  { code: 'both_inward_sale',         label: 'Both Inward and Sale' },
+  { code: 'registration_before_sale', label: 'Registration before Sale' },
+  { code: 'warranty_registration',    label: 'Warranty Registration' }
+];
 @Component({
   selector: 'app-quick-add-category',
   standalone: true,
@@ -36,6 +44,35 @@ export class QuickAddCategoryComponent implements OnInit {
   batchApplicable = signal(false);
   serialPolicyName = signal<string | null>(null);
   batchPolicyName = signal<string | null>(null);
+    // The category's one policy row (option C): Unique Identifier by default;
+  // when it is not the identifier, the user picks its stage and mandatory flag.
+  policyIsIdentifier = signal(true);
+  policyStage = signal('stock_inward');
+  policyMandatory = signal(true);
+  readonly policyStageLabels = QAC_POLICY_STAGES.map(s => s.label);
+
+  policyStageLabel(code: string): string {
+    return QAC_POLICY_STAGES.find(s => s.code === code)?.label || '';
+  }
+
+  setPolicyStage(label: string | null): void {
+    this.policyStage.set(QAC_POLICY_STAGES.find(s => s.label === label)?.code || 'stock_inward');
+  }
+
+  setPolicyIsIdentifier(on: boolean): void {
+    this.policyIsIdentifier.set(on);
+    if (on) {
+      // The Unique Identifier is always mandatory and captured at Stock Inward
+      this.policyStage.set('stock_inward');
+      this.policyMandatory.set(true);
+    }
+  }
+
+  private resetPolicyRow(): void {
+    this.policyIsIdentifier.set(true);
+    this.policyStage.set('stock_inward');
+    this.policyMandatory.set(true);
+  }
   saving = signal(false);
   error = signal('');
 
@@ -254,11 +291,12 @@ export class QuickAddCategoryComponent implements OnInit {
     this.error.set('');
     this.closeInlineSerialAdd();
     this.closeInlineBatchAdd();
+    this.resetPolicyRow();
   }
 
-  setSerialApplicable(val: boolean): void {
+    setSerialApplicable(val: boolean): void {
     this.serialApplicable.set(val);
-    if (!val) { this.serialPolicyName.set(null); this.closeInlineSerialAdd(); }
+    if (!val) { this.serialPolicyName.set(null); this.resetPolicyRow(); this.closeInlineSerialAdd(); }
   }
 
   setBatchApplicable(val: boolean): void {
@@ -413,8 +451,13 @@ export class QuickAddCategoryComponent implements OnInit {
     }
     const serialPolicy = this.serialApplicable() ? (this.serialPolicyName()?.trim() || null) : null;
     const batchPolicy = this.batchApplicable() ? (this.batchPolicyName()?.trim() || null) : null;
+    // Previous (Serial No. Policy forced on every category):
+    // if (!this.serialApplicable()) {
+    //   this.error.set('Serial No. Policy is mandatory. Set Serial No. Policy Applicable to Yes and select a policy.');
+    //   return;
+    // }
     if (this.serialApplicable() && !serialPolicy) {
-      this.error.set('Select or add a Serial Number Policy.');
+      this.error.set('Select or add a policy, or set Policy Applicable to No.');
       return;
     }
     if (this.batchApplicable() && !batchPolicy) {
@@ -430,14 +473,26 @@ export class QuickAddCategoryComponent implements OnInit {
       this.error.set('Category code already exists. Change the code or select the existing category.');
       return;
     }
+        // Policies (migration 265): one row from the popup; more rows in Category Master.
+    const isIdentifier = this.policyIsIdentifier();
+    const policyId = this.serialApplicable() ? this.serialPolicyId(serialPolicy) : null;
     const payload: CategoryItem = {
       id: 0,
+      segment_id: this.segmentId ?? undefined,
       category_code: code,
       category_name: name,
       description: this.catDescription().trim(),
-      serial_applicable: this.serialApplicable(),
-      serial_policy_id: this.serialApplicable() ? this.serialPolicyId(serialPolicy) : null,
-      serial_policy_name: serialPolicy,
+      policy_applicable: this.serialApplicable(),
+      policies: this.serialApplicable() && serialPolicy
+        ? [{
+            policy_id: policyId,
+            policy_name: serialPolicy,
+            capture_stage: isIdentifier ? 'stock_inward' : this.policyStage(),
+            is_mandatory: isIdentifier ? true : this.policyMandatory(),
+            is_unique_identifier: isIdentifier,
+            display_order: 1
+          }]
+        : [],
       batch_applicable: this.batchApplicable(),
       batch_policy_id: this.batchApplicable() ? this.batchPolicyId(batchPolicy) : null,
       batch_policy_name: batchPolicy,
@@ -461,12 +516,14 @@ export class QuickAddCategoryComponent implements OnInit {
         this.saving.set(false);
         if (res.success && res.data) {
           this.saved.emit(res.data);
+          this.clearCategoryForm();
         } else if (res.success) {
-          this.saved.emit({
+            this.saved.emit({
             id: 0, category_code: code, category_name: name,
             description: this.catDescription().trim(),
-            serial_applicable: this.serialApplicable(),
-            serial_policy_name: serialPolicy,
+            policy_applicable: this.serialApplicable(),
+            serial_applicable: this.serialApplicable() && this.policyIsIdentifier(),
+            serial_policy_name: this.policyIsIdentifier() ? serialPolicy : null,
             batch_applicable: this.batchApplicable(),
             batch_policy_name: batchPolicy,
             status: this.catStatus().toLowerCase()

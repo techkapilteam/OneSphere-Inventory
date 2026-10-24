@@ -3706,13 +3706,9 @@ input[type='date'].erp-input {
   .erp-btn:has(.pi-file-pdf),
   .erp-btn:has(.pi-file-excel),
   .erp-btn:has(.pi-download),
-  .erp-btn:has(.pi-envelope),
-  .erp-btn:has(.pi-whatsapp),
   .icon-action:has(.pi-print),
   .icon-action:has(.pi-file-pdf),
-  .icon-action:has(.pi-file-excel),
-  .icon-action:has(.pi-envelope),
-  .icon-action:has(.pi-whatsapp) {
+  .icon-action:has(.pi-file-excel) {
     width: 34px;
     min-width: 34px;
     height: 32px;
@@ -3736,8 +3732,6 @@ input[type='date'].erp-input {
   :has(.pi-file-pdf) { order: 2; }
   :has(.pi-file-excel),
   :has(.pi-download) { order: 3; }
-  :has(.pi-envelope) { order: 4; }
-  :has(.pi-whatsapp) { order: 5; }
 }
 
 /* Table wrapper */
@@ -9128,8 +9122,20 @@ body .p-connected-overlay {
   }
 
   &.inventory-generic-report-page .inventory-report-header-top-filters {
-    grid-template-columns: minmax(178px, max-content) minmax(258px, max-content);
+    // Previous: grid-template-columns: minmax(178px, max-content) minmax(258px, max-content);
+    // Two more columns: the date filter(s) moved up next to Branch / Warehouse.
+    grid-template-columns: minmax(178px, max-content) minmax(258px, max-content) repeat(2, max-content);
     justify-content: flex-start;
+  }
+
+  // Date filters in the top row keep their own widths: range box 230px,
+  // Stock Summary's single From / To pickers 154px each.
+  .inventory-report-header-top-filters .inventory-report-filter.inventory-report-filter--date {
+    width: 230px;
+  }
+
+  .inventory-report-header-top-filters .inventory-report-filter--date.inventory-report-filter--date-single {
+    width: 154px;
   }
 
   .inventory-report-header-top-filters .inventory-report-filter,
@@ -9151,6 +9157,12 @@ body .p-connected-overlay {
 
   .inventory-report-header-controls .inventory-report-filter--date {
     flex-basis: 230px;
+  }
+
+  // Stock Summary: separate From Date / To Date pickers each hold one date,
+  // so they take the normal filter width instead of the wider range box.
+  .inventory-report-header-controls .inventory-report-filter--date.inventory-report-filter--date-single {
+    flex-basis: 154px;
   }
 
   .inventory-report-header-controls .inventory-report-filter--group {
@@ -11451,7 +11463,7 @@ body .p-connected-overlay {
 // Accounts shell (only the host's global styles.scss applies at runtime) --
 // this rule is mirrored byte-for-byte in OneSphere-Accounts/src/styles.scss.
 .grn-grid-compact.inventory-line-items .erp-table.compact td.inventory-line-col-product {
-  vertical-align: middle;
+  vertical-align: top;
 }
 
 .grn-grid-compact.inventory-line-items .erp-table.compact th.inventory-line-col-qty,
@@ -13284,7 +13296,11 @@ body .ng-dropdown-panel.ap-switch-ng-select .ng-option.ng-option-selected::after
   position: sticky;
   top: 68px; // sits flush under .breadcrumb-bar (main-layout.component.scss), which is sticky at top: 0
   z-index: 150; // above form content, below .breadcrumb-bar (z-index 200)
-  margin: -20px 0 14px; // tightens the gap under the Business Segment bar above it
+  // -14px exactly cancels .product-segment-bar's 14px margin-bottom, so the tab bar
+  // sits flush under the segment bar instead of overlapping its bottom border
+  // (-20px pulled it 6px into the box). It also keeps the pinned/unpinned layout
+  // the same height, since the JS pin swaps this bar for a spacer with margin 0.
+  margin: -14px 0 14px;
   padding: 10px 0;
   background: var(--page-bg, #fff);
   border-bottom: 1px solid rgba(15, 23, 42, 0.06);
@@ -15014,4 +15030,13 @@ body .ng-dropdown-panel.ap-switch-ng-select .ng-option.ng-option-selected::after
     opacity: 0.65;
     pointer-events: none;
   }
+}
+
+// Transaction records grid: Edit/Delete stay visible on Posted/Cancelled rows
+// but are disabled (Draft rows only) -- grey them out so they read as locked.
+// Same rule as OneSphere-Accounts/src/styles.scss (the host that applies when
+// Inventory is loaded inside Accounts); kept here for standalone runs.
+.inventory-row-actions .erp-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }

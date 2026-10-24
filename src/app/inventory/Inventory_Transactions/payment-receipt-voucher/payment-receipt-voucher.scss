@@ -71,9 +71,18 @@
     white-space: nowrap;
   }
 
+  // Rendered as a <div>, not a <span>: the global
+  // `.inventory-kpi-card span:not(.inventory-card-icon)` rule forces spans to
+  // display:block + grey text, which pushed the badge text to the top of the pill.
   .erp-badge {
     justify-self: start;
   }
+}
+
+// The page-level summary has only three cards and the full page width, so it
+// sits on a single row instead of the drawer's two columns.
+.pay-kpi-grid.pay-kpi-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 // Outstanding is the figure the whole panel exists to answer, so it reads first.
@@ -85,7 +94,8 @@
 }
 
 @media (max-width: 560px) {
-  .pay-kpi-grid {
+  .pay-kpi-grid,
+  .pay-kpi-grid.pay-kpi-row {
     grid-template-columns: minmax(0, 1fr);
   }
 }
@@ -199,6 +209,12 @@
   margin-bottom: 0;
 }
 
+.pay-mode-party {
+  width: 260px;
+  flex: 0 0 auto;
+  margin-bottom: 0;
+}
+
 .pay-mode-summary {
   flex: 1 1 auto;
   font-size: 12.5px;
@@ -246,6 +262,14 @@
 
 .pay-ok { color: #047857; font-weight: 600; }
 .pay-warn { color: #b91c1c; font-weight: 600; }
+.pay-muted { color: #94a3b8; }
+
+// Per-customer breakdown when Customer Receipt has several customers selected.
+.pay-party-totals .pay-mode-total {
+  margin-top: 6px;
+  padding-top: 6px;
+  font-size: 12.5px;
+}
 
 // ── Sticky footer ────────────────────────────────────────────────────────────
 .pay-footer {
@@ -312,11 +336,13 @@
 }
 
 // ── Drawer ───────────────────────────────────────────────────────────────────
+// Must sit above the layout's top-navbar (500) and sticky breadcrumb-bar (200),
+// otherwise they cover the drawer header (invoice no. + close button).
 .pay-overlay {
   position: fixed;
   inset: 0;
   background: rgba(15, 23, 42, .45);
-  z-index: 80;
+  z-index: 1000;
 }
 
 .pay-drawer {
@@ -326,7 +352,7 @@
   width: min(560px, 96vw);
   height: 100%;
   background: #fff;
-  z-index: 90;
+  z-index: 1001;
   display: flex;
   flex-direction: column;
   box-shadow: -12px 0 40px rgba(16, 24, 40, .25);
@@ -424,6 +450,6 @@
 
 @media (max-width: 900px) {
   .pay-mode-row-head { flex-wrap: wrap; }
-  .pay-mode-amount { width: 100%; }
+  .pay-mode-amount, .pay-mode-party { width: 100%; }
   .pay-footer-in { gap: 14px; }
 }

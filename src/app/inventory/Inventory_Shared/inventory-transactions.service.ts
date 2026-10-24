@@ -134,6 +134,9 @@ export interface GrnItem {
   batch_no?: string;
   serial_no?: string;
   serial_numbers?: string[] | null;
+  serial_warranty?: any | null;
+  serial_identifiers?: any[] | null;
+  line_identifiers?: any[] | null;
   expiry_date?: string;
   remarks?: string;
 }
@@ -224,6 +227,9 @@ export interface ProductionPlan {
   remarks?: string;
   status: string;
   created_at?: string;
+  producible_qty?: number;
+  produced_so_far?: number;
+  material_cost_per_unit?: number;
   items: ManufacturingMaterialItem[];
 }
 
@@ -254,6 +260,8 @@ export interface ProductionEntryItem extends ManufacturingMaterialItem {
   rejected_qty?: number;
   wastage_qty?: number;
   production_cost?: number;
+  serial_identifiers?: any[] | null;
+  line_identifiers?: any[] | null;
 }
 
 export interface ProductionEntry {
@@ -279,6 +287,78 @@ export interface ProductionEntry {
   status: string;
   created_at?: string;
   items: ProductionEntryItem[];
+}
+
+// UIN Registration (migration 263): one row per serial of a UIN-required product
+export interface UinRegistrationRow {
+  serial_unit_id: number;
+  serial_no: string;
+  product_id: number;
+  product_name: string;
+  product_code?: string | null;
+  category_name?: string | null;
+  branch_id?: number | null;
+  branch_name?: string | null;
+  warehouse_id?: number | null;
+  warehouse_name?: string | null;
+  source_doc_no?: string | null;      // Production Entry number
+  source_doc_date?: string | null;
+  unit_status: string;                // in_stock | reserved | returned | sold
+  uin_number?: string | null;
+  uin_date?: string | null;           // yyyy-MM-dd
+  uin_certificate_no?: string | null;
+  uin_status: 'pending' | 'registered' | 'sold' | string;
+  can_edit: boolean;
+}
+
+export interface UinRegistrationSaveItem {
+  serial_unit_id: number;
+  uin_number: string | null;
+  uin_date: string | null;            // yyyy-MM-dd
+  uin_certificate_no: string | null;
+}
+
+
+// Phase 3 (migration 267): Registration before Sale, any policy
+export interface RegistrationPolicyOption {
+  policy_id: number;
+  policy_name: string;
+  policy_code?: string | null;
+  is_mandatory: boolean;
+  categories?: string | null;
+}
+
+export interface IdentifierRegistrationRow {
+  serial_unit_id: number;
+  serial_no: string;
+  identifier_label?: string | null;   // the unit's own ID policy, e.g. "Drone Serial"
+  product_id: number;
+  product_name: string;
+  product_code?: string | null;
+  category_name?: string | null;
+  branch_id?: number | null;
+  branch_name?: string | null;
+  warehouse_id?: number | null;
+  warehouse_name?: string | null;
+  source_doc_type?: string | null;
+  source_doc_no?: string | null;
+  source_doc_date?: string | null;
+  unit_status: string;
+  policy_id: number;
+  policy_name: string;
+  is_mandatory: boolean;
+  value?: string | null;
+  registration_date?: string | null;  // yyyy-MM-dd
+  reference_no?: string | null;
+  registration_status: 'pending' | 'registered' | 'sold' | string;
+  can_edit: boolean;
+}
+
+export interface IdentifierRegistrationSaveItem {
+  serial_unit_id: number;
+  value: string | null;
+  registration_date: string | null;   // yyyy-MM-dd
+  reference_no: string | null;
 }
 
 export interface ProductionReturn {
@@ -475,6 +555,9 @@ export interface PiItem {
   batch_no?: string;
   serial_no?: string;
   serial_numbers?: string[] | null;
+  serial_warranty?: any | null;          // per-serial warranty (migration 237)
+  serial_identifiers?: any[] | null;     // Phase 2: policy values per unit
+  line_identifiers?: any[] | null;   
   expiry_date?: string;
   amount: number;
   remarks?: string;
@@ -775,6 +858,9 @@ export interface SerialUnit {
   // (migration 237) — read-only display when selling it, never re-entered.
   manufacturing_date?: string | null;
   warranty_upto?: string | null;
+  // Phase 3 (267): a mandatory Registration before Sale value still missing
+  // (e.g. "UIN"); null = can be sold.
+  missing_registration?: string | null;
 }
 
 export interface SalesReturnItem {
@@ -1071,6 +1157,10 @@ export class InventoryTransactionsService {
       planned_qty: Number(r?.plannedQty ?? r?.planned_qty ?? 0),
       bom_version: r?.bomVersion || r?.bom_version,
       work_center: r?.workCenter || r?.work_center,
+            // From 262: what the issued material can still make, and its real cost per unit
+      producible_qty: Number(r?.producible_qty ?? r?.producibleQty ?? 0) || 0,
+      produced_so_far: Number(r?.produced_so_far ?? r?.producedSoFar ?? 0) || 0,
+      material_cost_per_unit: Number(r?.material_cost_per_unit ?? r?.materialCostPerUnit ?? 0) || 0,
       branch_id: r?.branchId ?? r?.branch_id,
       branch_name: r?.branchName || r?.branch_name,
       warehouse_id: r?.warehouseId ?? r?.warehouse_id,
@@ -1134,7 +1224,10 @@ export class InventoryTransactionsService {
         produced_qty: Number(i?.producedQty ?? i?.produced_qty ?? 0),
         rejected_qty: Number(i?.rejectedQty ?? i?.rejected_qty ?? 0),
         wastage_qty: Number(i?.wastageQty ?? i?.wastage_qty ?? 0),
-        production_cost: Number(i?.productionCost ?? i?.production_cost ?? 0)
+        production_cost: Number(i?.productionCost ?? i?.production_cost ?? 0),
+        // Phase 2: policy values of the produced units
+        serial_identifiers: i?.serialIdentifiers ?? i?.serial_identifiers ?? null,
+        line_identifiers: i?.lineIdentifiers ?? i?.line_identifiers ?? null
       }))
     };
   }
@@ -1319,6 +1412,9 @@ export class InventoryTransactionsService {
         amount: Number(i.amount || 0),
         batch_no: i.batchNo || i.batch_no, serial_no: i.serialNo || i.serial_no,
         serial_numbers: i.serialNumbers ?? i.serial_numbers ?? null,
+        serial_warranty: i.serialWarranty ?? i.serial_warranty ?? null,
+        serial_identifiers: i.serialIdentifiers ?? i.serial_identifiers ?? null,
+        line_identifiers: i.lineIdentifiers ?? i.line_identifiers ?? null,
         expiry_date: i.expiryDate || i.expiry_date, remarks: i.remarks
       }))
     };
@@ -1369,6 +1465,9 @@ export class InventoryTransactionsService {
         batch_no: i.batchNo || i.batch_no,
         serial_no: i.serialNo || i.serial_no,
         serial_numbers: i.serialNumbers ?? i.serial_numbers ?? null,
+        serial_warranty: i.serialWarranty ?? i.serial_warranty ?? null,
+        serial_identifiers: i.serialIdentifiers ?? i.serial_identifiers ?? null,
+        line_identifiers: i.lineIdentifiers ?? i.line_identifiers ?? null,
         expiry_date: i.expiryDate || i.expiry_date,
         amount: Number(i.amount || 0), remarks: i.remarks
       }))
@@ -1536,6 +1635,113 @@ export class InventoryTransactionsService {
         : this.http.post<ApiResponse<any>>(this.url('production-entries'), body, { headers: h }),
       r => this.normProductionEntry(r)
     );
+  }
+
+    // ── UIN Registration ─────────────────────────────────────────────────────
+  getUinRegistrations(filters: { status?: string; branchId?: number | null; warehouseId?: number | null; productId?: number | null; segmentId?: number | null } = {}): Observable<ApiResponse<UinRegistrationRow[]>> {
+    let params = new HttpParams();
+    if (filters.status) params = params.set('status', filters.status);
+    if (filters.branchId) params = params.set('branchId', String(filters.branchId));
+    if (filters.warehouseId) params = params.set('warehouseId', String(filters.warehouseId));
+    if (filters.productId) params = params.set('productId', String(filters.productId));
+    if (filters.segmentId) params = params.set('segmentId', String(filters.segmentId));
+    return this.mapArray(
+      this.http.get<ApiResponse<any[]>>(this.url('uin-registrations'), { headers: this.headers(), params }),
+      r => this.normUinRegistration(r)
+    );
+  }
+
+  saveUinRegistrations(items: UinRegistrationSaveItem[]): Observable<ApiResponse<any>> {
+    return this.mapItem(
+      this.http.post<ApiResponse<any>>(this.url('uin-registrations'), this.toApiValue({ items }), { headers: this.headers() }),
+      r => r
+    );
+  }
+
+    // ── Identifier Registration (Registration before Sale, any policy) ─────────
+  getRegistrationPolicies(): Observable<ApiResponse<RegistrationPolicyOption[]>> {
+    return this.mapArray(
+      this.http.get<ApiResponse<any[]>>(this.url('identifier-registrations/policies'), { headers: this.headers() }),
+      r => ({
+        policy_id: Number(r?.policyId ?? r?.policy_id) || 0,
+        policy_name: r?.policyName ?? r?.policy_name ?? '',
+        policy_code: r?.policyCode ?? r?.policy_code ?? null,
+        is_mandatory: !!(r?.isMandatory ?? r?.is_mandatory),
+        categories: r?.categories ?? null
+      })
+    );
+  }
+
+  getIdentifierRegistrations(policyId: number, filters: { status?: string; branchId?: number | null; warehouseId?: number | null; productId?: number | null; segmentId?: number | null } = {}): Observable<ApiResponse<IdentifierRegistrationRow[]>> {
+    let params = new HttpParams().set('policyId', String(policyId));
+    if (filters.status) params = params.set('status', filters.status);
+    if (filters.branchId) params = params.set('branchId', String(filters.branchId));
+    if (filters.warehouseId) params = params.set('warehouseId', String(filters.warehouseId));
+    if (filters.productId) params = params.set('productId', String(filters.productId));
+    if (filters.segmentId) params = params.set('segmentId', String(filters.segmentId));
+    return this.mapArray(
+      this.http.get<ApiResponse<any[]>>(this.url('identifier-registrations'), { headers: this.headers(), params }),
+      r => this.normIdentifierRegistration(r)
+    );
+  }
+
+  saveIdentifierRegistrations(policyId: number, items: IdentifierRegistrationSaveItem[]): Observable<ApiResponse<any>> {
+    return this.mapItem(
+      this.http.post<ApiResponse<any>>(this.url('identifier-registrations'), this.toApiValue({ policy_id: policyId, items }), { headers: this.headers() }),
+      r => r
+    );
+  }
+
+  private normIdentifierRegistration(r: any): IdentifierRegistrationRow {
+    return {
+      serial_unit_id: Number(r?.serialUnitId ?? r?.serial_unit_id) || 0,
+      serial_no: r?.serialNo ?? r?.serial_no ?? '',
+      identifier_label: r?.identifierLabel ?? r?.identifier_label ?? null,
+      product_id: Number(r?.productId ?? r?.product_id) || 0,
+      product_name: r?.productName ?? r?.product_name ?? '',
+      product_code: r?.productCode ?? r?.product_code ?? null,
+      category_name: r?.categoryName ?? r?.category_name ?? null,
+      branch_id: r?.branchId ?? r?.branch_id ?? null,
+      branch_name: r?.branchName ?? r?.branch_name ?? null,
+      warehouse_id: r?.warehouseId ?? r?.warehouse_id ?? null,
+      warehouse_name: r?.warehouseName ?? r?.warehouse_name ?? null,
+      source_doc_type: r?.sourceDocType ?? r?.source_doc_type ?? null,
+      source_doc_no: r?.sourceDocNo ?? r?.source_doc_no ?? null,
+      source_doc_date: r?.sourceDocDate ?? r?.source_doc_date ?? null,
+      unit_status: r?.unitStatus ?? r?.unit_status ?? 'in_stock',
+      policy_id: Number(r?.policyId ?? r?.policy_id) || 0,
+      policy_name: r?.policyName ?? r?.policy_name ?? '',
+      is_mandatory: !!(r?.isMandatory ?? r?.is_mandatory),
+      value: r?.value ?? null,
+      registration_date: r?.registrationDate ?? r?.registration_date ?? null,
+      reference_no: r?.referenceNo ?? r?.reference_no ?? null,
+      registration_status: r?.registrationStatus ?? r?.registration_status ?? 'pending',
+      can_edit: !!(r?.canEdit ?? r?.can_edit)
+    };
+  }
+
+  private normUinRegistration(r: any): UinRegistrationRow {
+    const pick = (snake: string, camel: string) => r?.[snake] ?? r?.[camel] ?? null;
+    return {
+      serial_unit_id: Number(pick('serial_unit_id', 'serialUnitId')),
+      serial_no: pick('serial_no', 'serialNo') || '',
+      product_id: Number(pick('product_id', 'productId')),
+      product_name: pick('product_name', 'productName') || '',
+      product_code: pick('product_code', 'productCode'),
+      category_name: pick('category_name', 'categoryName'),
+      branch_id: pick('branch_id', 'branchId'),
+      branch_name: pick('branch_name', 'branchName'),
+      warehouse_id: pick('warehouse_id', 'warehouseId'),
+      warehouse_name: pick('warehouse_name', 'warehouseName'),
+      source_doc_no: pick('source_doc_no', 'sourceDocNo'),
+      source_doc_date: pick('source_doc_date', 'sourceDocDate'),
+      unit_status: pick('unit_status', 'unitStatus') || 'in_stock',
+      uin_number: pick('uin_number', 'uinNumber'),
+      uin_date: pick('uin_date', 'uinDate'),
+      uin_certificate_no: pick('uin_certificate_no', 'uinCertificateNo'),
+      uin_status: pick('uin_status', 'uinStatus') || 'pending',
+      can_edit: !!pick('can_edit', 'canEdit')
+    };
   }
 
   getProductionReturns(status?: string, segmentId?: number | null): Observable<ApiResponse<ProductionReturn[]>> {
@@ -1820,9 +2026,21 @@ export class InventoryTransactionsService {
       customer_gstin: r?.customerGstin || r?.customer_gstin,
       channel_partner_id: r?.channelPartnerId ?? r?.channel_partner_id,
       channel_partner_name: r?.channelPartnerName || r?.channel_partner_name,
+      // Lead By (Sales Invoice, migration 253).
+      lead_by_contact_id: r?.leadByContactId ?? r?.lead_by_contact_id,
+      lead_by_name: r?.leadByName || r?.lead_by_name,
+      // Delivery / Ship address (Sales Invoice, migration 257).
+      delivery_address: r?.deliveryAddress || r?.delivery_address,
+      ship_address: r?.shipAddress || r?.ship_address,
       place_of_supply: r?.placeOfSupply || r?.place_of_supply,
       warehouse_id: r?.warehouseId ?? r?.warehouse_id,
       warehouse_name: r?.warehouseName || r?.warehouse_name, payment_terms: r?.paymentTerms || r?.payment_terms,
+      // Branch (migration 161): a Branch pick on the merged Warehouse/Branch
+      // field saves here with warehouse_* NULL. Without these the edit form's
+      // `warehouse_name || branch_name` fallback reopened the field empty and
+      // the next save wrote both location ids back out as NULL.
+      branch_id: r?.branchId ?? r?.branch_id,
+      branch_name: r?.branchName || r?.branch_name,
       remarks: r?.remarks, status: r?.status || 'draft', created_at: r?.createdAt || r?.created_at,
       items: (r?.items || []).map((i: any) => ({
         ...this.normSalesItem(i),
@@ -1849,6 +2067,13 @@ export class InventoryTransactionsService {
     return id
       ? this.http.put<ApiResponse<any>>(this.salesUrl(`invoices/${id}`), body, { headers: h })
       : this.http.post<ApiResponse<any>>(this.salesUrl('invoices'), body, { headers: h });
+  }
+
+  // Copy type (migration 272): counts one print of a posted Sales Invoice and
+  // returns the print count before it (0 = Original, more = Duplicate; null =
+  // draft / not found, printed without a copy type).
+  markSalesInvoicePrinted(id: number): Observable<ApiResponse<{ previousPrintCount: number | null }>> {
+    return this.http.post<ApiResponse<{ previousPrintCount: number | null }>>(this.salesUrl(`invoices/${id}/printed`), {}, { headers: this.headers() });
   }
 
   private normServiceBundleConsumption(r: any): ServiceBundleConsumption {
@@ -2177,7 +2402,9 @@ export class InventoryTransactionsService {
         // already fixed on this exact unit when it was received (migration
         // 237) — "warranty should carry at sales by its serial no."
         manufacturing_date: r?.manufacturingDate || r?.manufacturing_date || null,
-        warranty_upto: r?.warrantyUpto || r?.warranty_upto || null
+        warranty_upto: r?.warrantyUpto || r?.warranty_upto || null,
+        missing_registration: r?.missingRegistration ?? r?.missing_registration ?? null
+
       }))
     };
   }
@@ -2245,6 +2472,22 @@ export class InventoryTransactionsService {
     const httpParams = new HttpParams().set('productId', String(productId)).set('serialNo', serialNo);
     return this.http.get<ApiResponse<any>>(this.salesUrl('serials/check-duplicate'), { headers: this.headers(), params: httpParams }).pipe(
       map(res => ({ ...res, data: { exists: !!res?.data?.exists, allowDuplicate: !!(res?.data?.allowDuplicate ?? res?.data?.allow_duplicate) } }))
+    );
+  }
+
+    // Phase 2 (migration 266): live check of one policy value (IMEI 1, Chassis No, ...).
+  // enforceUnique = the existing value is protected (it was mandatory when captured).
+  checkIdentifierDuplicate(policyId: number, value: string): Observable<ApiResponse<{ exists: boolean; enforceUnique: boolean; usedOn: { productName?: string; docNo?: string } | null }>> {
+    const httpParams = new HttpParams().set('policyId', String(policyId)).set('value', value);
+    return this.http.get<ApiResponse<any>>(this.salesUrl('serials/check-identifier'), { headers: this.headers(), params: httpParams }).pipe(
+      map(res => ({
+        ...res,
+        data: {
+          exists: !!res?.data?.exists,
+          enforceUnique: !!(res?.data?.enforceUnique ?? res?.data?.enforce_unique),
+          usedOn: res?.data?.usedOn ?? res?.data?.used_on ?? null
+        }
+      }))
     );
   }
 
