@@ -8341,6 +8341,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       summary: [...summaryRows, ['Grand Total', this.formatCurrency(totals.total)]] as Array<[string, string]>,
       notes: String(record.customer_notes || record.customerNotes || ''),
       notesLabel: 'Notes',
+      // Test point 16: Grand Total in words (same helper as Purchase Invoice).
+      amountInWords: rupeesInWords(totals.total),
       terms: SALES_INVOICE_TERMS,
       bankDetails: [
         ['Bank Name', bank?.bankName || ''],
