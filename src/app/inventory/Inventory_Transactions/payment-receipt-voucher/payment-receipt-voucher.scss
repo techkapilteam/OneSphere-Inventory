@@ -209,6 +209,12 @@
   margin-bottom: 0;
 }
 
+.pay-mode-party {
+  width: 260px;
+  flex: 0 0 auto;
+  margin-bottom: 0;
+}
+
 .pay-mode-summary {
   flex: 1 1 auto;
   font-size: 12.5px;
@@ -256,6 +262,14 @@
 
 .pay-ok { color: #047857; font-weight: 600; }
 .pay-warn { color: #b91c1c; font-weight: 600; }
+.pay-muted { color: #94a3b8; }
+
+// Per-customer breakdown when Customer Receipt has several customers selected.
+.pay-party-totals .pay-mode-total {
+  margin-top: 6px;
+  padding-top: 6px;
+  font-size: 12.5px;
+}
 
 // ── Sticky footer ────────────────────────────────────────────────────────────
 .pay-footer {
@@ -436,6 +450,6 @@
 
 @media (max-width: 900px) {
   .pay-mode-row-head { flex-wrap: wrap; }
-  .pay-mode-amount { width: 100%; }
+  .pay-mode-amount, .pay-mode-party { width: 100%; }
   .pay-footer-in { gap: 14px; }
 }

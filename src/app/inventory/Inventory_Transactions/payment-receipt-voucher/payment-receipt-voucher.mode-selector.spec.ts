@@ -23,7 +23,7 @@ describe('PaymentReceiptVoucherComponent — mode-of-payment integration (item 1
   let bankDetailsCalls: any[];
 
   function setUpParty(): void {
-    (component as any).selectedPartyId.set(1);
+    (component as any).selectedPartyIds.set([1]);
     (component as any).parties.set([{ id: 1, vendor_name: 'Acme Supplies' } as any]);
   }
 
@@ -247,7 +247,7 @@ describe('PaymentReceiptVoucherComponent — mode-of-payment integration (item 1
 
   it('save() accepts a Receipt-against-SI Cash mode row up to Rs 199,000', () => {
     (component as any).mode.set('receipt');
-    (component as any).selectedPartyId.set(2);
+    (component as any).selectedPartyIds.set([2]);
     (component as any).parties.set([{ id: 2, customer_name: 'Retail Customer' } as any]);
     (component as any).quickAmount.set(199000);
     component.addMode();

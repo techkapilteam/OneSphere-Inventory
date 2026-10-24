@@ -20,6 +20,10 @@ export interface InventoryExportDocument {
   summary?: Array<[string, string]>;
   notes?: string;
   notesLabel?: string;
+  /** Amount in words — "Total Invoice Amount In Words" left of the totals
+   *  (invoices, default), or an "Amount in Words :" line under them (vouchers). */
+  amountInWords?: string;
+  amountInWordsPosition?: 'left' | 'below';
   /** "Terms & Conditions :" lines printed under the totals (Sales Invoice). */
   terms?: string[];
   /** Bank label/value pairs for the Bank Details | Certified / For <Company> |
@@ -463,23 +467,43 @@ export class InventoryExportService {
 
     const summary = document.summary || [];
     const notes = String(document.notes || '').trim();
+    const amountInWords = String(document.amountInWords || '').trim();
+    const wordsBelow = document.amountInWordsPosition === 'below';
+    const wordsLeft = wordsBelow ? '' : amountInWords;
     let blockEnd = y;
-    if (summary.length || notes) {
-      const blockHeight = Math.max(summary.length * 5 + 6, notes ? 14 : 0);
+    // Previous: if (summary.length || notes) {
+    if (summary.length || notes || wordsLeft) {
+      // Previous: const blockHeight = Math.max(summary.length * 5 + 6, notes ? 14 : 0);
+      const blockHeight = Math.max(summary.length * 5 + 6, (notes ? 14 : 0) + (wordsLeft ? 14 : 0));
       if (y + blockHeight > pageHeight - 15) {
         doc.addPage();
         y = 15;
       }
       blockEnd = y;
       const summaryWidth = 80;
+      // Left of the totals: notes.
+      let leftY = y;
+      if (wordsLeft) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text('Total Invoice Amount In Words :', L_MARGIN, leftY + 3);
+        doc.setFont('helvetica', 'normal');
+        const wordLines = doc.splitTextToSize(wordsLeft,pageWidth - L_MARGIN - R_MARGIN - summaryWidth - 10) as string[];
+        doc.text(wordLines, L_MARGIN, leftY + 8);
+        leftY = leftY + 8 + wordLines.length * 4 + 2;
+        blockEnd = Math.max(blockEnd, leftY);
+      }
       if (notes) {
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(9);
-        doc.text(`${document.notesLabel || 'Notes'} :`, L_MARGIN, y + 3);
+        // Previous: doc.text(`${document.notesLabel || 'Notes'} :`, L_MARGIN, y + 3);
+        doc.text(`${document.notesLabel || 'Notes'} :`, L_MARGIN, leftY + 3);
         doc.setFont('helvetica', 'normal');
         const noteLines = doc.splitTextToSize(notes, pageWidth - L_MARGIN - R_MARGIN - summaryWidth - 10) as string[];
-        doc.text(noteLines, L_MARGIN, y + 8);
-        blockEnd = Math.max(blockEnd, y + 8 + noteLines.length * 4);
+        // Previous: doc.text(noteLines, L_MARGIN, y + 8);
+        // Previous: blockEnd = Math.max(blockEnd, y + 8 + noteLines.length * 4);
+        doc.text(noteLines, L_MARGIN, leftY + 8);
+        blockEnd = Math.max(blockEnd, leftY + 8 + noteLines.length * 4);
       }
       if (summary.length) {
         autoTable(doc, {
@@ -499,6 +523,26 @@ export class InventoryExportService {
         });
         blockEnd = Math.max(blockEnd, (doc as any).lastAutoTable.finalY);
       }
+    }
+
+    if (wordsBelow && amountInWords) {
+      const label = 'Amount in Words : ';
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      const labelWidth = doc.getTextWidth(label);
+      doc.setFont('helvetica', 'normal');
+      const wordLines = doc.splitTextToSize(amountInWords, pageWidth - L_MARGIN - R_MARGIN - labelWidth) as string[];
+      let wordsY = blockEnd + 6;
+      if (wordsY + wordLines.length * 4 > pageHeight - 15) {
+        doc.addPage();
+        wordsY = 18;
+      }
+      doc.setFont('helvetica', 'bold');
+      doc.text(label, L_MARGIN, wordsY);
+      doc.setFont('helvetica', 'normal');
+      doc.text(wordLines, L_MARGIN + labelWidth, wordsY);
+      blockEnd = wordsY + (wordLines.length - 1) * 4 + 2;
+      y = blockEnd;
     }
 
     const terms = document.terms || [];
@@ -647,6 +691,39 @@ export class InventoryExportService {
     iframe.onload = () => iframe.contentWindow?.print();
     iframe.src = String(doc.output('bloburl'));
     document.body.appendChild(iframe);
+  }
+
+  /** Amount in Indian words, rounded to the nearest rupee, e.g. 147956.66 ->
+   *  "Rupees One Lakh Forty Seven Thousand Nine Hundred Fifty Seven Only". */
+  amountInWords(amount: number | undefined): string {
+    const rupees = Math.round(Math.abs(Number(amount || 0)));
+    return `Rupees ${rupees ? this.indianWords(rupees) : 'Zero'} Only`;
+  }
+
+  private indianWords(num: number): string {
+    const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+      'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+    const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+    const belowThousand = (n: number): string => {
+      const parts: string[] = [];
+      if (n >= 100) { parts.push(`${ones[Math.floor(n / 100)]} Hundred`); n %= 100; }
+      if (n >= 20) { parts.push(tens[Math.floor(n / 10)]); n %= 10; }
+      if (n > 0) parts.push(ones[n]);
+      return parts.join(' ');
+    };
+    const parts: string[] = [];
+    const crore = Math.floor(num / 10000000);
+    // Crores above 999 read as "One Thousand Crore" etc.
+    if (crore) parts.push(`${this.indianWords(crore)} Crore`);
+    num %= 10000000;
+    const lakh = Math.floor(num / 100000);
+    if (lakh) parts.push(`${belowThousand(lakh)} Lakh`);
+    num %= 100000;
+    const thousand = Math.floor(num / 1000);
+    if (thousand) parts.push(`${belowThousand(thousand)} Thousand`);
+    num %= 1000;
+    if (num) parts.push(belowThousand(num));
+    return parts.join(' ');
   }
 
   private filledFields(document: InventoryExportDocument): Array<[string, string]> {

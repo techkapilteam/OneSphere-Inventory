@@ -55,7 +55,7 @@ describe('PaymentReceiptVoucherComponent — TDS auto-apply for Services (item 2
     fixture = TestBed.createComponent(PaymentReceiptVoucherComponent);
     component = fixture.componentInstance;
     fixture.detectChanges();
-    (component as any).selectedPartyId.set(1);
+    (component as any).selectedPartyIds.set([1]);
     (component as any).parties.set([{ id: 1, vendor_name: 'Acme Supplies' } as any]);
     (component as any).outstandingInvoices.set([SERVICE_INVOICE, GOODS_INVOICE]);
   }

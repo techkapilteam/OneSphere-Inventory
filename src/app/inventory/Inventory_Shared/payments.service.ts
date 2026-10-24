@@ -120,6 +120,9 @@ export interface PaymentVoucher {
   tcs_amount: number;
   tcs_percentage?: number;
   net_amount: number;
+  // Snapshot taken at save time; null on vouchers saved before it existed.
+  previous_balance?: number | null;
+  remaining_due?: number | null;
   narration?: string;
   status: string;
   created_at?: string;
@@ -284,6 +287,8 @@ export class PaymentsService {
       tcs_amount: r?.tcsAmount ?? r?.tcs_amount ?? 0,
       tcs_percentage: r?.tcsPercentage ?? r?.tcs_percentage,
       net_amount: r?.netAmount ?? r?.net_amount ?? 0,
+      previous_balance: r?.previousBalance ?? r?.previous_balance ?? null,
+      remaining_due: r?.remainingDue ?? r?.remaining_due ?? null,
       narration: r?.narration,
       status: r?.status || 'posted',
       created_at: r?.createdAt ?? r?.created_at,
