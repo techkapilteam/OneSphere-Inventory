@@ -465,30 +465,31 @@ export class InventoryExportService {
 
     const summary = document.summary || [];
     const notes = String(document.notes || '').trim();
-    const amountInWords = String(document.amountInWords || '').trim();
+    // Previous: const amountInWords = String(document.amountInWords || '').trim();
+    // (amount in words is printed once, full width, below this block)
     let blockEnd = y;
-    // Previous: if (summary.length || notes) {
-    if (summary.length || notes || amountInWords) {
-      // Previous: const blockHeight = Math.max(summary.length * 5 + 6, notes ? 14 : 0);
-      const blockHeight = Math.max(summary.length * 5 + 6, (notes ? 14 : 0) + (amountInWords ? 14 : 0));
+    // Previous: if (summary.length || notes || amountInWords) {
+    if (summary.length || notes) {
+      // Previous: const blockHeight = Math.max(summary.length * 5 + 6, (notes ? 14 : 0) + (amountInWords ? 14 : 0));
+      const blockHeight = Math.max(summary.length * 5 + 6, notes ? 14 : 0);
       if (y + blockHeight > pageHeight - 15) {
         doc.addPage();
         y = 15;
       }
       blockEnd = y;
       const summaryWidth = 80;
-      // Left of the totals: amount in words first, then notes below it.
+      // Left of the totals: notes.
       let leftY = y;
-      if (amountInWords) {
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(9);
-        doc.text('Total Invoice Amount In Words :', L_MARGIN, leftY + 3);
-        doc.setFont('helvetica', 'normal');
-        const wordLines = doc.splitTextToSize(amountInWords, pageWidth - L_MARGIN - R_MARGIN - summaryWidth - 10) as string[];
-        doc.text(wordLines, L_MARGIN, leftY + 8);
-        leftY = leftY + 8 + wordLines.length * 4 + 2;
-        blockEnd = Math.max(blockEnd, leftY);
-      }
+      // Previous: if (amountInWords) {
+      // Previous:   doc.setFont('helvetica', 'bold');
+      // Previous:   doc.setFontSize(9);
+      // Previous:   doc.text('Total Invoice Amount In Words :', L_MARGIN, leftY + 3);
+      // Previous:   doc.setFont('helvetica', 'normal');
+      // Previous:   const wordLines = doc.splitTextToSize(amountInWords, pageWidth - L_MARGIN - R_MARGIN - summaryWidth - 10) as string[];
+      // Previous:   doc.text(wordLines, L_MARGIN, leftY + 8);
+      // Previous:   leftY = leftY + 8 + wordLines.length * 4 + 2;
+      // Previous:   blockEnd = Math.max(blockEnd, leftY);
+      // Previous: }
       if (notes) {
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(9);
