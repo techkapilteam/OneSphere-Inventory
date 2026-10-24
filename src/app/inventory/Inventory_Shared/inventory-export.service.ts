@@ -465,23 +465,41 @@ export class InventoryExportService {
 
     const summary = document.summary || [];
     const notes = String(document.notes || '').trim();
+    const amountInWords = String(document.amountInWords || '').trim();
     let blockEnd = y;
-    if (summary.length || notes) {
-      const blockHeight = Math.max(summary.length * 5 + 6, notes ? 14 : 0);
+    // Previous: if (summary.length || notes) {
+    if (summary.length || notes || amountInWords) {
+      // Previous: const blockHeight = Math.max(summary.length * 5 + 6, notes ? 14 : 0);
+      const blockHeight = Math.max(summary.length * 5 + 6, (notes ? 14 : 0) + (amountInWords ? 14 : 0));
       if (y + blockHeight > pageHeight - 15) {
         doc.addPage();
         y = 15;
       }
       blockEnd = y;
       const summaryWidth = 80;
+      // Left of the totals: amount in words first, then notes below it.
+      let leftY = y;
+      if (amountInWords) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text('Total Invoice Amount In Words :', L_MARGIN, leftY + 3);
+        doc.setFont('helvetica', 'normal');
+        const wordLines = doc.splitTextToSize(amountInWords, pageWidth - L_MARGIN - R_MARGIN - summaryWidth - 10) as string[];
+        doc.text(wordLines, L_MARGIN, leftY + 8);
+        leftY = leftY + 8 + wordLines.length * 4 + 2;
+        blockEnd = Math.max(blockEnd, leftY);
+      }
       if (notes) {
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(9);
-        doc.text(`${document.notesLabel || 'Notes'} :`, L_MARGIN, y + 3);
+        // Previous: doc.text(`${document.notesLabel || 'Notes'} :`, L_MARGIN, y + 3);
+        doc.text(`${document.notesLabel || 'Notes'} :`, L_MARGIN, leftY + 3);
         doc.setFont('helvetica', 'normal');
         const noteLines = doc.splitTextToSize(notes, pageWidth - L_MARGIN - R_MARGIN - summaryWidth - 10) as string[];
-        doc.text(noteLines, L_MARGIN, y + 8);
-        blockEnd = Math.max(blockEnd, y + 8 + noteLines.length * 4);
+        // Previous: doc.text(noteLines, L_MARGIN, y + 8);
+        // Previous: blockEnd = Math.max(blockEnd, y + 8 + noteLines.length * 4);
+        doc.text(noteLines, L_MARGIN, leftY + 8);
+        blockEnd = Math.max(blockEnd, leftY + 8 + noteLines.length * 4);
       }
       if (summary.length) {
         autoTable(doc, {
