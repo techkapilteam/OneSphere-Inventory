@@ -481,7 +481,7 @@ export class InventoryExportService {
       }
       blockEnd = y;
       const summaryWidth = 80;
-      // Left of the totals: amount in words first, then notes below it.
+      // Left of the totals: notes.
       let leftY = y;
       if (wordsLeft) {
         doc.setFont('helvetica', 'bold');
