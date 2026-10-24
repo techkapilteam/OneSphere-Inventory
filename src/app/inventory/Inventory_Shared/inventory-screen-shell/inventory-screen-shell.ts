@@ -11,6 +11,7 @@ import { ApiResponse, AttributeItem, BomItem, BomLineItem, PriceListItem, WorkCe
 import { AvailableStock, InventoryTransactionsService, PurchaseRefDoc, ServiceBundleConsumption, TransportDetails,UinRegistrationRow, UinRegistrationSaveItem, IdentifierRegistrationRow, IdentifierRegistrationSaveItem, RegistrationPolicyOption } from '../inventory-transactions.service';
 import { applyInventoryTextCase, inventoryTextCaseForField, inventoryTextCaseForLineColumn, toInventoryTitleCase } from '../inventory-text-case.util';
 import { InventoryExportService } from '../inventory-export.service';
+import { rupeesInWords } from '../inventory-amount-in-words';
 import { InvoiceBankDetails, PaymentsService } from '../payments.service';
 import { attachInventorySaveToast } from '../inventory-save-toast/inventory-save-toast.component';
 import {
@@ -68,6 +69,7 @@ interface GridExportPayload {
   summary?: Array<[string, string]>;
   notes?: string;
   notesLabel?: string;
+  amountInWords?: string;
   terms?: string[];
   bankDetails?: Array<[string, string]>;
   orientation?: 'portrait' | 'landscape';
@@ -8156,7 +8158,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // Previous: const rows = this.purchaseInvoiceDocumentRows(record);
     const { columns, rows } = this.withoutEmptyPriceColumns(
       record?.items || [],
-      ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
+      // Test point 36: first column heading 'S.No' instead of '#'.
+      // Previous: ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
+      ['S.No', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
       this.purchaseInvoiceDocumentRows(record)
     );
     const exportColumns = rows.length ? columns : fallbackColumns;
@@ -8195,6 +8199,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       summary: [...summaryRows, ['Grand Total', this.formatCurrency(totals.total)]] as Array<[string, string]>,
       notes: String(record.remarks || ''),
       notesLabel: 'Notes / Terms',
+      // Test point 32: Grand Total in words, Indian format, capitals, rounded
+      // to rupees (no paise) - e.g. "RUPEES THREE HUNDRED AND FIFTY FOUR ONLY".
+      amountInWords: rupeesInWords(totals.total),
+      // Test point 31: always print Portrait (like Sales Invoice). Without this
+      // the PDF builder chose Landscape for more than 7 columns, and a landscape
+      // page printed on A4 portrait paper came out sideways with the right side cut.
+      // Previous: (no orientation set -> landscape when more than 7 columns)
+      orientation: 'portrait',
       fileName: `Purchase_Invoice_${docNo || 'Selected_Record'}`
     };
   }
@@ -8382,6 +8394,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       summary: payload.summary,
       notes: payload.notes,
       notesLabel: payload.notesLabel,
+      amountInWords: payload.amountInWords,
       terms: payload.terms,
       bankDetails: payload.bankDetails,
       orientation: payload.orientation,
