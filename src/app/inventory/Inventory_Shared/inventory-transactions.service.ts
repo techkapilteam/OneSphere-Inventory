@@ -2069,6 +2069,13 @@ export class InventoryTransactionsService {
       : this.http.post<ApiResponse<any>>(this.salesUrl('invoices'), body, { headers: h });
   }
 
+  // Copy type (migration 272): counts one print of a posted Sales Invoice and
+  // returns the print count before it (0 = Original, more = Duplicate; null =
+  // draft / not found, printed without a copy type).
+  markSalesInvoicePrinted(id: number): Observable<ApiResponse<{ previousPrintCount: number | null }>> {
+    return this.http.post<ApiResponse<{ previousPrintCount: number | null }>>(this.salesUrl(`invoices/${id}/printed`), {}, { headers: this.headers() });
+  }
+
   private normServiceBundleConsumption(r: any): ServiceBundleConsumption {
     return {
       id: r?.id,

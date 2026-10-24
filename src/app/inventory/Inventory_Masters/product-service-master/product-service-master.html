@@ -733,7 +733,7 @@
                   <div class="inventory-field-with-add">
                     <!-- Previous: [items]="['GST 0%', 'GST 5%', 'GST 12%', 'GST 18%', 'GST 28%', 'Exempt']" -->
                     <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
-                      [items]="['GST 0%', 'GST 5%', 'GST 18%', 'GST 40%', 'Exempt']"
+                      [items]="['GST 0%', 'GST 5%', 'GST 18%', 'GST 24%', 'Exempt']"
                       [searchable]="true" [clearable]="true"
                       [ngModel]="formValues()['taxCategory'] || (gstRate() !== null ? 'GST ' + gstRate() + '%' : null)"
                       (ngModelChange)="collectFormField('taxCategory', $event)"
