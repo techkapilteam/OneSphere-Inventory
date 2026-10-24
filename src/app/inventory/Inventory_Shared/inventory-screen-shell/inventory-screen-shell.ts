@@ -7861,13 +7861,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
 
     if (action === 'print' || action === 'pdf') {
-      // Sales Invoice: the expanded invoice prints with its copy type
-      // (Original / Duplicate for Recipient).
-      if (tableId === 'records' && this.config?.key === 'salesInvoice') {
+      // Sales / Purchase Invoice: the expanded invoice prints with its copy
+      // type (Original / Duplicate for Recipient).
+      const invoiceKind = this.config?.key === 'salesInvoice' || this.config?.key === 'purchaseInvoice' ? this.config.key : null;
+      if (tableId === 'records' && invoiceKind) {
         const record = this.segmentFilteredRecords(this.savedRecordObjects())
           .find(item => Number(item.id) === Number(this.expandedGrnId()));
         if (record) {
-          this.printSalesInvoiceWithCopyType(record, payload, action === 'pdf' ? 'Pdf' : 'Print');
+          this.printInvoiceWithCopyType(invoiceKind, record, payload, action === 'pdf' ? 'Pdf' : 'Print');
           return;
         }
       }
@@ -8432,12 +8433,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.exportService.pdf(this.exportDocument(payload), asPdf ? 'Pdf' : 'Print');
   }
 
-  // Test point 22: a posted Sales Invoice prints "Original for Recipient" the
-  // first time (the PDF that opens on Post) and "Duplicate for Recipient" on
-  // every print after it. The count is kept on the invoice (migration 272) so it
-  // holds across users, refreshes and machines. Drafts, or a failed call, print
-  // without a copy type and are not counted.
-  private printSalesInvoiceWithCopyType(record: any, payload: GridExportPayload, mode: 'Pdf' | 'Print' | 'Open'): void {
+  // Test point 22: a posted Sales / Purchase Invoice prints "Original for
+  // Recipient" the first time (the PDF that opens on Post) and "Duplicate for
+  // Recipient" on every print after it. The count is kept on the invoice
+  // (migrations 272 / 274) so it holds across users, refreshes and machines.
+  // Drafts, or a failed call, print without a copy type and are not counted.
+  private printInvoiceWithCopyType(kind: 'salesInvoice' | 'purchaseInvoice', record: any, payload: GridExportPayload, mode: 'Pdf' | 'Print' | 'Open'): void {
     const output = (copyType?: string) => this.exportService.pdf(this.exportDocument({ ...payload, copyType }), mode);
     const id = Number(record?.id);
     const status = this.normalizeKey(record?.status || '');
@@ -8445,7 +8446,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       output();
       return;
     }
-    this.txService.markSalesInvoicePrinted(id)
+    const markPrinted$ = kind === 'salesInvoice'
+      ? this.txService.markSalesInvoicePrinted(id)
+      : this.txService.markPurchaseInvoicePrinted(id);
+    markPrinted$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: res => {
@@ -18259,7 +18263,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       const piNo = String(record?.pi_number || record?.piNumber || '');
       // Opens in a new tab with the browser's PDF viewer (not the print popup).
       // Previous: this.printGridPayload(this.purchaseInvoiceDocumentExportPayload(record, piNo, [], [], []), false);
-      this.exportService.pdf(this.exportDocument(this.purchaseInvoiceDocumentExportPayload(record, piNo, [], [], [])), 'Open');
+      // Previous: this.exportService.pdf(this.exportDocument(this.purchaseInvoiceDocumentExportPayload(record, piNo, [], [], [])), 'Open');
+      this.printInvoiceWithCopyType('purchaseInvoice', record, this.purchaseInvoiceDocumentExportPayload(record, piNo, [], [], []), 'Open');
       return;
     }
     const docNo = kind === 'salesInvoice'
@@ -18281,7 +18286,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // Previous: this.printGridPayload(payload, false);
     if (kind === 'salesInvoice') {
       // Previous: this.exportService.pdf(this.exportDocument(payload), 'Open');
-      this.printSalesInvoiceWithCopyType(record, payload, 'Open');
+      this.printInvoiceWithCopyType('salesInvoice', record, payload, 'Open');
     } else {
       this.printGridPayload(payload, false);
     }

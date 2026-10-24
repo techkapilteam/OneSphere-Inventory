@@ -2076,6 +2076,11 @@ export class InventoryTransactionsService {
     return this.http.post<ApiResponse<{ previousPrintCount: number | null }>>(this.salesUrl(`invoices/${id}/printed`), {}, { headers: this.headers() });
   }
 
+  // Copy type (migration 274): same as markSalesInvoicePrinted, for Purchase Invoice.
+  markPurchaseInvoicePrinted(id: number): Observable<ApiResponse<{ previousPrintCount: number | null }>> {
+    return this.http.post<ApiResponse<{ previousPrintCount: number | null }>>(this.url(`purchase-invoices/${id}/printed`), {}, { headers: this.headers() });
+  }
+
   private normServiceBundleConsumption(r: any): ServiceBundleConsumption {
     return {
       id: r?.id,
