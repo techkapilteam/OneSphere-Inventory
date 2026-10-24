@@ -8111,20 +8111,40 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     };
   }
 
-  private purchaseInvoiceDocumentRows(record: any): string[][] {
-    return (record?.items || []).map((item: any, index: number) => [
-      String(index + 1),
-      this.purchaseInvoiceItemName(item),
-      this.purchaseInvoiceItemHsn(item),
-      this.moneyValue(item?.qty ?? 0),
-      this.grnExpandedValue(item, 'uom_name', 'uomName'),
-      this.moneyValue(item?.rate ?? 0),
-      this.moneyValue(item?.mrp ?? item?.Mrp ?? 0),
-      this.moneyValue(item?.selling_price ?? item?.sellingPrice ?? 0),
-      String(item?.discount_pct ?? item?.discountPct ?? 0),
-      String(item?.gst_rate ?? item?.gstRate ?? 0),
-      this.moneyValue(item?.amount ?? 0)
-    ]);
+  // Previous: private purchaseInvoiceDocumentRows(record: any): string[][] {
+  private purchaseInvoiceDocumentRows(record: any, isInterstate = false): string[][] {
+    return (record?.items || []).map((item: any, index: number) => {
+      // Test point 39: line-wise Taxable Amt and CGST/SGST (or IGST) — same
+      // saved-value-first / computed-fallback rule documentFinancials() uses,
+      // so the columns add up to the summary.
+      const qty = Number(item?.qty ?? item?.accepted_qty ?? item?.acceptedQty ?? 0) || 0;
+      const rate = Number(item?.rate ?? 0) || 0;
+      const discPct = Number(item?.discount_pct ?? item?.discountPct ?? 0) || 0;
+      const gstPct = Number(item?.gst_rate ?? item?.gstRate ?? 0) || 0;
+      const lineGross = qty * rate;
+      const savedTaxable = this.firstNumericValue(item, ['taxable_amount', 'taxableAmount']);
+      const savedTax = this.firstNumericValue(item, ['tax_amount', 'taxAmount', 'gst_amount', 'gstAmount']);
+      const lineTaxable = savedTaxable || (lineGross - lineGross * discPct / 100);
+      const lineTax = savedTax || this.transactionLineTaxBreakup(qty, rate, discPct, gstPct, undefined, this.itemGstIncluded(item) ?? false).taxAmount;
+      return [
+        String(index + 1),
+        this.purchaseInvoiceItemName(item),
+        this.purchaseInvoiceItemHsn(item),
+        this.moneyValue(item?.qty ?? 0),
+        this.grnExpandedValue(item, 'uom_name', 'uomName'),
+        this.moneyValue(item?.rate ?? 0),
+        // Test point 39: MRP / Selling Price no longer printed on the PI PDF.
+        // Previous: this.moneyValue(item?.mrp ?? item?.Mrp ?? 0),
+        // Previous: this.moneyValue(item?.selling_price ?? item?.sellingPrice ?? 0),
+        String(item?.discount_pct ?? item?.discountPct ?? 0),
+        String(item?.gst_rate ?? item?.gstRate ?? 0),
+        this.moneyValue(lineTaxable),
+        ...(isInterstate
+          ? [this.moneyValue(lineTax)]
+          : [this.moneyValue(lineTax / 2), this.moneyValue(lineTax / 2)]),
+        this.moneyValue(item?.amount ?? 0)
+      ];
+    });
   }
 
   // MRP / Selling Price print only when at least one line actually carries a
@@ -8157,16 +8177,24 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const locationName = warehouseName || branchName;
     // Previous: const columns = ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'];
     // Previous: const rows = this.purchaseInvoiceDocumentRows(record);
+    // Test point 39: totals computed first so the rows know CGST/SGST vs IGST.
+    const totals = this.purchaseInvoiceFinancials(record);
     const { columns, rows } = this.withoutEmptyPriceColumns(
       record?.items || [],
       // Test point 36: first column heading 'S.No' instead of '#'.
       // Previous: ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
-      ['S.No', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
-      this.purchaseInvoiceDocumentRows(record)
+      // Test point 38: heading 'HSN/SAC Code' instead of 'HSN'.
+      // Previous: ['S.No', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
+      // Test point 39: MRP / Selling Price dropped; Taxable Amt + CGST/SGST (or IGST) added.
+      // Previous: ['S.No', 'Product / Service', 'HSN/SAC Code', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
+      ['S.No', 'Product / Service', 'HSN/SAC Code', 'Qty', 'UOM', 'Rate (Rs.)', 'Disc %', 'GST %', 'Taxable Amt (Rs.)',
+        ...(totals.isInterstate ? ['IGST (Rs.)'] : ['CGST (Rs.)', 'SGST (Rs.)']), 'Amount (Rs.)'],
+      // Previous: this.purchaseInvoiceDocumentRows(record)
+      this.purchaseInvoiceDocumentRows(record, totals.isInterstate)
     );
     const exportColumns = rows.length ? columns : fallbackColumns;
     const exportRows = rows.length ? rows : fallbackRows;
-    const totals = this.purchaseInvoiceFinancials(record);
+    // Previous: const totals = this.purchaseInvoiceFinancials(record);
     const fields: Array<[string, string]> = [
       ['PI No', docNo],
       ['PI Date', this.gridDateDisplay(String(record.pi_date || record.piDate || ''))],
