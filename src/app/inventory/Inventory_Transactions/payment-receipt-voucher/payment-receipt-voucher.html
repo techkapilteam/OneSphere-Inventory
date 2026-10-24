@@ -261,7 +261,9 @@
             @for (s of partySummaries(); track s.id) {
               <div class="pay-mode-total">
                 <span><b>{{ s.name }}</b></span>
+                <span>Previous Balance: <b>{{ fmt(s.previousBalance) }}</b></span>
                 <span>Allocated: <b>{{ fmt(s.reference) }}</b></span>
+                <span>Remaining Due: <b>{{ fmt(s.remainingDue) }}</b></span>
                 <span>Mode total: <b>{{ fmt(s.modeTotal) }}</b></span>
                 @if (s.reference || s.modeTotal) {
                   @if (Math.abs(s.diff) < 0.01) {
@@ -404,11 +406,12 @@
   <div class="pay-footer">
     <div class="pay-footer-in">
       <div class="pay-f-item"><div class="pay-f-k">Invoices</div><div class="pay-f-v">{{ selectedInvoiceIds().size }}</div></div>
-      <div class="pay-f-item"><div class="pay-f-k">Outstanding</div><div class="pay-f-v w">{{ fmt(remainingOutstanding()) }}</div></div>
+      <div class="pay-f-item"><div class="pay-f-k">Previous Balance</div><div class="pay-f-v">{{ fmt(totalOutstanding()) }}</div></div>
       <div class="pay-f-item">
         <div class="pay-f-k">Allocated</div>
         <div class="pay-f-v hl">{{ fmt(totalAllocated()) }}</div>
       </div>
+      <div class="pay-f-item"><div class="pay-f-k">Remaining Due</div><div class="pay-f-v w">{{ fmt(remainingOutstanding()) }}</div></div>
       @if (totalNotesApplied() > 0) {
         <div class="pay-f-item"><div class="pay-f-k">Notes Applied</div><div class="pay-f-v n">{{ fmt(totalNotesApplied()) }}</div></div>
       }

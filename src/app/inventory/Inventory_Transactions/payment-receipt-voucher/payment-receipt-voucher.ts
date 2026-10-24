@@ -25,7 +25,7 @@ type VoucherMode = 'pay' | 'receipt';
 // than one customer selected (one voucher is posted per customer).
 type ModeRow = { details: PaymentModeSelectorValue; amount: number; partyId: number | null };
 
-type PartySummary = { id: number; name: string; allocated: number; notes: number; reference: number; modeTotal: number; cashTotal: number; diff: number };
+type PartySummary = { id: number; name: string; previousBalance: number; allocated: number; remainingDue: number; notes: number; reference: number; modeTotal: number; cashTotal: number; diff: number };
 
 // Item 21: fallback only, used if the live taxation.tds_codes fetch (see
 // tdsCodes signal) comes back empty — mirrors migration 149's seed values
@@ -354,8 +354,12 @@ export class PaymentReceiptVoucherComponent {
       const rows = this.modeRows().filter(r => this.rowParty(r) === p.id);
       const modeTotal = rows.reduce((s, r) => s + (r.amount || 0), 0);
       const cashTotal = rows.filter(r => r.details.modeKey === 'cash').reduce((s, r) => s + (r.amount || 0), 0);
+      const previousBalance = this.outstandingInvoices()
+        .filter(inv => this.partyOfInvoice(inv.invoice_id) === p.id)
+        .reduce((s, inv) => s + inv.outstanding, 0);
+      const remainingDue = Math.max(0, previousBalance - allocated);
       const reference = multi ? Math.max(0, allocated - notes) : this.referenceTotal();
-      return { id: p.id, name: this.partyName(p), allocated, notes, reference, modeTotal, cashTotal, diff: modeTotal - reference };
+      return { id: p.id, name: this.partyName(p), previousBalance, allocated, remainingDue, notes, reference, modeTotal, cashTotal, diff: modeTotal - reference };
     });
   });
 
@@ -871,6 +875,10 @@ export class PaymentReceiptVoucherComponent {
 
   printVoucher(v: PaymentVoucher, action: 'Pdf' | 'Print'): void {
     const isPay = v.voucher_type !== 'receipt';
+    // Previous Balance / Remaining Due are stored on the voucher when it is
+    // saved, so a reprint shows the balance as it was then. Vouchers saved
+    // before the snapshot existed print without them.
+    const hasBalance = v.previous_balance != null && v.remaining_due != null;
     const typeLabel: Record<string, string> = {
       purchase_invoice: 'Purchase Invoice', sales_invoice: 'Sales Invoice',
       debit_note: 'Debit Note', credit_note: 'Credit Note'
@@ -885,7 +893,10 @@ export class PaymentReceiptVoucherComponent {
       .map(m => `${m.ref_json?.['summary'] || m.mode_key} (${this.pdfAmt(m.amount)})`)
       .join(', ');
     const cheque = this.chequeDetails(v);
-    const summary: Array<[string, string]> = [['Total Allocated', this.pdfAmt(v.total_allocated)]];
+    const summary: Array<[string, string]> = [];
+    if (hasBalance) summary.push(['Previous Balance', this.pdfAmt(v.previous_balance!)]);
+    summary.push(['Total Allocated', this.pdfAmt(v.total_allocated)]);
+    if (hasBalance) summary.push(['Remaining Due', this.pdfAmt(v.remaining_due!)]);
     if (v.tds_amount) summary.push(['TDS', this.pdfAmt(v.tds_amount)]);
     if (v.tcs_amount) summary.push([`TCS${v.tcs_percentage ? ` (${v.tcs_percentage}%)` : ''}`, this.pdfAmt(v.tcs_amount)]);
     summary.push(['Net Amount', this.pdfAmt(v.net_amount)]);
