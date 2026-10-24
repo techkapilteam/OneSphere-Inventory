@@ -8200,20 +8200,46 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     };
   }
 
-  private salesInvoiceDocumentRows(record: any): string[][] {
-    return (record?.items || []).map((item: any, index: number) => [
-      String(index + 1),
-      this.purchaseInvoiceItemName(item),
-      this.purchaseInvoiceItemHsn(item),
-      this.moneyValue(item?.qty ?? 0),
-      this.grnExpandedValue(item, 'uom_name', 'uomName'),
-      this.moneyValue(item?.rate ?? 0),
-      this.moneyValue(item?.mrp ?? item?.Mrp ?? 0),
-      this.moneyValue(item?.selling_price ?? item?.sellingPrice ?? 0),
-      String(item?.discount_pct ?? item?.discountPct ?? 0),
-      String(item?.gst_rate ?? item?.gstRate ?? 0),
-      this.moneyValue(item?.amount ?? 0)
-    ]);
+  // Previous: private salesInvoiceDocumentRows(record: any): string[][] {
+  private salesInvoiceDocumentRows(record: any, isInterstate = false): string[][] {
+    return (record?.items || []).map((item: any, index: number) => {
+      // Product-wise GST: taxable value and CGST/SGST (or IGST) amount per line.
+      // SGST = tax - CGST so the two halves always add up to the line tax.
+      const { taxable, tax } = this.salesInvoiceLineTax(item);
+      const cgst = Math.round((tax / 2) * 100) / 100;
+      const lineTaxCells = isInterstate
+        ? [this.moneyValue(tax)]
+        : [this.moneyValue(cgst), this.moneyValue(tax - cgst)];
+      return [
+        String(index + 1),
+        this.purchaseInvoiceItemName(item),
+        this.purchaseInvoiceItemHsn(item),
+        this.moneyValue(item?.qty ?? 0),
+        this.grnExpandedValue(item, 'uom_name', 'uomName'),
+        this.moneyValue(item?.rate ?? 0),
+        this.moneyValue(item?.mrp ?? item?.Mrp ?? 0),
+        this.moneyValue(item?.selling_price ?? item?.sellingPrice ?? 0),
+        String(item?.discount_pct ?? item?.discountPct ?? 0),
+        this.moneyValue(taxable),
+        String(item?.gst_rate ?? item?.gstRate ?? 0),
+        ...lineTaxCells,
+        this.moneyValue(item?.amount ?? 0)
+      ];
+    });
+  }
+
+  // Same per-line taxable/tax rule as documentFinancials(): saved values first,
+  // recomputed from qty/rate/discount/GST when the line has none.
+  private salesInvoiceLineTax(item: any): { taxable: number; tax: number } {
+    const qty = Number(item?.qty ?? 0) || 0;
+    const rate = Number(item?.rate ?? 0) || 0;
+    const discPct = Number(item?.discount_pct ?? item?.discountPct ?? 0) || 0;
+    const gstPct = Number(item?.gst_rate ?? item?.gstRate ?? 0) || 0;
+    const computedTaxable = qty * rate - (qty * rate * discPct / 100);
+    const taxable = this.firstNumericValue(item, ['taxable_amount', 'taxableAmount']) || computedTaxable;
+    const tax = this.firstNumericValue(item, ['tax_amount', 'taxAmount', 'gst_amount', 'gstAmount'])
+      || this.transactionLineTaxBreakup(qty, rate, discPct, gstPct, undefined, this.itemGstIncluded(item) ?? false).taxAmount;
+    return { taxable, tax };
   }
 
   // Full party address as entered in the master — the free-text address line
@@ -8250,10 +8276,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const bank = this.invoiceBankDetails();
     // Previous: const columns = ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'];
     // Previous: const rows = this.salesInvoiceDocumentRows(record);
+    const lineIsInterstate = this.salesInvoiceFinancials(record).isInterstate;
     const { columns, rows } = this.withoutEmptyPriceColumns(
       record?.items || [],
-      ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
-      this.salesInvoiceDocumentRows(record)
+      // Previous: ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
+      ['S.No', 'Product / Service', 'HSN/SAC Code', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'Taxable Value', 'GST %',
+        ...(lineIsInterstate ? ['IGST Amt'] : ['CGST Amt', 'SGST Amt']), 'Amount (Rs.)'],
+      // Previous: this.salesInvoiceDocumentRows(record)
+      this.salesInvoiceDocumentRows(record, lineIsInterstate)
     );
     const exportColumns = rows.length ? columns : fallbackColumns;
     const exportRows = rows.length ? rows : fallbackRows;
@@ -8268,8 +8298,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Previous: ['Customer Address', this.partyFullAddress(customer)],
       // Delivery Address entered on the invoice (customer master address when
       // none was entered); Ship Address falls back to the delivery address.
-      ['Delivery Address', deliveryAddress || '-'],
-      ['Ship Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
+      // Previous: ['Delivery Address', deliveryAddress || '-'],
+      ['Bill To Address', deliveryAddress || '-'],
+      // Previous: ['Ship Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
+      ['Ship To Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
       ['State', customerState || '-'],
       ['GSTIN No', customerGstin || '-'],
       ['Place of Supply', String(record.place_of_supply || record.placeOfSupply || '')],
@@ -8289,7 +8321,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]])
     ];
     return {
-      title: `Sales Invoice - ${docNo || 'Selected Record'}`,
+      // Previous: title: `Sales Invoice - ${docNo || 'Selected Record'}`,
+      title: `Tax Invoice - ${docNo || 'Selected Record'}`,
       fields,
       columns: exportColumns,
       rows: exportRows,
@@ -17192,6 +17225,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       next['paymentTerms'] = customer.payment_term_name;
     }
     if (this.config?.key === 'deliveryChallan') {
+      Object.assign(next, this.dcAddressPatchFromSource(customer, false, next));
+    }
+    // Sales Invoice: fill the Delivery / Ship Address from the customer master.
+    // A different customer clears the previous customer's address first, so
+    // the new one is not left behind the old values.
+    if (this.config?.key === 'salesInvoice') {
+      const customerChanged = !this.optionEquals(this.formValues()[key], value);
+      if (customerChanged) {
+        Object.assign(next, {
+          deliveryHouseNo: '', deliveryStreet: '', deliveryState: '', deliveryDistrict: '',
+          deliveryCity: '', deliveryPincode: '', deliveryAddress: '',
+          shipSameAsDelivery: 'Yes', shipAddress: ''
+        });
+      }
       Object.assign(next, this.dcAddressPatchFromSource(customer, false, next));
     }
   }
