@@ -10,8 +10,9 @@
           <label class="erp-label">{{ partyLabel() }} <span class="req">*</span></label>
           <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
             [items]="partyOptions()" bindLabel="name" bindValue="id"
+            [multiple]="multiPartySelect()" [closeOnSelect]="!multiPartySelect()"
             [searchable]="true" [clearable]="true" [loading]="loadingParties()"
-            [ngModel]="selectedPartyId()" (ngModelChange)="onPartyChange($event)"
+            [ngModel]="partySelectModel()" (ngModelChange)="onPartyChange($event)"
             [placeholder]="'Search ' + partyLabel().toLowerCase() + ' name or code'">
           </ng-select>
           @if (selectedParty(); as party) {
@@ -34,7 +35,7 @@
         </div>
       </div>
 
-      @if (selectedParty()) {
+      @if (hasParty()) {
         <section class="inventory-kpi-grid pay-kpi-grid pay-kpi-row">
           <article class="inventory-card inventory-kpi-card">
             <span class="inventory-card-icon"><i class="pi pi-file"></i></span>
@@ -65,7 +66,7 @@
       </div>
     }
 
-    @if (selectedParty()) {
+    @if (hasParty()) {
       <section class="inventory-section">
         <div class="inventory-line-title">
           <div>
@@ -83,6 +84,7 @@
                 <tr>
                   <th style="width:36px"></th>
                   <th>{{ docLabel() }} No</th>
+                  @if (isMultiParty()) { <th>{{ partyLabel() }}</th> }
                   <th>Date</th>
                   <th>Due Date</th>
                   <th class="text-right">Invoice Value</th>
@@ -100,6 +102,7 @@
                       <a class="pay-inv-link" (click)="openDrawer(inv)">{{ inv.invoice_number }}</a>
                       @if (inv.reference) { <div class="pay-inv-ref">{{ inv.reference }}</div> }
                     </td>
+                    @if (isMultiParty()) { <td>{{ partyNameOf(partyOfInvoice(inv.invoice_id)) }}</td> }
                     <td>{{ fmtDate(inv.invoice_date) }}</td>
                     <td>
                       {{ fmtDate(inv.due_date) }}
@@ -124,7 +127,7 @@
                     <td class="text-center"><button type="button" class="eye" title="View invoice detail" (click)="openDrawer(inv)"><i class="pi pi-eye"></i></button></td>
                   </tr>
                 } @empty {
-                  <tr><td colspan="9"><div class="inventory-grid-empty-hint">No outstanding {{ docLabel() }}s for this {{ partyLabel().toLowerCase() }}.</div></td></tr>
+                  <tr><td [attr.colspan]="isMultiParty() ? 10 : 9"><div class="inventory-grid-empty-hint">No outstanding {{ docLabel() }}s for {{ isMultiParty() ? 'the selected ' + partyLabel().toLowerCase() + 's' : 'this ' + partyLabel().toLowerCase() }}.</div></td></tr>
                 }
               </tbody>
             </table>
@@ -148,6 +151,7 @@
                 <tr>
                   <th style="width:36px"></th>
                   <th>Note No</th>
+                  @if (isMultiParty()) { <th>{{ partyLabel() }}</th> }
                   <th>Date</th>
                   <th>From Return</th>
                   <th>Reason</th>
@@ -161,6 +165,7 @@
                   <tr [class.sel]="isNoteSelected(note)">
                     <td><input type="checkbox" class="cb" [checked]="isNoteSelected(note)" (change)="toggleNote(note, $any($event.target).checked)" /></td>
                     <td>{{ note.note_number }}</td>
+                    @if (isMultiParty()) { <td>{{ partyNameOf(partyOfNote(note.note_id)) }}</td> }
                     <td>{{ fmtDate(note.note_date) }}</td>
                     <td>{{ note.return_number || '—' }}</td>
                     <td>{{ note.reason || '—' }}</td>
@@ -204,6 +209,17 @@
                   <input class="erp-input" type="text" inputmode="decimal" style="text-align:right;font-weight:600" placeholder="0.00"
                     [ngModel]="row.amount ? row.amount.toFixed(2) : ''" [ngModelOptions]="{ updateOn: 'blur' }" (ngModelChange)="setModeAmount(idx, $event)" />
                 </div>
+                @if (isMultiParty()) {
+                  <div class="erp-form-group pay-mode-party">
+                    <label class="erp-label">{{ partyLabel() }} <span class="req">*</span></label>
+                    <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+                      [items]="selectedPartyOptions()" bindLabel="name" bindValue="id"
+                      [searchable]="true" [clearable]="false"
+                      [ngModel]="row.partyId" (ngModelChange)="setModeParty(idx, $event)"
+                      [placeholder]="'Select ' + partyLabel().toLowerCase()">
+                    </ng-select>
+                  </div>
+                }
                 <span class="pay-mode-summary">{{ row.details.summary }}</span>
                 <button type="button" class="erp-btn btn-white btn-icon btn-sm pay-mode-rm" title="Remove" (click)="removeMode(idx)"><i class="pi pi-trash"></i></button>
               </div>
@@ -239,6 +255,29 @@
             }
           }
         </div>
+        @if (isMultiParty()) {
+          <!-- One receipt voucher is posted per customer on Save. -->
+          <div class="pay-party-totals">
+            @for (s of partySummaries(); track s.id) {
+              <div class="pay-mode-total">
+                <span><b>{{ s.name }}</b></span>
+                <span>Allocated: <b>{{ fmt(s.reference) }}</b></span>
+                <span>Mode total: <b>{{ fmt(s.modeTotal) }}</b></span>
+                @if (s.reference || s.modeTotal) {
+                  @if (Math.abs(s.diff) < 0.01) {
+                    <span class="pay-ok">✓ Fully matched</span>
+                  } @else if (s.diff < -0.005) {
+                    <span class="pay-warn">Short by {{ fmt(-s.diff) }}</span>
+                  } @else {
+                    <span class="pay-ok">Excess {{ fmt(s.diff) }} — on account</span>
+                  }
+                } @else {
+                  <span class="pay-muted">Nothing entered — no receipt will be posted</span>
+                }
+              </div>
+            }
+          </div>
+        }
       </section>
 
       <section class="inventory-section">
@@ -361,7 +400,7 @@
   </div>
 </div>
 
-@if (selectedParty()) {
+@if (hasParty()) {
   <div class="pay-footer">
     <div class="pay-footer-in">
       <div class="pay-f-item"><div class="pay-f-k">Invoices</div><div class="pay-f-v">{{ selectedInvoiceIds().size }}</div></div>
@@ -398,7 +437,7 @@
     <div class="pay-dr-h">
       <div>
         <div class="pay-dr-t">{{ inv.invoice_number }}</div>
-        <div class="pay-dr-s">{{ selectedParty() ? partyName(selectedParty()!) : '' }} @if (selectedParty()?.gstin) { · GSTIN {{ selectedParty()!.gstin }} }</div>
+        <div class="pay-dr-s">{{ drawerParty() ? partyName(drawerParty()!) : '' }} @if (drawerParty()?.gstin) { · GSTIN {{ drawerParty()!.gstin }} }</div>
       </div>
       <button type="button" class="pay-dr-x" (click)="closeDrawer()" aria-label="Close"><i class="pi pi-times"></i></button>
     </div>

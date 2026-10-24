@@ -20,8 +20,10 @@ export interface InventoryExportDocument {
   summary?: Array<[string, string]>;
   notes?: string;
   notesLabel?: string;
-  /** "Amount in Words :" line printed under the totals (vouchers). */
+  /** Amount in words — "Total Invoice Amount In Words" left of the totals
+   *  (invoices, default), or an "Amount in Words :" line under them (vouchers). */
   amountInWords?: string;
+  amountInWordsPosition?: 'left' | 'below';
   /** "Terms & Conditions :" lines printed under the totals (Sales Invoice). */
   terms?: string[];
   /** Bank label/value pairs for the Bank Details | Certified / For <Company> |
@@ -466,11 +468,13 @@ export class InventoryExportService {
     const summary = document.summary || [];
     const notes = String(document.notes || '').trim();
     const amountInWords = String(document.amountInWords || '').trim();
+    const wordsBelow = document.amountInWordsPosition === 'below';
+    const wordsLeft = wordsBelow ? '' : amountInWords;
     let blockEnd = y;
     // Previous: if (summary.length || notes) {
-    if (summary.length || notes || amountInWords) {
+    if (summary.length || notes || wordsLeft) {
       // Previous: const blockHeight = Math.max(summary.length * 5 + 6, notes ? 14 : 0);
-      const blockHeight = Math.max(summary.length * 5 + 6, (notes ? 14 : 0) + (amountInWords ? 14 : 0));
+      const blockHeight = Math.max(summary.length * 5 + 6, (notes ? 14 : 0) + (wordsLeft ? 14 : 0));
       if (y + blockHeight > pageHeight - 15) {
         doc.addPage();
         y = 15;
@@ -479,12 +483,12 @@ export class InventoryExportService {
       const summaryWidth = 80;
       // Left of the totals: amount in words first, then notes below it.
       let leftY = y;
-      if (amountInWords) {
+      if (wordsLeft) {
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(9);
         doc.text('Total Invoice Amount In Words :', L_MARGIN, leftY + 3);
         doc.setFont('helvetica', 'normal');
-        const wordLines = doc.splitTextToSize(amountInWords, pageWidth - L_MARGIN - R_MARGIN - summaryWidth - 10) as string[];
+        const wordLines = doc.splitTextToSize(wordsLeft,pageWidth - L_MARGIN - R_MARGIN - summaryWidth - 10) as string[];
         doc.text(wordLines, L_MARGIN, leftY + 8);
         leftY = leftY + 8 + wordLines.length * 4 + 2;
         blockEnd = Math.max(blockEnd, leftY);
@@ -521,8 +525,7 @@ export class InventoryExportService {
       }
     }
 
-    const amountInWords = String(document.amountInWords || '').trim();
-    if (amountInWords) {
+    if (wordsBelow && amountInWords) {
       const label = 'Amount in Words : ';
       doc.setFontSize(9);
       doc.setFont('helvetica', 'bold');
