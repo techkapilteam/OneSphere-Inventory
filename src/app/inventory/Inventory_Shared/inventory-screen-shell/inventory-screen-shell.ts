@@ -8349,8 +8349,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const soReference = String(record.so_number || record.soNumber || record.reference_no || record.referenceNo || 'Direct');
     const fields: Array<[string, string]> = [
       ['Invoice No', docNo],
-      ['Invoice Date', this.gridDateDisplay(String(record.doc_date || record.docDate || ''))],
-      ['Due Date', this.gridDateDisplay(String(record.due_date || record.dueDate || ''))],
+      // Previous: ['Invoice Date', this.gridDateDisplay(String(record.doc_date || record.docDate || ''))],
+      // Previous: ['Due Date', this.gridDateDisplay(String(record.due_date || record.dueDate || ''))],
+      ['Invoice Date', this.fullYearDateDisplay(record.doc_date || record.docDate)],
+      ['Due Date', this.fullYearDateDisplay(record.due_date || record.dueDate)],
       ['Customer', customerName],
       ['Customer Phone', String(customer?.mobile || '')],
       // Previous: ['Customer Address', this.partyFullAddress(customer)],
@@ -9609,6 +9611,22 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   gridDateDisplay(value: any): string {
     const parts = this.gridDateParts(value);
     return parts ? `${parts.day}-${parts.month}-${parts.year}` : String(value || '');
+  }
+
+  // DD-MM-YYYY (gridDateDisplay trims the year to 2 digits); used by the
+  // Sales Invoice print for Invoice Date / Due Date.
+  private fullYearDateDisplay(value: any): string {
+    if (!value) return '';
+    if (value instanceof Date) {
+      if (Number.isNaN(value.getTime())) return '';
+      return `${String(value.getDate()).padStart(2, '0')}-${String(value.getMonth() + 1).padStart(2, '0')}-${value.getFullYear()}`;
+    }
+    const text = String(value).trim();
+    let match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) return `${match[3]}-${match[2]}-${match[1]}`;
+    match = text.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (match) return `${match[1].padStart(2, '0')}-${match[2].padStart(2, '0')}-${match[3]}`;
+    return this.gridDateDisplay(text);
   }
 
   private paymentTermBySelection(value: any): PaymentTermItem | null {
