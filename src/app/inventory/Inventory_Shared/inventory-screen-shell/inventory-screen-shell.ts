@@ -8375,9 +8375,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['Vehicle No', String(record.vehicle_no || record.vehicleNo || '')],
       ['SO Reference', soReference],
       ['Payment Terms', String(record.payment_terms || record.paymentTerms || '')],
-      ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
+      ['Status', toInventoryTitleCase(String(record.status || 'draft'))]
+      // Header 'Total' removed - the amount already prints as Grand Total below the grid.
       // Previous: ['Total', this.formatCurrency(totals.total)]
-      ['Total', this.invoiceGrandTotalText(totals.total)]
+      // Previous: ['Total', this.invoiceGrandTotalText(totals.total)]
     ];
     const summaryRows = [
       ['Sub total', this.moneyValue(totals.gross)],
