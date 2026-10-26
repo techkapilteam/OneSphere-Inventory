@@ -75,6 +75,8 @@ interface GridExportPayload {
   bankDetails?: Array<[string, string]>;
   orientation?: 'portrait' | 'landscape';
   fileName?: string;
+  gstInvoiceLayout?: boolean;
+  signatureBlock?: boolean;
 }
 
 export interface PriceHintView {
@@ -8211,9 +8213,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const exportColumns = rows.length ? columns : fallbackColumns;
     const exportRows = rows.length ? rows : fallbackRows;
     // Previous: const totals = this.purchaseInvoiceFinancials(record);
-    const fields: Array<[string, string]> = [
+       const fields: Array<[string, string]> = [
       ['PI No', docNo],
-      ['PI Date', this.gridDateDisplay(String(record.pi_date || record.piDate || ''))],
+      // Point 5: full year (23-10-2026). Previous: this.gridDateDisplay(...)
+      ['PI Date', this.invoiceDateDisplay(record.pi_date || record.piDate)],
       ['Vendor', vendorName],
       ['GSTIN', vendorGstin],
       ['Vendor Phone', String(vendor?.mobile || vendor?.contact_mobile || '')],
@@ -8221,12 +8224,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['Branch / Warehouse', locationName],
       ['GRN Reference', String(record.grn_number || record.grnNumber || 'Direct')],
       ['Vendor Invoice No', String(record.vendor_invoice_no || record.vendorInvoiceNo || '')],
-      ['Vendor Invoice Date', this.gridDateDisplay(String(record.vendor_invoice_dt || record.vendorInvoiceDt || ''))],
+      ['Vendor Invoice Date', this.invoiceDateDisplay(record.vendor_invoice_dt || record.vendorInvoiceDt)],
       ['Payment Terms', String(record.payment_terms || record.paymentTerms || '')],
-      ['Due Date', this.gridDateDisplay(String(record.due_date || record.dueDate || ''))],
-      ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
-      // Previous: ['Total', this.formatCurrency(totals.total)]
-      ['Total', this.invoiceGrandTotalText(totals.total)]
+      ['Due Date', this.invoiceDateDisplay(record.due_date || record.dueDate)]
+      // Points 2 and 3: 'Status' and 'Total' removed from the header.
+      // Previous: ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
+      // Previous: ['Total', this.invoiceGrandTotalText(totals.total)]
     ];
     const summaryRows = [
       ['Sub total', this.moneyValue(totals.gross)],
@@ -8237,8 +8240,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]]),
       ['Round off', this.moneyValue(totals.roundOff)]
     ];
+        // Point 4: amount in words in small letters: "Rupees three hundred and fifty four only".
+    const totalInWords = rupeesInWords(totals.total).toLowerCase();
+    const amountInWordsText = totalInWords ? totalInWords.charAt(0).toUpperCase() + totalInWords.slice(1) : '';
     return {
-      title: `Purchase Invoice - ${docNo || 'Selected Record'}`,
+      title: `Purchase Invoice`,
       fields,
       columns: exportColumns,
       rows: exportRows,
@@ -8248,14 +8254,26 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       notesLabel: 'Notes / Terms',
       // Test point 32: Grand Total in words, Indian format, capitals, rounded
       // to rupees (no paise) - e.g. "RUPEES THREE HUNDRED AND FIFTY FOUR ONLY".
-      amountInWords: rupeesInWords(totals.total),
+      amountInWords: amountInWordsText,
       // Test point 31: always print Portrait (like Sales Invoice). Without this
       // the PDF builder chose Landscape for more than 7 columns, and a landscape
       // page printed on A4 portrait paper came out sideways with the right side cut.
       // Previous: (no orientation set -> landscape when more than 7 columns)
       orientation: 'portrait',
+            // Points 6 and 7: words + totals joined under the table, then the
+      // Common Seal / Authorised Signatory row (old printed invoice layout).
+      gstInvoiceLayout: true,
+      signatureBlock: true,
       fileName: `Purchase_Invoice_${docNo || 'Selected_Record'}`
     };
+  }
+
+    // Invoice prints show the full year: 2026-10-23 -> 23-10-2026.
+  private invoiceDateDisplay(value: any): string {
+    const text = String(value ?? '').trim();
+    const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) return `${iso[3]}-${iso[2]}-${iso[1]}`;
+    return this.gridDateDisplay(text);
   }
 
   // Previous: private salesInvoiceDocumentRows(record: any): string[][] {
@@ -8532,6 +8550,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       terms: payload.terms,
       bankDetails: payload.bankDetails,
       orientation: payload.orientation,
+      gstInvoiceLayout: payload.gstInvoiceLayout,
+      signatureBlock: payload.signatureBlock,
       fileName: payload.fileName || payload.title
     };
   }
