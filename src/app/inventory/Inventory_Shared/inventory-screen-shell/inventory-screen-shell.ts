@@ -8347,14 +8347,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const exportRows = rows.length ? rows : fallbackRows;
     const totals = this.salesInvoiceFinancials(record);
     const soReference = String(record.so_number || record.soNumber || record.reference_no || record.referenceNo || 'Direct');
+    // The print lays fields out two per row (left | right) and drops empty
+    // ones, so every field up to State carries a '-' fallback to keep the
+    // columns fixed: GSTIN No prints under Customer, Bill To / Ship To share
+    // a row, and State prints under Ship To.
     const fields: Array<[string, string]> = [
-      ['Invoice No', docNo],
+      ['Invoice No', docNo || '-'],
       // Previous: ['Invoice Date', this.gridDateDisplay(String(record.doc_date || record.docDate || ''))],
       // Previous: ['Due Date', this.gridDateDisplay(String(record.due_date || record.dueDate || ''))],
-      ['Invoice Date', this.fullYearDateDisplay(record.doc_date || record.docDate)],
-      ['Due Date', this.fullYearDateDisplay(record.due_date || record.dueDate)],
-      ['Customer', customerName],
-      ['Customer Phone', String(customer?.mobile || '')],
+      ['Invoice Date', this.fullYearDateDisplay(record.doc_date || record.docDate) || '-'],
+      ['Due Date', this.fullYearDateDisplay(record.due_date || record.dueDate) || '-'],
+      ['Customer', customerName || '-'],
+      ['Customer Phone', String(customer?.mobile || '').trim() || '-'],
+      // Previous position: after State.
+      ['GSTIN No', customerGstin || '-'],
       // Previous: ['Customer Address', this.partyFullAddress(customer)],
       // Delivery Address entered on the invoice (customer master address when
       // none was entered); Ship Address falls back to the delivery address.
@@ -8362,9 +8368,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['Bill To Address', deliveryAddress || '-'],
       // Previous: ['Ship Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
       ['Ship To Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
+      // Previous position: after GSTIN No.
+      ['Place of Supply', String(record.place_of_supply || record.placeOfSupply || '').trim() || '-'],
       ['State', customerState || '-'],
-      ['GSTIN No', customerGstin || '-'],
-      ['Place of Supply', String(record.place_of_supply || record.placeOfSupply || '')],
       ['Warehouse', warehouseName],
       ['Vehicle No', String(record.vehicle_no || record.vehicleNo || '')],
       ['SO Reference', soReference],
