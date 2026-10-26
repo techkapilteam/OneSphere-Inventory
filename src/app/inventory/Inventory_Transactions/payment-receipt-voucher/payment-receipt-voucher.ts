@@ -934,7 +934,8 @@ export class PaymentReceiptVoucherComponent {
         ['Mode of Payment', modes],
         ['Cheque No', cheque.numbers],
         ['Cheque Date', cheque.dates],
-        ['Status', v.status ? v.status.charAt(0).toUpperCase() + v.status.slice(1) : '']
+        // Customer Receipt prints without the Status line.
+        ...(isPay ? [['Status', v.status ? v.status.charAt(0).toUpperCase() + v.status.slice(1) : ''] as [string, string]] : [])
       ],
       columns: ['S.No.', 'Particulars', 'Amount'],
       rows,
