@@ -8383,7 +8383,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     ];
     return {
       // Previous: title: `Sales Invoice - ${docNo || 'Selected Record'}`,
-      title: `Tax Invoice - ${docNo || 'Selected Record'}`,
+      // Previous: title: `Tax Invoice - ${docNo || 'Selected Record'}`,
+      title: 'Tax Invoice',
       fields,
       columns: exportColumns,
       rows: exportRows,
