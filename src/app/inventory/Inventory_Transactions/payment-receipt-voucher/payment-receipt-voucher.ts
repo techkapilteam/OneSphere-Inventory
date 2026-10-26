@@ -909,7 +909,11 @@ export class PaymentReceiptVoucherComponent {
     ]);
     if (!rows.length) rows.push(['1', 'On Account', this.pdfAmt(v.net_amount)]);
     const modes = (v.modes || [])
-      .map(m => `${m.ref_json?.['summary'] || m.mode_key} (${this.pdfAmt(m.amount)})`)
+      .map(m => {
+        const label = m.ref_json?.['summary'] || m.mode_key;
+        // Customer Receipt prints the mode without its amount.
+        return isPay ? `${label} (${this.pdfAmt(m.amount)})` : label;
+      })
       .join(', ');
     const cheque = this.chequeDetails(v);
     const summary: Array<[string, string]> = [];
