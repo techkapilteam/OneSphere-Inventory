@@ -114,10 +114,10 @@
                     <td class="text-right">{{ inv.paid_amount ? fmt(inv.paid_amount) : '—' }}</td>
                     <td class="text-right" style="font-weight:600">{{ fmt(inv.outstanding) }}</td>
                     <td class="text-right pay-alloc-cell">
-                      <input type="text" inputmode="decimal" placeholder="0.00"
+                      <input type="text" inputmode="numeric" placeholder="0"
                         [class.err]="allocExceeds(inv)"
                         [disabled]="!isSelected(inv)"
-                        [ngModel]="allocFor(inv) ? allocFor(inv).toFixed(2) : ''"
+                        [ngModel]="rupeeInput(allocFor(inv))"
                         [ngModelOptions]="{ updateOn: 'blur' }"
                         (ngModelChange)="setAlloc(inv, $event)" />
                       @if (isSelected(inv)) {
@@ -172,10 +172,10 @@
                     <td class="text-right">{{ fmt(note.total_amount) }}</td>
                     <td class="text-right" style="font-weight:600">{{ fmt(note.outstanding) }}</td>
                     <td class="text-right pay-alloc-cell">
-                      <input type="text" inputmode="decimal" placeholder="0.00"
+                      <input type="text" inputmode="numeric" placeholder="0"
                         [class.err]="noteApplyExceeds(note)"
                         [disabled]="!isNoteSelected(note)"
-                        [ngModel]="noteApplyFor(note) ? noteApplyFor(note).toFixed(2) : ''"
+                        [ngModel]="rupeeInput(noteApplyFor(note))"
                         [ngModelOptions]="{ updateOn: 'blur' }"
                         (ngModelChange)="setNoteApply(note, $event)" />
                     </td>
@@ -206,8 +206,8 @@
               <div class="pay-mode-row-head">
                 <div class="erp-form-group pay-mode-amount">
                   <label class="erp-label">Amount (₹)</label>
-                  <input class="erp-input" type="text" inputmode="decimal" style="text-align:right;font-weight:600" placeholder="0.00"
-                    [ngModel]="row.amount ? row.amount.toFixed(2) : ''" [ngModelOptions]="{ updateOn: 'blur' }" (ngModelChange)="setModeAmount(idx, $event)" />
+                  <input class="erp-input" type="text" inputmode="numeric" style="text-align:right;font-weight:600" placeholder="0"
+                    [ngModel]="rupeeInput(row.amount)" [ngModelOptions]="{ updateOn: 'blur' }" (ngModelChange)="setModeAmount(idx, $event)" />
                 </div>
                 @if (isMultiParty()) {
                   <div class="erp-form-group pay-mode-party">
@@ -246,7 +246,7 @@
             <span class="pay-warn">{{ cashLimitMessage() }}</span>
           }
           @if (referenceTotal() || modeTotal()) {
-            @if (Math.abs(modeDiff()) < 0.01) {
+            @if (Math.abs(modeDiff()) < 0.5) {
               <span class="pay-ok">✓ Fully matched</span>
             } @else if (modeShort()) {
               <span class="pay-warn">Short by {{ fmt(-modeDiff()) }}</span>
@@ -266,9 +266,9 @@
                 <span>Remaining Due: <b>{{ fmt(s.remainingDue) }}</b></span>
                 <span>Mode total: <b>{{ fmt(s.modeTotal) }}</b></span>
                 @if (s.reference || s.modeTotal) {
-                  @if (Math.abs(s.diff) < 0.01) {
+                  @if (Math.abs(s.diff) < 0.5) {
                     <span class="pay-ok">✓ Fully matched</span>
-                  } @else if (s.diff < -0.005) {
+                  } @else if (s.diff <= -0.5) {
                     <span class="pay-warn">Short by {{ fmt(-s.diff) }}</span>
                   } @else {
                     <span class="pay-ok">Excess {{ fmt(s.diff) }} — on account</span>

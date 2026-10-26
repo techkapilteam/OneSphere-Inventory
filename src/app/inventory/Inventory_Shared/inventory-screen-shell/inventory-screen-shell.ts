@@ -8097,7 +8097,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     gross: number; discount: number; taxable: number; tax: number; cgst: number; sgst: number; igst: number; isInterstate: boolean; total: number; roundOff: number;
   } {
     const computed = this.documentFinancials(record?.items || []);
-    const total = computed.taxable + computed.tax;
+    // Stored whole-rupee round off (migration 275); 0 on older invoices.
+    const roundOff = Number(record?.round_off ?? record?.roundOff ?? 0) || 0;
+    // Previous: const total = computed.taxable + computed.tax;
+    const total = computed.taxable + computed.tax + roundOff;
 
     const customer = this.customerForRecord(record);
     const branch = this.ourBranchForRecord(record);
@@ -8119,7 +8122,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       igst: isInterstate ? computed.tax : 0,
       isInterstate,
       total,
-      roundOff: 0
+      // Previous: roundOff: 0
+      roundOff
     };
   }
 
@@ -8221,7 +8225,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['Payment Terms', String(record.payment_terms || record.paymentTerms || '')],
       ['Due Date', this.gridDateDisplay(String(record.due_date || record.dueDate || ''))],
       ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
-      ['Total', this.formatCurrency(totals.total)]
+      // Previous: ['Total', this.formatCurrency(totals.total)]
+      ['Total', this.invoiceGrandTotalText(totals.total)]
     ];
     const summaryRows = [
       ['Sub total', this.moneyValue(totals.gross)],
@@ -8237,7 +8242,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       fields,
       columns: exportColumns,
       rows: exportRows,
-      summary: [...summaryRows, ['Grand Total', this.formatCurrency(totals.total)]] as Array<[string, string]>,
+      // Previous: summary: [...summaryRows, ['Grand Total', this.formatCurrency(totals.total)]] as Array<[string, string]>,
+      summary: [...summaryRows, ['Grand Total', this.invoiceGrandTotalText(totals.total)]] as Array<[string, string]>,
       notes: String(record.remarks || ''),
       notesLabel: 'Notes / Terms',
       // Test point 32: Grand Total in words, Indian format, capitals, rounded
@@ -8362,7 +8368,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['SO Reference', soReference],
       ['Payment Terms', String(record.payment_terms || record.paymentTerms || '')],
       ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
-      ['Total', this.formatCurrency(totals.total)]
+      // Previous: ['Total', this.formatCurrency(totals.total)]
+      ['Total', this.invoiceGrandTotalText(totals.total)]
     ];
     const summaryRows = [
       ['Sub total', this.moneyValue(totals.gross)],
@@ -8370,7 +8377,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['Taxable amount', this.moneyValue(totals.taxable)],
       ...(totals.isInterstate
         ? [['IGST', this.moneyValue(totals.igst)]]
-        : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]])
+        : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]]),
+      // Only invoices saved with a round off (migration 275) print the row.
+      ...(totals.roundOff ? [['Round off', this.moneyValue(totals.roundOff)]] : [])
     ];
     return {
       // Previous: title: `Sales Invoice - ${docNo || 'Selected Record'}`,
@@ -8378,7 +8387,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       fields,
       columns: exportColumns,
       rows: exportRows,
-      summary: [...summaryRows, ['Grand Total', this.formatCurrency(totals.total)]] as Array<[string, string]>,
+      // Previous: summary: [...summaryRows, ['Grand Total', this.formatCurrency(totals.total)]] as Array<[string, string]>,
+      summary: [...summaryRows, ['Grand Total', this.invoiceGrandTotalText(totals.total)]] as Array<[string, string]>,
       notes: String(record.customer_notes || record.customerNotes || ''),
       notesLabel: 'Notes',
       // Test point 16: Grand Total in words (same helper as Purchase Invoice).
@@ -11289,6 +11299,35 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return { value: fmt(value), discount: fmt(discount), gst: fmt(gst) };
   }
 
+  // Sales / Purchase Invoice: the whole-rupee Grand Total under the line grid
+  // and the Round Off that gets there. Lines are summed at paise the way the
+  // server does (migration 275 stores the same round off on save).
+  invoiceRoundOffFooter(): { roundOff: string; grandTotal: string } | null {
+    const key = this.config?.key;
+    if (key !== 'salesInvoice' && key !== 'purchaseInvoice') return null;
+    let total = 0;
+    this.directEntryLineRows().forEach((row, rowIndex) => {
+      const preview = this.transactionLineAmountPreview(row, rowIndex);
+      if (!preview) return;
+      total += this.roundLineAmount(preview.total - preview.taxAmount) + this.roundLineAmount(preview.taxAmount);
+    });
+    total = this.roundLineAmount(total);
+    const grandTotal = Math.round(total);
+    const roundOff = this.roundLineAmount(grandTotal - total);
+    return {
+      roundOff: `${roundOff < 0 ? '-' : '+'}${Math.abs(roundOff).toFixed(2)}`,
+      grandTotal: `Rs. ${grandTotal.toLocaleString('en-IN')}`
+    };
+  }
+
+  // Grand Total on a printed invoice: whole rupees once the invoice carries a
+  // round off; older invoices (saved before 275) keep their paise.
+  private invoiceGrandTotalText(total: number): string {
+    return Math.abs(total - Math.round(total)) < 0.005
+      ? `Rs. ${Math.round(total).toLocaleString('en-IN')}`
+      : this.formatCurrency(total);
+  }
+
   // One footer cell of the line grid's Total row, by column: Qty columns and
   // Amount columns are summed as the existing Total rows do; on a priced grid
   // (one with a Rate column) the Rate / Disc % / GST columns show Total
@@ -13069,7 +13108,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const discountPercent = discountIndex >= 0 ? this.parseCurrency(row[discountIndex]) : 0;
     const taxPercent = taxIndex >= 0 ? this.transactionLineGstPercent(row, this.config?.lineColumns?.[taxIndex]) : this.transactionLineGstPercent(row);
     const total = this.transactionLineTaxBreakup(qty, rate, discountPercent, taxPercent, rowIndex).total;
-    row[amountIndex] = Math.round(total).toLocaleString('en-IN');
+    // Line Amount keeps paise (it is saved per line); only the invoice Grand
+    // Total is rounded to whole rupees, through Round Off (migration 275).
+    // Previous: row[amountIndex] = Math.round(total).toLocaleString('en-IN');
+    row[amountIndex] = this.roundLineAmount(total).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
   private amountColumnIndex(): number {

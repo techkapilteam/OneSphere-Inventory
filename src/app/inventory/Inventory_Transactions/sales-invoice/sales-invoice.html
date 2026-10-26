@@ -504,6 +504,35 @@
                     </td>
                   }
                 </tr>
+                @let roundOffFooter = invoiceRoundOffFooter();
+                @if (roundOffFooter) {
+                  <tr class="inventory-line-total-row">
+                    <td class="text-center"></td>
+                    <td></td>
+                    @for (column of renderedColumns; track column) {
+                      <td>
+                        @if (column === 'Item / SKU') {
+                          <strong>Round Off</strong>
+                        } @else if (column === 'Amount') {
+                          <strong>{{ roundOffFooter.roundOff }}</strong>
+                        }
+                      </td>
+                    }
+                  </tr>
+                  <tr class="inventory-line-total-row">
+                    <td class="text-center"></td>
+                    <td></td>
+                    @for (column of renderedColumns; track column) {
+                      <td>
+                        @if (column === 'Item / SKU') {
+                          <strong>Grand Total</strong>
+                        } @else if (column === 'Amount') {
+                          <strong>{{ roundOffFooter.grandTotal }}</strong>
+                        }
+                      </td>
+                    }
+                  </tr>
+                }
               </tfoot>
             </table>
           </div>

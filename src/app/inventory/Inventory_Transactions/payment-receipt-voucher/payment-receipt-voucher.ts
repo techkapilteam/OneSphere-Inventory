@@ -280,7 +280,8 @@ export class PaymentReceiptVoucherComponent {
   // AND a section has actually been picked (rate otherwise unknown).
   readonly tdsAmount = computed(() =>
     this.tdsApplicable() && this.tdsSection() && this.tdsRate() > 0
-      ? Math.round(this.tdsBaseAmount() * this.tdsRate() / 100 * 100) / 100
+      // Whole rupees (Previous: Math.round(this.tdsBaseAmount() * this.tdsRate() / 100 * 100) / 100)
+      ? Math.round(this.tdsBaseAmount() * this.tdsRate() / 100)
       : 0
   );
 
@@ -301,7 +302,8 @@ export class PaymentReceiptVoucherComponent {
   // GST-exclusion circular applies to TCS the way it does to TDS).
   readonly tcsAmount = computed(() =>
     this.tcsThresholdCrossed() && this.tcsPercentage() > 0
-      ? Math.round(this.referenceTotal() * this.tcsPercentage() / 100 * 100) / 100
+      // Whole rupees (Previous: Math.round(this.referenceTotal() * this.tcsPercentage() / 100 * 100) / 100)
+      ? Math.round(this.referenceTotal() * this.tcsPercentage() / 100)
       : 0
   );
 
@@ -337,7 +339,9 @@ export class PaymentReceiptVoucherComponent {
     (this.selectedInvoiceIds().size > 0 ? this.totalAllocated() : this.quickAmount()) - this.totalNotesApplied()
   ));
   readonly modeDiff = computed(() => this.modeTotal() - (this.referenceTotal() - this.tdsAmount() + this.tcsAmount()));
-  readonly modeShort = computed(() => this.modeDiff() < -0.005);
+  // A difference under 50 paise rounds to ₹ 0, so it counts as matched
+  // (only older invoices still carry paise). Previous: this.modeDiff() < -0.005
+  readonly modeShort = computed(() => this.modeDiff() <= -0.5);
 
   // Per-customer totals — each one becomes its own voucher on Save.
   readonly partySummaries = computed<PartySummary[]>(() => {
@@ -410,7 +414,12 @@ export class PaymentReceiptVoucherComponent {
   }
   daysBetween(a: string, b: string): number { return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000); }
   fmtDate(d?: string): string { return d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'; }
-  fmt(n: number | undefined): string { return '₹ ' + Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  // Amounts on this screen are whole rupees (231.8942 -> 232).
+  // Previous: fmt(n: number | undefined): string { return '₹ ' + Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  fmt(n: number | undefined): string { return '₹ ' + Math.round(Number(n || 0)).toLocaleString('en-IN'); }
+
+  // Value shown in an amount input box: whole rupees, blank for 0.
+  rupeeInput(n: number): string { return n ? String(Math.round(n)) : ''; }
 
   agingLabel(inv: OutstandingInvoice): { text: string; cls: string } {
     if (!inv.due_date) return { text: 'Not set', cls: 'badge-success' };
@@ -660,7 +669,10 @@ export class PaymentReceiptVoucherComponent {
   allocFor(inv: OutstandingInvoice): number { return this.allocAmounts()[inv.invoice_id] || 0; }
 
   setAlloc(inv: OutstandingInvoice, value: string): void {
-    let v = this.parseAmt(value);
+    // Previous: let v = this.parseAmt(value);
+    let v = this.parseRupees(value);
+    // Capped at the exact outstanding, so an older invoice with paise still
+    // settles in full when its rounded figure is typed.
     if (v > inv.outstanding) v = inv.outstanding;
     this.allocAmounts.update(a => ({ ...a, [inv.invoice_id]: v }));
   }
@@ -708,7 +720,8 @@ export class PaymentReceiptVoucherComponent {
   noteApplyFor(note: AvailableNote): number { return this.noteApplyAmounts()[note.note_id] || 0; }
 
   setNoteApply(note: AvailableNote, value: string): void {
-    let v = this.parseAmt(value);
+    // Previous: let v = this.parseAmt(value);
+    let v = this.parseRupees(value);
     if (v > note.outstanding) v = note.outstanding;
     this.noteApplyAmounts.update(a => ({ ...a, [note.note_id]: v }));
   }
@@ -731,6 +744,9 @@ export class PaymentReceiptVoucherComponent {
     const n = parseFloat(String(v).replace(/[^0-9.]/g, ''));
     return isNaN(n) ? 0 : n;
   }
+
+  // Typed amounts are whole rupees; parseAmt() stays for percentages (TCS %).
+  parseRupees(v: string): number { return Math.round(this.parseAmt(v)); }
 
   autoAllocate(): void {
     let amt = this.quickAmount();
@@ -756,10 +772,12 @@ export class PaymentReceiptVoucherComponent {
     if (this.isMultiParty()) {
       // Default the new row to the first customer still short of receipts.
       const short = this.partySummaries().find(s => s.diff < -0.005);
-      this.modeRows.update(rows => [...rows, { details: defaultPaymentModeValue(), amount: short ? -short.diff : 0, partyId: short?.id ?? null }]);
+      // Previous: amount: short ? -short.diff : 0
+      this.modeRows.update(rows => [...rows, { details: defaultPaymentModeValue(), amount: short ? Math.round(-short.diff) : 0, partyId: short?.id ?? null }]);
       return;
     }
-    const remain = Math.max(0, this.referenceTotal() - this.modeTotal());
+    // Previous: const remain = Math.max(0, this.referenceTotal() - this.modeTotal());
+    const remain = Math.max(0, Math.round(this.referenceTotal() - this.modeTotal()));
     this.modeRows.update(rows => [...rows, { details: defaultPaymentModeValue(), amount: remain, partyId: this.singlePartyId() }]);
   }
   setModeParty(idx: number, partyId: number | null): void {
@@ -767,7 +785,8 @@ export class PaymentReceiptVoucherComponent {
   }
   removeMode(idx: number): void { this.modeRows.update(rows => rows.filter((_, i) => i !== idx)); }
   setModeAmount(idx: number, value: string): void {
-    const v = this.parseAmt(value);
+    // Previous: const v = this.parseAmt(value);
+    const v = this.parseRupees(value);
     this.modeRows.update(rows => rows.map((r, i) => i === idx ? { ...r, amount: v } : r));
   }
   setModeDetails(idx: number, details: PaymentModeSelectorValue): void {
@@ -942,7 +961,8 @@ export class PaymentReceiptVoucherComponent {
   }
 
   private pdfAmt(n: number | undefined): string {
-    return Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // Previous: return Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return Math.round(Number(n || 0)).toLocaleString('en-IN');
   }
 
   private pdfDate(d?: string): string {
