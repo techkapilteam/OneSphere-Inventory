@@ -8421,7 +8421,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       notes: String(record.customer_notes || record.customerNotes || ''),
       notesLabel: 'Notes',
       // Test point 16: Grand Total in words (same helper as Purchase Invoice).
-      amountInWords: rupeesInWords(totals.total),
+      // Previous: amountInWords: rupeesInWords(totals.total),  (all capitals)
+      // Title case instead, e.g. "Rupees Three Hundred And Fifty Four Only".
+      amountInWords: rupeesInWords(totals.total).toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase()),
       terms: SALES_INVOICE_TERMS,
       // Previous order: Bank Name, Branch Name, Account No, IFSC CODE.
       // Account Name = login company name from session storage (CompanyDetails),
