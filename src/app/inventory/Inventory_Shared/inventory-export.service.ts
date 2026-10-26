@@ -53,7 +53,8 @@ const R_MARGIN = 15;
 const CODE_HEADER = /\b(no\.?|number|code|phone|mobile|pin|gstin|pan|hsn|sac|id)\b/i;
 const TERMS_LINE_HEIGHT = 3.6;
 /** Rendered height (mm) of the Bank Details / Authorised Signatory box. */
-const BANK_BOX_HEIGHT = 46;
+// Previous: 46 (4 bank rows); +Account Name row, which can wrap.
+const BANK_BOX_HEIGHT = 58;
 const NUMERIC_CELL =/^-?(rs\.?\s*|₹\s*)?-?[\d,]+(\.\d+)?\s*%?$/i;
 
 @Injectable({ providedIn: 'root' })
@@ -645,7 +646,9 @@ export class InventoryExportService {
       ['', '', 'Authorised Signatory']
     ];
     const lastRow = body.length - 1;
-    const widths = [width * 0.36, width * 0.2, width * 0.44];
+    // Previous: [0.36, 0.2, 0.44] — "Account Name : <company>" wrapped onto two
+    // lines; the blank middle column gives up its width so it stays on one.
+    const widths = [width * 0.54, width * 0.02, width * 0.44];
     autoTable(doc, {
       body,
       theme: 'plain',
@@ -751,7 +754,7 @@ export class InventoryExportService {
       .map(({ index }) => index);
   }
 
-  private companyDetails(): any {
+  companyDetails(): any {
     try {
       const raw = sessionStorage.getItem('CompanyDetails');
       if (!raw) return {};

@@ -8405,11 +8405,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Test point 16: Grand Total in words (same helper as Purchase Invoice).
       amountInWords: rupeesInWords(totals.total),
       terms: SALES_INVOICE_TERMS,
+      // Previous order: Bank Name, Branch Name, Account No, IFSC CODE.
+      // Account Name = login company name from session storage (CompanyDetails),
+      // same source as the letterhead.
       bankDetails: [
+        ['Account Name', String(this.exportService.companyDetails()?.companyName || '').trim()],
         ['Bank Name', bank?.bankName || ''],
-        ['Branch Name', bank?.branchName || ''],
         ['Account No', bank?.accountNo || ''],
-        ['IFSC CODE', bank?.ifscCode || '']
+        ['Branch Name', bank?.branchName || ''],
+        ['IFSC Code', bank?.ifscCode || '']
       ],
       // Portrait like the earlier invoice report, so the terms and the bank /
       // signatory box fit on the same page as the items (landscape A4 is too
