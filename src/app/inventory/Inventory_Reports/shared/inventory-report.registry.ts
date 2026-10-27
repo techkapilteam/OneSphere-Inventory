@@ -495,7 +495,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
   phaseOneReport({
     key: 'batchSerialExpiry',
     slug: 'batch-serial-expiry',
-    title: 'Batch / Serial / Expiry Report',
+    title: 'Batch / Serial / Expiry Closed Report',
     groupId: 'batchSerialExpiry',
     endpoint: 'batch-serial-expiry',
     icon: 'pi pi-barcode',
