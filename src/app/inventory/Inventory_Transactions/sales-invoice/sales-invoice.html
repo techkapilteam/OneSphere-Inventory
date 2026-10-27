@@ -368,6 +368,7 @@
               <thead>
                 <tr>
                   <th class="text-center">Actions</th>
+                  <th class="text-center">S.No</th>
                   @for (column of renderedColumns; track column) {
                     <th [class]="lineGridColumnCssClass(column)" [style.width]="lineGridColumnWidthPx(column)">
                       {{ lineGridColumnHeader(column) }}
@@ -385,6 +386,7 @@
                         <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove row" (click)="removeEntryLineRow(rowIndex)"><i class="pi pi-trash"></i></button>
                       </div>
                     </td>
+                    <td class="text-center">{{ rowIndex + 1 }}</td>
                     @let rowView = rowViews[rowIndex];
                     @for (column of renderedColumns; track column) {
                       @let columnIndex = lineGridSourceColumnIndex(column);
@@ -485,6 +487,7 @@
                 @let footerTotals = lineFooterTotals();
                 <tr class="inventory-line-total-row">
                   <td class="text-center"></td>
+                  <td></td>
                   @for (column of renderedColumns; track column) {
                     <td>
                       @if (column === 'Item / SKU') {
@@ -501,6 +504,61 @@
                     </td>
                   }
                 </tr>
+                @let roundOffFooter = invoiceRoundOffFooter();
+                @if (roundOffFooter) {
+                  <tr class="inventory-line-total-row">
+                    <td class="text-center"></td>
+                    <td></td>
+                    @for (column of renderedColumns; track column) {
+                      <td>
+                        @if (column === 'Item / SKU') {
+                          <strong>Round Off</strong>
+                        } @else if (column === 'Amount') {
+                          <strong>{{ roundOffFooter.roundOff }}</strong>
+                        }
+                      </td>
+                    }
+                  </tr>
+                  <tr class="inventory-line-total-row">
+                    <td class="text-center"></td>
+                    <td></td>
+                    @for (column of renderedColumns; track column) {
+                      <td>
+                        @if (column === 'Item / SKU') {
+                          <strong>Grand Total</strong>
+                        } @else if (column === 'Amount') {
+                          <strong>{{ roundOffFooter.grandTotal }}</strong>
+                        }
+                      </td>
+                    }
+                  </tr>
+                  <tr class="inventory-line-total-row">
+                    <td class="text-center"></td>
+                    <td></td>
+                    @for (column of renderedColumns; track column) {
+                      <td>
+                        @if (column === 'Item / SKU') {
+                          <strong>Previous Balance</strong>
+                        } @else if (column === 'Amount') {
+                          <strong>{{ balanceText(previousBalance()) }}</strong>
+                        }
+                      </td>
+                    }
+                  </tr>
+                  <tr class="inventory-line-total-row">
+                    <td class="text-center"></td>
+                    <td></td>
+                    @for (column of renderedColumns; track column) {
+                      <td>
+                        @if (column === 'Item / SKU') {
+                          <strong>Total Balance</strong>
+                        } @else if (column === 'Amount') {
+                          <strong>{{ balanceText(previousBalance() + roundOffFooter.grandTotalValue) }}</strong>
+                        }
+                      </td>
+                    }
+                  </tr>
+                }
               </tfoot>
             </table>
           </div>

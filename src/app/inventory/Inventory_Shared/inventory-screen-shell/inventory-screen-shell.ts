@@ -8,10 +8,12 @@ import { DatePickerModule } from 'primeng/datepicker';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Observable, Subject, catchError, concatMap, debounceTime, distinctUntilChanged, forkJoin, from, map, of, switchMap, tap } from 'rxjs';
 import { ApiResponse, AttributeItem, BomItem, BomLineItem, PriceListItem, WorkCenterItem, AttributeValueItem, BranchInvItem, CategoryItem, ChannelPartnerItem, ContactItem, CustomerItem, GstRateGuide, HsnSacItem, InventoryConfigService, PaymentTermItem, ProductApplicableVariant, ProductBundleItem, ProductItem, ProductTypeItem, ProductUomConversion, ProductVariantStockAttribute, ProductVariantStockControl, SegmentItem, SerialPolicyItem, TaxCodeSuggestion, UomItem, VariantCombinationRow, VariantItem, VendorItem, WarehouseItem } from '../inventory-config.service';
-import { AvailableStock, InventoryTransactionsService, PurchaseRefDoc, ServiceBundleConsumption, TransportDetails } from '../inventory-transactions.service';
+import { AvailableStock, InventoryTransactionsService, PurchaseRefDoc, ServiceBundleConsumption, TransportDetails,UinRegistrationRow, UinRegistrationSaveItem, IdentifierRegistrationRow, IdentifierRegistrationSaveItem, RegistrationPolicyOption } from '../inventory-transactions.service';
 import { applyInventoryTextCase, inventoryTextCaseForField, inventoryTextCaseForLineColumn, toInventoryTitleCase } from '../inventory-text-case.util';
 import { InventoryExportService } from '../inventory-export.service';
+import { rupeesInWords } from '../inventory-amount-in-words';
 import { InvoiceBankDetails, PaymentsService } from '../payments.service';
+import { attachInventorySaveToast } from '../inventory-save-toast/inventory-save-toast.component';
 import {
   INVENTORY_KPIS,
   INVENTORY_OPTIONS,
@@ -67,10 +69,18 @@ interface GridExportPayload {
   summary?: Array<[string, string]>;
   notes?: string;
   notesLabel?: string;
+  amountInWords?: string;
+  amountInWordsPosition?: 'left' | 'below' | 'box';
+  columnGroups?: Array<[string, number]>;
+  totalRow?: string[];
+  fitOnePage?: boolean;
+  copyType?: string;
   terms?: string[];
   bankDetails?: Array<[string, string]>;
   orientation?: 'portrait' | 'landscape';
   fileName?: string;
+  gstInvoiceLayout?: boolean;
+  signatureBlock?: boolean;
 }
 
 export interface PriceHintView {
@@ -104,8 +114,63 @@ interface ManufacturingBomRecord {
   quantityPerUnit: number;
   wastagePercent: number;
   productionCost: number;
+  materials: Array<{ productName: string; quantity: number }>;
   status: string;
 }
+
+// BOM Master: one raw-material line = what is needed for ONE finished unit.
+// Wastage is recorded only; it does not increase the quantity.
+export interface BomMaterialLine {
+  productId: number | null;
+  productName: string;
+  uomId: number | null;
+  uomName: string;
+  quantity: number;
+  wastagePercent: number;
+}
+
+const NO_BOM_LINES: BomMaterialLine[] = [];
+// Identifier Registration: what the user typed on a row (not saved yet)
+interface UinDraft {
+  value: string;
+  registration_date: string;   // yyyy-MM-dd
+  reference_no: string;
+}
+type UinField = keyof UinDraft;
+
+// Category Master: one policy row being edited (migration 265)
+// Category Master: one policy row being edited (migration 265)
+interface CategoryPolicyDraft {
+  policyId: number | null;
+  policyName: string;
+  captureStage: string;          // stage code
+  isMandatory: boolean;
+  isUniqueIdentifier: boolean;
+  // While a row is the Unique Identifier its stage/mandatory are forced;
+  // these keep the user's own values to restore when it stops being one.
+  savedStage?: string | null;
+  savedMandatory?: boolean | null;
+}
+// Phase 2 (migration 266): a policy captured at Stock Inward (not the Unique Identifier)
+interface InwardPolicy {
+  policyId: number;
+  policyName: string;
+  isMandatory: boolean;
+}
+
+// rowIndex -> serial -> policyId -> value
+type LineSerialIdentifiers = Record<number, Record<string, Record<number, string>>>;
+// rowIndex -> policyId -> value (quantity products: one value per line)
+type LineIdentifierValues = Record<number, Record<number, string>>;
+
+const POLICY_CAPTURE_STAGES: { code: string; label: string }[] = [
+  { code: 'stock_inward',             label: 'Stock Inward' },
+  { code: 'sales_invoice',            label: 'Sales Invoice' },
+  { code: 'both_inward_sale',         label: 'Both Inward and Sale' },
+  { code: 'registration_before_sale', label: 'Registration before Sale' },
+  { code: 'warranty_registration',    label: 'Warranty Registration' }
+];
+
 
 interface GlobalContactOption {
   id?: number;
@@ -255,7 +320,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private readonly inventoryConfigService = inject(InventoryConfigService);
   protected readonly txService = inject(InventoryTransactionsService);
   private readonly exportService = inject(InventoryExportService);
-  private readonly paymentsService = inject(PaymentsService);
+  protected readonly paymentsService = inject(PaymentsService);
   // Bank block on the Sales Invoice print — loaded once in ngOnInit because
   // the export payload builders are synchronous.
   private readonly invoiceBankDetails = signal<InvoiceBankDetails | null>(null);
@@ -271,9 +336,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private readonly activatedRoute = inject(ActivatedRoute, { optional: true });
 
   // ── Reference picker ─────────────────────────────────────────────────────
-  readonly refPickerOpen  = signal(false);
-  readonly refPickerType  = signal('');
-  readonly refPickerDocs  = signal<PurchaseRefDoc[]>([]);
+  readonly refPickerOpen = signal(false);
+  readonly refPickerType = signal('');
+  readonly refPickerDocs = signal<PurchaseRefDoc[]>([]);
   readonly refPickerSearch = signal('');
   readonly refPickerLoading = signal(false);
   // Drill-down row in the reference-picker tray (Purchase Return's "Posted
@@ -286,12 +351,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private transactionReferenceOptionsCacheKey = '';
   private transactionReferenceOptionsCache: string[] = [];
   private readonly purchaseInvoiceReservedGrnRefKeys = new Set<string>();
-  readonly txDocId        = signal<number | null>(null);
-  readonly txDocNumber    = signal('');
-  readonly txDocStatus    = signal('draft');
-  readonly txSaving       = signal(false);
-  readonly txSaveMsg      = signal('');
-  readonly txSaveError    = signal('');
+  readonly txDocId = signal<number | null>(null);
+  readonly txDocNumber = signal('');
+  readonly txDocStatus = signal('draft');
+  readonly txSaving = signal(false);
+  readonly txSaveMsg = signal('');
+  readonly txSaveError = signal('');
   readonly bundleConsumptionOpen = signal(false);
   readonly bundleConsumptionInvoiceId = signal<number | null>(null);
   readonly bundleConsumptionInvoiceNo = signal('');
@@ -397,13 +462,32 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // ── API form-capture state ────────────────────────────────────────────────
   readonly genericNameValue = signal('');
 
-  readonly existingRowMatches = computed(() => {
+     readonly existingRowMatches = computed(() => {
     const q = this.genericNameValue().trim().toLowerCase();
     if (q.length < 2) return [];
-    return this.liveRows().filter(row =>
-      row.some(cell => cell.toLowerCase().includes(q))
-    ).slice(0, 6);
+
+    // While a saved record is open, leave that record itself out of the hint.
+    const editingId = this.editingId();
+    const editingRecord = editingId
+      ? this.savedRecordObjects().find((r: any) => Number(r?.id) === Number(editingId))
+      : null;
+    const editingRow = editingRecord ? this.mapToGridRows([editingRecord])[0] : null;
+
+    // Match on what the hint shows (code and name), not on every column:
+    // text like "Not used yet" in other columns would match almost anything.
+    return this.liveRows()
+      .filter(row => !(editingRow && row[0] === editingRow[0]))
+      .filter(row => [row[0], row[1]].some(cell => String(cell ?? '').toLowerCase().includes(q)))
+      .slice(0, 6);
   });
+
+  // A row in the "existing" panel is only a real duplicate when one of its
+  // cells equals the typed name exactly; a partial match (e.g. "Drone Frame"
+  // vs "Drone Frame Assembly") is just a similar name, so it is labelled so.
+  isExactExistingMatch(row: string[]): boolean {
+    const q = this.genericNameValue().trim().toLowerCase();
+    return !!q && row.some(cell => String(cell ?? '').trim().toLowerCase() === q);
+  }
 
   readonly formValues = signal<Record<string, any>>({});
   readonly savedRecordObjects = signal<any[]>([]);
@@ -448,10 +532,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   readonly isBatchSaving = signal(false);
   readonly isAdmin = signal(false);
 
-  readonly quickAddName       = signal('');
-  readonly quickAddCode       = signal('');
-  readonly isSavingQuickAdd   = signal(false);
-  readonly quickAddError      = signal('');
+  readonly quickAddName = signal('');
+  readonly quickAddCode = signal('');
+  readonly isSavingQuickAdd = signal(false);
+  readonly quickAddError = signal('');
   readonly addMasterSourceFieldKey = signal<string | null>(null);
   private readonly inlineManufacturingFieldOptions = signal<Record<string, string[]>>({});
   private readonly inlineManufacturingOptionsCache = new Map<string, { signature: string; options: string[] }>();
@@ -460,7 +544,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // from hsnSacCode/gstRate (the product form's own tax fields) so opening
   // this popup while a product already has an HSN code selected doesn't
   // clobber that selection before the popup is saved or cancelled.
-  readonly quickAddHsnType    = signal<'HSN' | 'SAC'>('HSN');
+  readonly quickAddHsnType = signal<'HSN' | 'SAC'>('HSN');
   readonly quickAddHsnGstRate = signal<number | null>(null);
 
   // Suggestions shown when typing in quick-add Name fields to prevent duplicates
@@ -472,16 +556,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     switch (master) {
       // Company-wide list (not segment-scoped) — matches what sp_upsert_uom actually checks,
       // so the warning shows even when this segment's own UOM list is still empty.
-      case 'UOM':                  pool = this.loadedUomObjects().map(u => u.uom_name).filter((n): n is string => !!n); break;
-      case 'Category':             pool = this.categoryOptions; break;
-      case 'Variant':              pool = this.variantOptions; break;
-      case 'Attribute':            pool = this.attributeOptions; break;
-      case 'Brand':                pool = this.brandOptions; break;
+      case 'UOM': pool = this.loadedUomObjects().map(u => u.uom_name).filter((n): n is string => !!n); break;
+      case 'Category': pool = this.categoryOptions; break;
+      case 'Variant': pool = this.variantOptions; break;
+      case 'Attribute': pool = this.attributeOptions; break;
+      case 'Brand': pool = this.brandOptions; break;
       case 'Serial Number Policy': pool = this.serialPolicyOptions; break;
-      case 'Batch / Lot Policy':   pool = this.batchPolicyOptions; break;
-      case 'Product Type':         pool = this.productTypeOptions; break;
-      case 'Manufacturer':         pool = this.manufacturerOptions; break;
-      case 'Tax Category':         pool = this.taxCategoryOptions; break;
+      case 'Batch / Lot Policy': pool = this.batchPolicyOptions; break;
+      case 'Product Type': pool = this.productTypeOptions; break;
+      case 'Manufacturer': pool = this.manufacturerOptions; break;
+      case 'Tax Category': pool = this.taxCategoryOptions; break;
       default: return [];
     }
     return pool.filter(opt => opt.toLowerCase().includes(input)).slice(0, 8);
@@ -492,16 +576,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!input) return false;
     return this.quickAddSuggestions().some(opt => opt.toLowerCase() === input);
   });
-  readonly productCodeIsAuto  = signal(false);
-  readonly skuIsAuto          = signal(false);
+  readonly productCodeIsAuto = signal(false);
+  readonly skuIsAuto = signal(false);
   private _quickAddCodeManuallySet = false;
-  readonly quickAddUomSymbol     = signal('');
-  readonly quickAddUomType       = signal('Base');
-  readonly quickAddParentMaster  = signal('');
-  readonly quickAddParentName    = signal('');
-  readonly quickAddParentCode    = signal('');
-  readonly quickAddVariantRows   = signal<Array<{name: string; value: any}>>([{name: '', value: ''}]);
-  private _autoCodeFields        = new Set<string>();
+  readonly quickAddUomSymbol = signal('');
+  readonly quickAddUomType = signal('Base');
+  readonly quickAddParentMaster = signal('');
+  readonly quickAddParentName = signal('');
+  readonly quickAddParentCode = signal('');
+  readonly quickAddVariantRows = signal<Array<{ name: string; value: any }>>([{ name: '', value: '' }]);
+  private _autoCodeFields = new Set<string>();
 
   readonly kpis = INVENTORY_KPIS;
   private readonly segmentCardList = signal<InventorySegment[]>([]);
@@ -548,18 +632,29 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // shows already-captured serials (e.g. a GRN-linked PI line) with no
   // add/remove affordances, distinct from 'inherited' (which is specifically
   // the DC/SI cross-reference flow with its own "reserved via ..." copy).
-  readonly activeSerialPicker = signal<{ rowIndex: number; mode: 'capture' | 'select' | 'inherited' | 'view'; qtyNeeded: number; productId: number | null; productName: string; warrantyApplicable: boolean; saleWarrantyApplicable?: boolean } | null>(null);
+  // readonly activeSerialPicker = signal<{ rowIndex: number; mode: 'capture' | 'select' | 'inherited' | 'view'; qtyNeeded: number; productId: number | null; productName: string; warrantyApplicable: boolean; saleWarrantyApplicable?: boolean } | null>(null);
+
+    readonly activeSerialPicker = signal<{ rowIndex: number; mode: 'capture' | 'select' | 'inherited' | 'view' | 'lineValues'; qtyNeeded: number; productId: number | null; productName: string; warrantyApplicable: boolean; saleWarrantyApplicable?: boolean; inwardPolicies?: InwardPolicy[] } | null>(null);
   // Sales Invoice serial popup: warranty dates added with "+" for units of a
   // Warranty Applicable product that got no warranty at purchase, keyed by
   // serial no. Saved on the SI line as serial_warranty (same shape as GRN/PI)
   // and stamped onto the serial unit when the invoice posts.
   readonly serialPickerSaleWarrantyEdits = signal<Record<string, string>>({});
   readonly serialPickerDraftValues = signal<string[]>([]);
-  readonly serialPickerAvailableOptions = signal<{ id: number; serial_no: string; warranty_upto?: string | null; manufacturing_date?: string | null }[]>([]);
+  readonly serialPickerAvailableOptions = signal<{ id: number; serial_no: string; warranty_upto?: string | null; manufacturing_date?: string | null; missing_registration?: string | null }[]>([]);
   // Per-line, per-serial warranty (capture mode only — GRN / Direct PI, the
   // screens that actually create new serial units). Populated by the shared
   // default below unless a specific serial has been individually overridden.
   readonly lineSerialWarrantyMap = signal<Record<number, Record<string, SerialWarrantyEntry>>>({});
+    // Phase 2: policy values per unit / per line, saved from the serial popup
+  readonly lineSerialIdentifiersMap = signal<LineSerialIdentifiers>({});
+  readonly lineIdentifierValuesMap = signal<LineIdentifierValues>({});
+  // The popup's working copy: serial -> policyId -> value
+  readonly serialPickerIdentifierDraft = signal<Record<string, Record<number, string>>>({});
+    // Phase 2 (2.6g): quantity products, the popup's working copy: policyId -> value
+  readonly serialPickerLineValuesDraft = signal<Record<number, string>>({});
+    // Phase 2: live warnings per cell, key "serial|policyId"
+  readonly serialPickerIdentifierWarnings = signal<Record<string, string>>({});
   // The picker's own working state while open: one shared default applied to
   // every serial that hasn't been overridden, plus the set of per-serial
   // overrides entered so far. "Same for all" is simply never overriding
@@ -1419,7 +1514,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: res => this.loadedContactObjects.set(res.data ?? []),
-        error: () => {}
+        error: () => { }
       });
   }
 
@@ -1446,7 +1541,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: res => this.loadedGlobalMstContacts.set(res.data ?? []),
-        error: () => {} // legacy schema may be absent in some environments — fail quiet, keep inv_contacts working
+        error: () => { } // legacy schema may be absent in some environments — fail quiet, keep inv_contacts working
       });
   }
 
@@ -1481,6 +1576,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   });
 
   constructor() {
+    // Vendor Payment style top-right toast for every save / post / delete
+    // message on all screens built on this shell. Vendor Payment / Customer
+    // Receipt only embed the shell for their header and raise their own
+    // toast, so they're left exactly as they were.
+    attachInventorySaveToast(this.saveMsg, this.saveError,
+      () => ['vendorPayment', 'customerReceipt'].includes(this.config?.key || ''));
+
     // Safety net for startLineGridColumnResize(): if the component is
     // destroyed mid-drag (route navigation while a resize handle is still
     // held down), drop the document-level listeners rather than leaking them.
@@ -1628,6 +1730,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (this.config?.key === 'productServiceMaster' || this.config?.key === 'hsnSacMapping') {
       this.loadTaxCodeSourceStatus();
       this.loadGstGuide();
+    }
+    // UIN Registration: load the units waiting for a UIN when the screen opens
+        if (this.config?.key === 'uinRegistration') {
+      this.loadRegistrationPolicies();
     }
   }
 
@@ -1904,7 +2010,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   onProductNameChange(value: string): void {
-    const name = toInventoryTitleCase(value ?? '');
+    // Previous: const name = toInventoryTitleCase(value ?? '');
+    const name = value ?? '';
     this.productName.set(name);
     if (!name || !name.trim()) {
       if (this.editingId() !== null || this.editingPendingIndex() !== null) {
@@ -1923,8 +2030,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (c) { this.collectFormField('productCode', c); this.productCodeIsAuto.set(true); }
     }
     if (!this.formValues()['sku'] || this.skuIsAuto()) {
-      const cat     = this.selectedProductCategory() || undefined;
-      const brand   = this.formValues()['brand'] as string || undefined;
+      const cat = this.selectedProductCategory() || undefined;
+      const brand = this.formValues()['brand'] as string || undefined;
       const variant = this.formValues()['variant'] as string || undefined;
       const s = this.generateSku(name, cat, brand, variant);
       if (s) { this.collectFormField('sku', s); this.skuIsAuto.set(true); }
@@ -2084,14 +2191,17 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   onProductCategoryChange(value: string | null): void {
     this.selectedProductCategory.set(value || '');
+    this.syncProductSerialFromCategory();
 
     if (!value) {
+      // Clear the stale id too, so UIN / locks don't follow the old category.
+      this.collectFormField('categoryId', null);
       this.productSerialApplicable.set(false);
       this.productBatchApplicable.set(false);
       this.collectFormField('serialPolicyName', null);
       this.collectFormField('batchPolicyName', null);
       if (this.editingId() === null && this.skuIsAuto()) {
-        const brand   = this.formValues()['brand'] as string || undefined;
+        const brand = this.formValues()['brand'] as string || undefined;
         const variant = this.formValues()['variant'] as string || undefined;
         const s = this.generateSku(this.productName(), undefined, brand, variant);
         this.collectFormField('sku', s || '');
@@ -2143,7 +2253,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
 
     if (this.editingId() === null && (!this.formValues()['sku'] || this.skuIsAuto())) {
-      const brand   = this.formValues()['brand'] as string || undefined;
+      const brand = this.formValues()['brand'] as string || undefined;
       const variant = this.formValues()['variant'] as string || undefined;
       const s = this.generateSku(this.productName(), value, brand, variant);
       if (s) { this.collectFormField('sku', s); this.skuIsAuto.set(true); }
@@ -2154,7 +2264,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.collectFormField('brand', brand);
     if (this.editingId() !== null) return;
     if (!this.formValues()['sku'] || this.skuIsAuto()) {
-      const cat     = this.selectedProductCategory() || undefined;
+      const cat = this.selectedProductCategory() || undefined;
       const variant = this.formValues()['variant'] as string || undefined;
       const s = this.generateSku(this.productName(), cat, brand || undefined, variant);
       if (s) { this.collectFormField('sku', s); this.skuIsAuto.set(true); }
@@ -2165,7 +2275,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.collectFormField('variant', variant);
     if (this.editingId() !== null) return;
     if (!this.formValues()['sku'] || this.skuIsAuto()) {
-      const cat   = this.selectedProductCategory() || undefined;
+      const cat = this.selectedProductCategory() || undefined;
       const brand = this.formValues()['brand'] as string || undefined;
       const s = this.generateSku(this.productName(), cat, brand, this.variantNameFromSelection(variant || undefined) || undefined);
       if (s) { this.collectFormField('sku', s); this.skuIsAuto.set(true); }
@@ -2875,6 +2985,57 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return serialMap;
   }
 
+   // Phase 2: a line's policy values in the format the API expects (lists, fixed keys)
+  protected lineIdentifierPayload(index: number): { serial_identifiers: any[] | null; line_identifiers: any[] | null } {
+    const toValues = (values: Record<number, string> | undefined) =>
+      Object.entries(values || {})
+        .map(([policyId, value]) => ({ policy_id: Number(policyId), value: String(value ?? '').trim() }))
+        .filter(v => v.policy_id > 0 && v.value);
+
+    const serials = this.lineSerialUnitsMap()[index] || [];
+    const perSerial = this.lineSerialIdentifiersMap()[index] || {};
+    const serialIdentifiers = serials
+      .map(serial => ({ serial, values: toValues(perSerial[serial]) }))
+      .filter(entry => entry.values.length);
+
+    const lineValues = toValues(this.lineIdentifierValuesMap()[index]);
+
+    return {
+      serial_identifiers: serialIdentifiers.length ? serialIdentifiers : null,
+      line_identifiers: lineValues.length ? lineValues : null
+    };
+  }
+
+    // Phase 2: rebuild the policy-value maps from saved items (reopened draft / record)
+  protected lineIdentifierMapsFromItems(items: any[] | null | undefined, startIndex = 0): { serial: LineSerialIdentifiers; line: LineIdentifierValues } {
+    const serial: LineSerialIdentifiers = {};
+    const line: LineIdentifierValues = {};
+    const toMap = (values: any[] | null | undefined): Record<number, string> => {
+      const out: Record<number, string> = {};
+      for (const v of values || []) {
+        const policyId = Number(v?.policy_id ?? v?.policyId);
+        const value = String(v?.value ?? '').trim();
+        if (policyId > 0 && value) out[policyId] = value;
+      }
+      return out;
+    };
+    (items || []).forEach((item: any, index: number) => {
+      const row = startIndex + index;
+      const perSerial = item?.serial_identifiers ?? item?.serialIdentifiers;
+      if (Array.isArray(perSerial) && perSerial.length) {
+        const bySerial: Record<string, Record<number, string>> = {};
+        for (const entry of perSerial) {
+          const key = String(entry?.serial ?? '').trim();
+          if (key) bySerial[key] = toMap(entry?.values);
+        }
+        if (Object.keys(bySerial).length) serial[row] = bySerial;
+      }
+      const lineValues = toMap(item?.line_identifiers ?? item?.lineIdentifiers);
+      if (Object.keys(lineValues).length) line[row] = lineValues;
+    });
+    return { serial, line };
+  }
+
   protected productStockLimitsForLine(
     product: ProductItem | null | undefined,
     variantId: number | null | undefined,
@@ -2985,7 +3146,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     ]);
   }
 
-  private findCustomerBySelection(value: any): CustomerItem | null {
+  protected findCustomerBySelection(value: any): CustomerItem | null {
     const raw = String(value ?? '').trim();
     if (!raw) return null;
     const selectedKey = this.normalizeKey(raw);
@@ -3356,13 +3517,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
       if (activeWarehouseId != null && fromWarehouseId !== activeWarehouseId) {
         return `From: a Stock Transfer can only send stock out of `
-             + `${this.sessionActiveWarehouse()?.warehouse_name || 'your active warehouse'}. `
-             + `Switch your active location to transfer from somewhere else.`;
+          + `${this.sessionActiveWarehouse()?.warehouse_name || 'your active warehouse'}. `
+          + `Switch your active location to transfer from somewhere else.`;
       }
       if (activeWarehouseId == null && activeBranchId != null && fromBranchId !== activeBranchId) {
         return `From: a Stock Transfer can only send stock out of `
-             + `${this.sessionActiveBranch()?.branch_name || 'your active branch'}. `
-             + `Switch your active location to transfer from somewhere else.`;
+          + `${this.sessionActiveBranch()?.branch_name || 'your active branch'}. `
+          + `Switch your active location to transfer from somewhere else.`;
       }
     }
 
@@ -3424,7 +3585,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return this.compactKey(product?.product_nature_name || product?.product_type || '');
   }
 
-  private productIsManufacturingRawMaterial(product: ProductItem | null | undefined): boolean {
+  protected productIsManufacturingRawMaterial(product: ProductItem | null | undefined): boolean {
     if (!product || !this.productTracksStock(product)) return false;
     const nature = this.productNatureKey(product);
     if (!InventoryScreenShell.MANUFACTURING_RAW_NATURE_KEYS.has(nature)) return false;
@@ -3513,47 +3674,47 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // branch resolves does the default fall back to the warehouse, as before.
     noWarehouseFallback?: boolean;
   }>> = {
-    // Merged Warehouse/Branch fields below all default to the logged-in branch
-    // only (preferBranch + noWarehouseFallback) -- locations are branch-based.
-    // Previous (each merged entry): { field, kind: 'merged' } -- warehouse first, else branch.
-    purchaseRequisition: [{ field: 'branch', kind: 'branchOnly' }],
-    goodsReceipt:        [{ field: 'receivingLocation', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    // Previous: purchaseInvoice: [{ field: 'receivingLocation', kind: 'merged', preferBranch: true }],
-    purchaseInvoice:     [{ field: 'receivingLocation', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    purchaseReturn:      [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    deliveryChallan:     [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    // Sales Invoice's own merged Warehouse/Branch picker, plus its separate
-    // Interbranch Sale Branch field -- two independent capabilities.
-    // Previous: salesInvoice: [{ field: 'warehouse', kind: 'merged' }, { field: 'branch', kind: 'branchOnly' }],
-    // Previous: salesInvoice: [{ field: 'warehouse', kind: 'merged', preferBranch: true }, { field: 'branch', kind: 'branchOnly' }],
-    salesInvoice:        [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }, { field: 'branch', kind: 'branchOnly' }],
-    // Only fromWarehouse defaults -- toWarehouse is deliberately left blank
-    // so the existing mutual-exclusivity logic isn't pre-violated.
-    // Previous: stockTransfer: [{ field: 'fromWarehouse', kind: 'merged' }],
-    // Previous: stockTransfer: [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true }],
-    stockTransfer:       [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    // Was 'warehouseOnly' — fn_post_sales_return_stock is now branch-aware
-    // (migration 241), matching Purchase Return's merged picker.
-    // Kept as before (not branch-only): fn_post_sales_return_stock (migration
-    // 139) still posts by warehouse only — a branch-only return would post its
-    // stock to no location. Switch once that function is made branch-aware.
-    salesReturn:         [{ field: 'returnToWarehouse', kind: 'merged' }],
-    purchaseOrder:       [{ field: 'receivingWarehouse', kind: 'warehouseOnly' }],
-    // Opening Inventory Balance and Opening Stock Entry were missed by the
-    // original Full Warehouse/Branch Independence migration -- both used to
-    // show Branch and Warehouse as two separate mandatory fields and are
-    // folded into the same single merged 'warehouse' field as PR/SI now.
-    openingInventoryBalance: [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    // Kept as before (not branch-only): fn_post_opening_stock (migration 143)
-    // raises "Opening Stock Entry requires a Warehouse." for a branch-only entry.
-    openingStockEntry:   [{ field: 'warehouse', kind: 'merged' }],
-    // "in stock adjustment should add even branches too".
-    stockAdjustment:     [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    productionPlanning:  [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    materialIssueProduction: [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    productionEntry:     [{ field: 'toWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
-    productionReturn:    [{ field: 'toWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }]
-  };
+      // Merged Warehouse/Branch fields below all default to the logged-in branch
+      // only (preferBranch + noWarehouseFallback) -- locations are branch-based.
+      // Previous (each merged entry): { field, kind: 'merged' } -- warehouse first, else branch.
+      purchaseRequisition: [{ field: 'branch', kind: 'branchOnly' }],
+      goodsReceipt: [{ field: 'receivingLocation', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      // Previous: purchaseInvoice: [{ field: 'receivingLocation', kind: 'merged', preferBranch: true }],
+      purchaseInvoice: [{ field: 'receivingLocation', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      purchaseReturn: [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      deliveryChallan: [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      // Sales Invoice's own merged Warehouse/Branch picker, plus its separate
+      // Interbranch Sale Branch field -- two independent capabilities.
+      // Previous: salesInvoice: [{ field: 'warehouse', kind: 'merged' }, { field: 'branch', kind: 'branchOnly' }],
+      // Previous: salesInvoice: [{ field: 'warehouse', kind: 'merged', preferBranch: true }, { field: 'branch', kind: 'branchOnly' }],
+      salesInvoice: [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }, { field: 'branch', kind: 'branchOnly' }],
+      // Only fromWarehouse defaults -- toWarehouse is deliberately left blank
+      // so the existing mutual-exclusivity logic isn't pre-violated.
+      // Previous: stockTransfer: [{ field: 'fromWarehouse', kind: 'merged' }],
+      // Previous: stockTransfer: [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true }],
+      stockTransfer: [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      // Was 'warehouseOnly' — fn_post_sales_return_stock is now branch-aware
+      // (migration 241), matching Purchase Return's merged picker.
+      // Kept as before (not branch-only): fn_post_sales_return_stock (migration
+      // 139) still posts by warehouse only — a branch-only return would post its
+      // stock to no location. Switch once that function is made branch-aware.
+      salesReturn: [{ field: 'returnToWarehouse', kind: 'merged' }],
+      purchaseOrder: [{ field: 'receivingWarehouse', kind: 'warehouseOnly' }],
+      // Opening Inventory Balance and Opening Stock Entry were missed by the
+      // original Full Warehouse/Branch Independence migration -- both used to
+      // show Branch and Warehouse as two separate mandatory fields and are
+      // folded into the same single merged 'warehouse' field as PR/SI now.
+      openingInventoryBalance: [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      // Kept as before (not branch-only): fn_post_opening_stock (migration 143)
+      // raises "Opening Stock Entry requires a Warehouse." for a branch-only entry.
+      openingStockEntry: [{ field: 'warehouse', kind: 'merged' }],
+      // "in stock adjustment should add even branches too".
+      stockAdjustment: [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      productionPlanning: [{ field: 'warehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      materialIssueProduction: [{ field: 'fromWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      productionEntry: [{ field: 'toWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }],
+      productionReturn: [{ field: 'toWarehouse', kind: 'merged', preferBranch: true, noWarehouseFallback: true }]
+    };
 
   private shouldDefaultLocationForCurrentScreen(): boolean {
     return !!InventoryScreenShell.LOCATION_DEFAULT_CAPABILITIES[this.config?.key || ''];
@@ -4308,13 +4469,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   addQuickVariantRow(): void {
-    this.quickAddVariantRows.update(rows => [...rows, {name: '', value: ''}]);
+    this.quickAddVariantRows.update(rows => [...rows, { name: '', value: '' }]);
   }
 
   removeQuickVariantRow(index: number): void {
     this.quickAddVariantRows.update(rows => rows.filter((_, i) => i !== index));
     if (!this.quickAddVariantRows().length) {
-      this.quickAddVariantRows.set([{name: '', value: ''}]);
+      this.quickAddVariantRows.set([{ name: '', value: '' }]);
     }
   }
 
@@ -4322,7 +4483,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.quickAddVariantRows.update(rows => rows.map((row, i) => {
       if (i !== index) return row;
       const attrChanged = row.name !== name;
-      return {name, value: attrChanged ? '' : row.value};
+      return { name, value: attrChanged ? '' : row.value };
     }));
   }
 
@@ -4334,7 +4495,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (row?.name && value) {
       this.persistNewAttributeValueIfNeeded(row.name, value);
     }
-    this.quickAddVariantRows.update(rows => rows.map((row, i) => i === index ? {...row, value} : row));
+    this.quickAddVariantRows.update(rows => rows.map((row, i) => i === index ? { ...row, value } : row));
   }
 
   quickVariantRowValueOptions(index: number): string[] {
@@ -4458,6 +4619,44 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   categoryRequiresSerialPolicy(): boolean {
     return !!this.selectedProductCategoryObject()?.serial_applicable;
   }
+    // Product Master (migration 265): unit identification comes from the category.
+  productCategoryPolicies(): any[] {
+    const category: any = this.selectedProductCategoryObject();
+    return [...(category?.policies || [])]
+      .sort((a: any, b: any) => (Number(a.display_order) || 0) - (Number(b.display_order) || 0));
+  }
+
+  productCategoryIdentifier(): any | null {
+    return this.productCategoryPolicies().find((p: any) => p.is_unique_identifier) || null;
+  }
+    // The product's policies captured at Stock Inward: its category's rows with
+  // stage Stock Inward or Both Inward and Sale, except the Unique Identifier
+  // (that one is the serial itself).
+  productInwardPolicies(product: any): InwardPolicy[] {
+    if (!product) return [];
+    const categoryId = Number(product.category_id ?? product.categoryId) || null;
+    const categoryName = product.category_name ?? product.categoryName;
+    const category: any = this.loadedCategoryObjects().find((c: any) =>
+      (categoryId && Number(c.id) === categoryId) || (!categoryId && this.optionEquals(c.category_name, categoryName)));
+    return [...(category?.policies || [])]
+      .filter((p: any) => !p.is_unique_identifier && ['stock_inward', 'both_inward_sale'].includes(p.capture_stage))
+      .sort((a: any, b: any) => (Number(a.display_order) || 0) - (Number(b.display_order) || 0))
+      .map((p: any) => ({ policyId: Number(p.policy_id), policyName: p.policy_name, isMandatory: !!p.is_mandatory }));
+  }
+
+  // New product / category changed: follow the category (the database does the
+  // same through trg_product_follow_category, whatever the screen sends).
+  private syncProductSerialFromCategory(): void {
+    const identifier = this.productCategoryIdentifier();
+    this.productSerialApplicable.set(!!identifier);
+    this.collectFormField('serialPolicyName', identifier?.policy_name || null);
+    if (identifier) this.productTrackingRequired.set(true);
+  }
+
+  // Category's UIN Required, shown read-only in Product Master's Tracking Policies.
+  categoryUinRequired(): boolean {
+    return !!this.selectedProductCategoryObject()?.uin_required;
+  }
 
   // HSN codes matching the selected product category — shown as a suggestion panel
   readonly categoryHsnSuggestions = computed(() => {
@@ -4567,7 +4766,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             this.refreshSegmentScopedOptions();
           }
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getUoms(true)
@@ -4583,7 +4782,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             this.refreshSegmentScopedOptions();
           }
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getHsnSac(undefined, true)
@@ -4601,7 +4800,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const taxCats = items.map(item => item.tax_category).filter(Boolean) as string[];
           this.taxCategoryOptionList.set(this.mergeOptions([], taxCats));
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getAttributes(null, true)
@@ -4615,7 +4814,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             this.attributeOptionList.set(this.mergeOptions([], names));
           }
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getBranchesInv(true)
@@ -4629,7 +4828,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           this.branchesMasterLoaded = true;
           this.tryApplyDefaultLocation();
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getWarehouses(true)
@@ -4646,7 +4845,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           this.warehousesMasterLoaded = true;
           this.tryApplyDefaultLocation();
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getPaymentTerms(true)
@@ -4660,16 +4859,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           // merge cleanup as warehouse/vendor (see loadSegmentScopedLookups).
           this.paymentTermOptionList.set(this.mergeOptions([], names));
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getBoms(true)
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: res => this.loadedBomObjects.set(res.data ?? []), error: () => {} });
+      .subscribe({ next: res => this.loadedBomObjects.set(res.data ?? []), error: () => { } });
 
     this.inventoryConfigService.getWorkCenters(true)
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: res => this.loadedWorkCenterObjects.set(res.data ?? []), error: () => {} });
+      .subscribe({ next: res => this.loadedWorkCenterObjects.set(res.data ?? []), error: () => { } });
 
     this.inventoryConfigService.getProductTypes(true)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -4731,7 +4930,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const mfrs = items.map(item => item.manufacturer).filter(Boolean) as string[];
           this.manufacturerOptionList.set(this.mergeOptions([], mfrs));
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getUoms(true, requestedSegmentId)
@@ -4744,7 +4943,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const names = uoms.map(item => item.uom_symbol || item.uom_name || item.uom_code).filter(Boolean) as string[];
           this.uomOptionList.set(this.mergeOptions([], names));
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getAttributes(requestedSegmentId, true)
@@ -4771,7 +4970,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const names = variants.map(item => this.variantDisplayLabel(item)).filter(Boolean) as string[];
           this.variantOptionList.set(this.mergeOptions([], names));
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getSerialPolicies(requestedSegmentId, null, false)
@@ -4784,7 +4983,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const names = policies.map(item => item.policy_name).filter(Boolean) as string[];
           this.serialPolicyOptionList.set(this.mergeOptions([], names));
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getBatchPolicies(requestedSegmentId, null, false)
@@ -4795,7 +4994,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const names = (res.data ?? []).map(item => item.policy_name).filter(Boolean) as string[];
           this.batchPolicyOptionList.set(this.mergeOptions([], names));
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getProducts(requestedSegmentId, null, true)
@@ -4809,7 +5008,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           this.productOptionList.set(this.mergeOptions([], names));
           this.applyPendingCreatedProductBind();
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getVendors(requestedSegmentId, true)
@@ -4827,7 +5026,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const vendorLabels = vendors.map(item => this.vendorOptionLabel(item)).filter(Boolean) as string[];
           this.vendorOptionList.set(this.mergeOptions([], vendorLabels));
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getCustomers(requestedSegmentId, true)
@@ -4840,7 +5039,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const names = customers.map(item => this.customerOptionLabel(item)).filter(Boolean) as string[];
           this.customerOptionList.set(this.mergeOptions([], names));
         },
-        error: () => {}
+        error: () => { }
       });
 
     this.inventoryConfigService.getChannelPartners(requestedSegmentId, true)
@@ -4853,7 +5052,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const names = partners.map(item => this.channelPartnerOptionLabel(item)).filter(Boolean) as string[];
           this.channelPartnerOptionList.set(this.mergeOptions([], names));
         },
-        error: () => {}
+        error: () => { }
       });
   }
 
@@ -4888,6 +5087,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       finishedProduct: bom.finished_product_name || '',
       version: bom.bom_version || '',
       rawMaterials: (bom.items || []).map((item: BomLineItem) => item.product_name).filter(Boolean),
+      materials: (bom.items || [])
+        .map((item: BomLineItem) => ({ productName: item.product_name, quantity: Number(item.quantity) || 0 }))
+        .filter(m => !!m.productName),
       quantityPerUnit: Number(bom.quantity) || 1,
       wastagePercent: Number(bom.wastage_percent) || 0,
       productionCost: Number(bom.production_cost) || 0,
@@ -4897,6 +5099,478 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       && record.rawMaterials.length > 0
       && this.normalizeKey(record.status || 'Active') !== 'inactive'
     );
+  }
+
+    // ── Material Issue for Production ───────────────────────────────────────
+
+  // What is still to be issued for one plan line: Required - already issued.
+  private planItemRemainingQty(item: any): number {
+    const required = Number(item?.required_qty ?? item?.requiredQty ?? 0) || 0;
+    const issued = Number(item?.issued_qty ?? item?.issuedQty ?? 0) || 0;
+    return Math.max(required - issued, 0);
+  }
+
+  private planHasRemainingToIssue(plan: any): boolean {
+    const items: any[] = Array.isArray(plan?.items) ? plan.items : [];
+    return items.some(item => this.planItemRemainingQty(item) > 0);
+  }
+
+  // Live stock at the From location, in the row's UOM. null = not known yet.
+  private materialIssueAvailableQty(row: string[]): number | null {
+    const product = this.lineRowProduct(row);
+    if (!product?.id) return null;
+    const { warehouseId, branchId } = this.resolveHeaderStockLocation(
+      this.formValues()['fromWarehouse'] || this.formValues()['fromWarehouseId']);
+    if (!warehouseId && !branchId) return null;
+
+    const variantId = this.lineRowVariantId(product, row);
+    this.fetchAvailableStockForLine(product.id, null);
+    if (variantId) this.fetchAvailableStockForLine(product.id, variantId);
+    const cache = this.availableStockCache();
+    const rows = (variantId ? cache[this.availableStockKey(product.id, variantId)] : null)
+      || cache[this.availableStockKey(product.id, null)];
+    if (!rows) return null;
+
+    const here = warehouseId ? this.stockRowForWarehouse(rows, warehouseId) : this.stockRowForBranch(rows, branchId);
+    const available = Number(here?.available ?? 0) || 0;
+    const factor = this.productUomConversionFactorForSelection(product, this.lineValue(row, ['uom']), this.config?.key || '');
+    return factor > 0 ? available / factor : available;
+  }
+
+  private materialIssueAvailableText(row: string[]): string {
+    if (!String(this.formValues()['fromWarehouse'] || '').trim()) return 'Select location';
+    const qty = this.materialIssueAvailableQty(row);
+    if (qty === null) return 'Checking…';
+    if (qty <= 0) return '0 · not in stock here, remove this row';
+    return this.formatStockLimitQty(qty);
+  }
+
+  private materialIssueRowsValidationMessage(isPosting: boolean): string {
+    if (this.config?.key !== 'materialIssueProduction') return '';
+    const location = String(this.formValues()['fromWarehouse'] || '').trim() || 'the From location';
+    const rows = this.activeManufacturingLineRows();
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const name = this.lineValue(row, ['product', 'item', 'sku', 'material']);
+      const remaining = this.lineNumber(row, ['required']);
+      const issued = this.lineNumber(row, ['issued']);
+      const available = this.materialIssueAvailableQty(row);
+      if (isPosting && available !== null && available <= 0) {
+        return `${name} is not in stock at ${location}. Remove it from the grid, then post.`;
+      }
+      if (issued <= 0) return `Enter Issued Qty for ${name} (row ${i + 1}), or remove the row.`;
+      if (remaining > 0 && issued > remaining) {
+        return `${name}: Issued Qty ${this.formatStockLimitQty(issued)} is more than the ${this.formatStockLimitQty(remaining)} still to be issued.`;
+      }
+      if (isPosting && available !== null && issued > available) {
+        return `${name}: only ${this.formatStockLimitQty(available)} in stock at ${location}.`;
+      }
+    }
+    return '';
+  }
+
+    // ── Identifier Registration (Phase 3, migration 267) ─────────────────
+  // Units whose category has a Registration before Sale policy (UIN, RTO
+  // No, ...). The user picks the policy, types the value per unit; only
+  // changed rows are saved. Editable until the unit is sold; the server
+  // blocks a sale while a MANDATORY registration is missing.
+
+  readonly uinStatusOptions = [
+    { label: 'Pending (not registered yet)', value: 'pending' },
+    { label: 'Registered', value: 'registered' },
+    { label: 'Sold', value: 'sold' },
+    { label: 'All', value: 'all' }
+  ];
+
+  readonly registrationPolicies = signal<RegistrationPolicyOption[]>([]);
+  readonly registrationPolicyId = signal<number | null>(null);
+  readonly registrationPolicyName = computed(() =>
+    this.registrationPolicies().find(p => p.policy_id === this.registrationPolicyId())?.policy_name || 'Registration');
+  readonly registrationPolicyMandatory = computed(() =>
+    !!this.registrationPolicies().find(p => p.policy_id === this.registrationPolicyId())?.is_mandatory);
+
+  readonly uinStatus = signal<string>('pending');
+  readonly uinProductFilter = signal<string | null>(null);
+  readonly uinSearchText = signal<string>('');
+  readonly uinRows = signal<IdentifierRegistrationRow[]>([]);
+  readonly uinDrafts = signal<Record<number, UinDraft>>({});
+  readonly uinLoading = signal(false);
+  readonly uinSaving = signal(false);
+
+  readonly uinProductOptions = computed(() =>
+    [...new Set(this.uinRows().map(r => r.product_name).filter(Boolean))].sort());
+
+  readonly uinVisibleRows = computed(() => {
+    const product = this.uinProductFilter();
+    const text = this.uinSearchText().trim().toLowerCase();
+    return this.uinRows().filter(r =>
+      (!product || r.product_name === product) &&
+      (!text
+        || r.serial_no.toLowerCase().includes(text)
+        || (r.value || '').toLowerCase().includes(text)
+        || (r.source_doc_no || '').toLowerCase().includes(text)));
+  });
+
+  readonly uinChangedRows = computed(() => {
+    this.uinDrafts();
+    return this.uinRows().filter(r => this.uinIsChanged(r));
+  });
+
+  // The policies in use (dropdown). Keeps the current choice, else UIN, else the first.
+  loadRegistrationPolicies(): void {
+    this.uinLoading.set(true);
+    this.saveError.set('');
+    this.txService.getRegistrationPolicies().subscribe({
+      next: res => {
+        const policies = res?.data || [];
+        this.registrationPolicies.set(policies);
+        const current = this.registrationPolicyId();
+        const keep = policies.find(p => p.policy_id === current);
+        const uin = policies.find(p => this.normalizeKey(p.policy_name) === 'uin');
+        this.registrationPolicyId.set((keep || uin || policies[0])?.policy_id ?? null);
+        this.loadUinRegistrations();
+      },
+      error: err => {
+        this.uinLoading.set(false);
+        this.saveError.set(this.uinErrorText(err, 'Could not load the registration policies.'));
+      }
+    });
+  }
+
+  setRegistrationPolicy(policyId: number | null): void {
+    if (policyId === this.registrationPolicyId()) return;
+    if (this.uinChangedRows().length && !confirm('You have unsaved changes. Discard them?')) return;
+    this.registrationPolicyId.set(policyId);
+    this.uinProductFilter.set(null);
+    this.saveMsg.set('');
+    this.loadUinRegistrations();
+  }
+
+  loadUinRegistrations(): void {
+    const policyId = this.registrationPolicyId();
+    if (!policyId) {
+      this.uinRows.set([]);
+      this.uinDrafts.set({});
+      this.uinLoading.set(false);
+      return;
+    }
+    this.uinLoading.set(true);
+    this.saveError.set('');
+    this.txService.getIdentifierRegistrations(policyId, { status: this.uinStatus() }).subscribe({
+      next: res => {
+        this.uinRows.set(res?.data || []);
+        this.uinDrafts.set({});
+        this.uinLoading.set(false);
+      },
+      error: err => {
+        this.uinRows.set([]);
+        this.uinLoading.set(false);
+        this.saveError.set(this.uinErrorText(err, 'Could not load the units.'));
+      }
+    });
+  }
+
+  setUinStatus(value: string): void {
+    if (this.uinChangedRows().length && !confirm('You have unsaved changes. Discard them?')) return;
+    this.uinStatus.set(value || 'pending');
+    this.saveMsg.set('');
+    this.loadUinRegistrations();
+  }
+
+  uinValue(row: IdentifierRegistrationRow, field: UinField): string {
+    const draft = this.uinDrafts()[row.serial_unit_id];
+    return draft ? draft[field] : this.uinSavedValue(row, field);
+  }
+
+  setUinValue(row: IdentifierRegistrationRow, field: UinField, value: string): void {
+    const current: UinDraft = this.uinDrafts()[row.serial_unit_id] || {
+      value: this.uinSavedValue(row, 'value'),
+      registration_date: this.uinSavedValue(row, 'registration_date'),
+      reference_no: this.uinSavedValue(row, 'reference_no')
+    };
+    this.uinDrafts.update(all => ({ ...all, [row.serial_unit_id]: { ...current, [field]: value ?? '' } }));
+    this.saveError.set('');
+    this.saveMsg.set('');
+  }
+
+  uinIsChanged(row: IdentifierRegistrationRow): boolean {
+    const draft = this.uinDrafts()[row.serial_unit_id];
+    if (!draft) return false;
+    return (['value', 'registration_date', 'reference_no'] as UinField[])
+      .some(f => (draft[f] || '').trim() !== this.uinSavedValue(row, f).trim());
+  }
+
+  undoUinRow(row: IdentifierRegistrationRow): void {
+    this.uinDrafts.update(all => {
+      const next = { ...all };
+      delete next[row.serial_unit_id];
+      return next;
+    });
+  }
+
+  clearUinChanges(): void {
+    this.uinDrafts.set({});
+    this.saveError.set('');
+    this.saveMsg.set('');
+  }
+
+  saveUinRegistrations(): void {
+    const policyId = this.registrationPolicyId();
+    const label = this.registrationPolicyName();
+    const changed = this.uinChangedRows();
+    if (!policyId) return;
+    if (!changed.length) {
+      this.saveError.set(`Nothing to save. Type a ${label} on at least one row.`);
+      return;
+    }
+
+    const items: IdentifierRegistrationSaveItem[] = [];
+    const seen = new Map<string, string>();
+    for (const row of changed) {
+      const value = this.uinValue(row, 'value').trim();
+      const date = this.uinValue(row, 'registration_date').trim();
+      const ref = this.uinValue(row, 'reference_no').trim();
+
+      if (!value && (date || ref)) {
+        this.saveError.set(`Unit ${row.serial_no}: enter the ${label} (Registration Date and Reference No alone are not enough).`);
+        return;
+      }
+      if (value && row.is_mandatory) {
+        const key = value.toUpperCase();
+        if (seen.has(key)) {
+          this.saveError.set(`${label} ${value} is typed on both ${seen.get(key)} and ${row.serial_no}.`);
+          return;
+        }
+        seen.set(key, row.serial_no);
+      }
+      items.push({
+        serial_unit_id: row.serial_unit_id,
+        value: value || null,
+        registration_date: value ? (date || null) : null,
+        reference_no: value ? (ref || null) : null
+      });
+    }
+
+    this.uinSaving.set(true);
+    this.saveError.set('');
+    this.txService.saveIdentifierRegistrations(policyId, items).subscribe({
+      next: () => {
+        this.uinSaving.set(false);
+        this.saveMsg.set(`${label} saved for ${items.length} unit(s).`);
+        this.loadUinRegistrations();
+      },
+      error: err => {
+        this.uinSaving.set(false);
+        this.saveError.set(this.uinErrorText(err, `Could not save the ${label} details.`));
+      }
+    });
+  }
+
+  uinStatusLabel(row: IdentifierRegistrationRow): string {
+    if (row.registration_status === 'sold') return 'Sold';
+    if (this.uinIsChanged(row)) return 'Changed';
+    return row.registration_status === 'registered' ? 'Registered' : 'Pending';
+  }
+
+  uinStatusClass(row: IdentifierRegistrationRow): string {
+    if (row.registration_status === 'sold') return 'erp-badge';
+    if (this.uinIsChanged(row)) return 'erp-badge badge-info';
+    return row.registration_status === 'registered' ? 'erp-badge badge-success' : 'erp-badge badge-warning';
+  }
+
+  uinDateText(value: string | null | undefined): string {
+    if (!value) return '-';
+    const d = new Date(String(value).slice(0, 10) + 'T00:00:00');
+    if (isNaN(d.getTime())) return String(value);
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
+  }
+
+  private uinSavedValue(row: IdentifierRegistrationRow, field: UinField): string {
+    let raw: string | null | undefined;
+    if (field === 'value') raw = row.value;
+    else if (field === 'registration_date') raw = row.registration_date;
+    else raw = row.reference_no;
+    if (!raw) return '';
+    return field === 'registration_date' ? String(raw).slice(0, 10) : String(raw);
+  }
+
+  private uinErrorText(err: any, fallback: string): string {
+    return err?.error?.message || err?.error?.detail || err?.error?.title || err?.message || fallback;
+  }
+
+  // ── BOM Master: line-wise raw materials ────────────────────────────────
+  // Lines and the entry row live in formValues, so they survive the trip to
+  // Product Master ("+" buttons) and are wiped by clearConfigForm().
+
+  readonly bomLines = computed<BomMaterialLine[]>(() => {
+    const raw = this.formValues()['bomLines'];
+    return Array.isArray(raw) ? raw : NO_BOM_LINES;
+  });
+
+  readonly bomEditingLine = computed<number | null>(() => {
+    const raw = this.formValues()['bomEditingLine'];
+    return raw === null || raw === undefined ? null : Number(raw);
+  });
+
+  readonly bomFinishedOptions = computed(() => this.finishedManufacturingProductOptions());
+
+  readonly bomRawOptions = computed(() => {
+    const finished = this.normalizeKey(this.formValues()['finishedProduct']);
+    const editing = this.bomEditingLine();
+    const used = new Set(this.bomLines().filter((_, i) => i !== editing).map(line => this.normalizeKey(line.productName)));
+    return this.rawMaterialProductOptions().filter(name => {
+      const key = this.normalizeKey(name);
+      return key !== finished && !used.has(key);
+    });
+  });
+
+  readonly bomDraftUom = computed(() => {
+    const product = this.findProductBySelection(this.formValues()['bomDraftProduct']);
+    return String(product?.base_uom_name || product?.base_uom_symbol || '');
+  });
+
+  readonly bomStatusActive = computed(() =>
+    String(this.formValues()['status'] || 'Active').toLowerCase() !== 'inactive');
+
+  readonly bomFinishedName = computed(() => String(this.formValues()['finishedProduct'] || '').trim());
+
+  onBomFinishedProductChange(value: any): void {
+    this.collectFormField('finishedProduct', value);
+    this.maybeAutoCode('finishedProduct', value);
+    const key = this.normalizeKey(value);
+    if (key && this.bomLines().some(line => this.normalizeKey(line.productName) === key)) {
+      this.bomPatch({ bomLines: this.bomLines().filter(line => this.normalizeKey(line.productName) !== key) });
+      this.saveError.set(`${value} was removed from the raw materials. A product cannot be made from itself.`);
+    }
+  }
+
+  onBomVersionChange(value: any): void {
+    this.collectFormField('version', value);
+    this.maybeAutoCode('version', value);
+  }
+
+  setBomStatus(active: boolean): void {
+    this.collectFormField('status', active ? 'Active' : 'Inactive');
+  }
+
+  addBomFinishedProduct(): void {
+    this.openFieldAddMaster({ key: 'finishedProduct', label: 'Finished Product', addMaster: 'Product / Service' } as InventoryField);
+  }
+
+  addBomRawMaterial(): void {
+    this.openFieldAddMaster({ key: 'rawMaterials', label: 'Raw Materials', addMaster: 'Product / Service' } as InventoryField);
+  }
+
+  setBomDraft(field: 'bomDraftProduct' | 'bomDraftQty' | 'bomDraftWastage', value: any): void {
+    this.bomPatch({ [field]: value });
+    this.saveError.set('');
+  }
+
+  addBomLine(): void {
+    const v = this.formValues();
+    const name = String(v['bomDraftProduct'] || '').trim();
+    if (!name) { this.saveError.set('Select a raw material.'); return; }
+
+    const product = this.findProductBySelection(name);
+    if (!product || !this.productIsManufacturingRawMaterial(product)) {
+      this.saveError.set(`${name} must have Product Nature Raw Material or Semi-Finished Product.`);
+      return;
+    }
+    if (this.normalizeKey(product.product_name) === this.normalizeKey(v['finishedProduct'])) {
+      this.saveError.set('A product cannot be a raw material of itself.');
+      return;
+    }
+
+    const quantity = Number(v['bomDraftQty']);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      this.saveError.set('Enter the quantity needed for 1 finished unit (more than 0).');
+      return;
+    }
+
+    const wastageText = String(v['bomDraftWastage'] ?? '').trim();
+    const wastagePercent = wastageText === '' ? 0 : Number(wastageText);
+    if (!Number.isFinite(wastagePercent) || wastagePercent < 0 || wastagePercent >= 100) {
+      this.saveError.set('Wastage % must be from 0 to below 100.');
+      return;
+    }
+
+    const editing = this.bomEditingLine();
+    if (this.bomLines().some((line, i) => i !== editing && this.normalizeKey(line.productName) === this.normalizeKey(product.product_name))) {
+      this.saveError.set(`${product.product_name} is already on this BOM. Edit that line instead.`);
+      return;
+    }
+
+    const line: BomMaterialLine = {
+      productId: product.id ?? null,
+      productName: product.product_name,
+      uomId: this.optionalNumber(product.base_uom_id),
+      uomName: String(product.base_uom_name || product.base_uom_symbol || ''),
+      quantity,
+      wastagePercent
+    };
+    const lines = editing === null
+      ? [...this.bomLines(), line]
+      : this.bomLines().map((existing, i) => (i === editing ? line : existing));
+
+    this.bomPatch({ bomLines: lines, ...this.emptyBomDraft() });
+    this.saveError.set('');
+  }
+
+  editBomLine(index: number): void {
+    const line = this.bomLines()[index];
+    if (!line) return;
+    this.bomPatch({
+      bomDraftProduct: line.productName,
+      bomDraftQty: String(line.quantity),
+      bomDraftWastage: line.wastagePercent ? String(line.wastagePercent) : '',
+      bomEditingLine: index
+    });
+    this.saveError.set('');
+  }
+
+  cancelBomLineEdit(): void {
+    this.bomPatch(this.emptyBomDraft());
+    this.saveError.set('');
+  }
+
+  removeBomLine(index: number): void {
+    const editing = this.bomEditingLine();
+    const patch: Record<string, any> = { bomLines: this.bomLines().filter((_, i) => i !== index) };
+    if (editing === index) Object.assign(patch, this.emptyBomDraft());
+    else if (editing !== null && editing > index) patch['bomEditingLine'] = editing - 1;
+    this.bomPatch(patch);
+  }
+
+  saveBom(): void {
+    const pending = String(this.formValues()['bomDraftProduct'] || '').trim();
+    if (pending) {
+      this.saveError.set(`${pending} is selected but not added. Click "${this.bomEditingLine() === null ? 'Add Material' : 'Update Material'}" first, or clear it.`);
+      return;
+    }
+    this.saveConfigRecord();
+  }
+
+  bomQtyText(value: number): string {
+    return Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 3 });
+  }
+
+  private bomPatch(values: Record<string, any>): void {
+    this.formValues.update(current => ({ ...current, ...values }));
+  }
+
+  private emptyBomDraft(): Record<string, any> {
+    return { bomDraftProduct: null, bomDraftQty: '', bomDraftWastage: '', bomEditingLine: null };
+  }
+
+  private bomLinesFromRecord(record: any): BomMaterialLine[] {
+    return (record?.items || []).map((item: any) => ({
+      productId: item.product_id ?? item.productId ?? null,
+      productName: item.product_name || item.productName || '',
+      uomId: item.uom_id ?? item.uomId ?? null,
+      uomName: item.uom_name || item.uomName || '',
+      quantity: Number(item.quantity) || 0,
+      wastagePercent: Number(item.wastage_percent ?? item.wastagePercent) || 0
+    }));
   }
 
   private formatDateLabel(value: string): string {
@@ -5322,7 +5996,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.quickAddHsnGstRate.set(null);
 
     if (master === 'Variant') {
-      this.quickAddVariantRows.set([{name: '', value: ''}]);
+      this.quickAddVariantRows.set([{ name: '', value: '' }]);
     }
 
     if (this.isInlineManufacturingQuickAdd(master)) {
@@ -5572,6 +6246,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       serial_applicable: !!(item?.serial_applicable ?? item?.serialApplicable ?? false),
       serial_policy_id: item?.serial_policy_id ?? item?.serialPolicyId ?? null,
       serial_policy_name: item?.serial_policy_name ?? item?.serialPolicyName ?? null,
+      // UIN Required from the quick-add category, so Product Master can show it.
+      uin_required: !!(item?.uin_required ?? item?.uinRequired ?? false),
       batch_applicable: !!(item?.batch_applicable ?? item?.batchApplicable ?? false),
       batch_policy_id: item?.batch_policy_id ?? item?.batchPolicyId ?? null,
       batch_policy_name: item?.batch_policy_name ?? item?.batchPolicyName ?? null,
@@ -5585,9 +6261,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!name) { this.quickAddError.set('UOM name is required.'); return; }
     if (this.isSavingQuickAdd()) return;
 
-    const code   = this.quickAddCode().trim() || this.generateCodeFromName(name);
+    const code = this.quickAddCode().trim() || this.generateCodeFromName(name);
     const symbol = this.quickAddUomSymbol().trim() || null;
-    const type   = this.quickAddUomType() || 'Base';
+    const type = this.quickAddUomType() || 'Base';
     const parentBeforeSave = this.quickAddParentMaster();
     const sourceKey = this.addMasterSourceFieldKey();
     const isQuickProductMapping = this.isQuickUomMappingContext();
@@ -6319,7 +6995,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       display_order: i + 1
     }));
     const attributeError = this.variantAttributesValidationMessage(
-      filledRows.map(r => ({attribute_name: r.name, attribute_value: r.value}))
+      filledRows.map(r => ({ attribute_name: r.name, attribute_value: r.value }))
     );
     if (attributeError) { this.quickAddError.set(attributeError); return; }
     const firstAttr = attributePayloads[0];
@@ -6376,30 +7052,21 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     });
   }
 
-  saveQuickSerialPolicy(): void {
+   saveQuickSerialPolicy(): void {
     const name = this.quickAddName().trim();
     if (!name) { this.quickAddError.set('Policy name is required.'); return; }
     if (this.isSavingQuickAdd()) return;
     const v = this.formValues();
     const code = this.quickAddCode().trim() || null;
-    const categoryName = String(v['quickApplicableCategory'] || '').trim() || null;
-    // sp_upsert_serial_policy links the category by id only — category_name is
-    // read-only (used on the way out to join the display label back), so the
-    // auto-filled category from context has to be resolved to an id here or
-    // it silently never links, same fix as the main Serial Number Policy screen.
-    const categoryId = categoryName
-      ? this.loadedCategoryObjects().find(item => this.optionEquals(item.category_name, categoryName))?.id ?? null
-      : null;
     this.isSavingQuickAdd.set(true);
     this.quickAddError.set('');
+    // Policy library only (migration 265): capture stage, mandatory and
+    // Unique Identifier are set per category in Category Master.
     this.inventoryConfigService.saveSerialPolicy({
       segment_id: this.selectedSegmentId(),
       policy_code: code,
       policy_name: name,
-      category_id: categoryId,
-      category_name: categoryName,
       serial_format: v['quickSerialFormat'] || null,
-      capture_stage: this.normalizeCaptureStage(v['quickCaptureStage']),
       status: 'active'
     }, null).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res: ApiResponse<any>) => {
@@ -6414,12 +7081,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           this.restoreParentModal();
           this.loadLookupOptions();
         } else {
-          this.quickAddError.set(res.message || 'Failed to save serial policy.');
+          this.quickAddError.set(res.message || 'Failed to save policy.');
         }
       },
       error: (err: any) => {
         this.isSavingQuickAdd.set(false);
-        this.quickAddError.set(this.apiErrorMessage(err, 'Failed to save serial policy.'));
+        this.quickAddError.set(this.apiErrorMessage(err, 'Failed to save policy.'));
       }
     });
   }
@@ -6608,11 +7275,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       quickVendorGstins: (Array.isArray(fv['quickVendorGstins']) && fv['quickVendorGstins'].length) || !contact?.gstin
         ? fv['quickVendorGstins']
         : [{
-            stateName: '',
-            stateCode: /^[0-9]{2}/.test(contact.gstin) ? contact.gstin.slice(0, 2) : null,
-            gstin: String(contact.gstin).toUpperCase(),
-            isPrimary: true
-          }]
+          stateName: '',
+          stateCode: /^[0-9]{2}/.test(contact.gstin) ? contact.gstin.slice(0, 2) : null,
+          gstin: String(contact.gstin).toUpperCase(),
+          isPrimary: true
+        }]
     }));
   }
 
@@ -6873,7 +7540,131 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   setCategorySerialApplicable(required: boolean): void {
     this.categorySerialApplicable.set(required);
+    // UIN is registered per serial number, so it only exists with serial tracking.
+    if (!required) {
+      this.formValues.update(v => ({ ...v, uinRequired: false }));
+    }
   }
+    // ── Category Master: policies (migration 265) ─────────────────────────
+  readonly categoryPolicyApplicable = signal(false);
+  readonly categoryPolicyRows = signal<CategoryPolicyDraft[]>([]);
+  readonly policyStageLabels = POLICY_CAPTURE_STAGES.map(s => s.label);
+
+  policyStageLabel(code: string | null | undefined): string {
+    return POLICY_CAPTURE_STAGES.find(s => s.code === code)?.label || '';
+  }
+
+  private policyStageCode(label: string | null | undefined): string {
+    return POLICY_CAPTURE_STAGES.find(s => this.optionEquals(s.label, label))?.code || '';
+  }
+
+  private blankCategoryPolicyRow(isFirst: boolean): CategoryPolicyDraft {
+    // The first row is offered as the Unique Identifier: the usual setup (e.g. Serial No.)
+    return {
+      policyId: null,
+      policyName: '',
+      captureStage: 'stock_inward',
+      isMandatory: true,
+      isUniqueIdentifier: isFirst
+    };
+  }
+
+    // Rows hidden by switching Policies to No, kept so that switching back to Yes
+  // restores them (until the form is saved, cleared or another record is opened).
+  private categoryPolicyRowsBackup: CategoryPolicyDraft[] = [];
+
+  setCategoryPolicyApplicable(on: boolean): void {
+    if (on) {
+      const restored = this.categoryPolicyRowsBackup.length
+        ? this.categoryPolicyRowsBackup
+        : (this.categoryPolicyRows().length ? this.categoryPolicyRows() : [this.blankCategoryPolicyRow(true)]);
+      this.categoryPolicyRows.set(restored);
+      this.categoryPolicyRowsBackup = [];
+    } else {
+      if (this.categoryPolicyRows().length) this.categoryPolicyRowsBackup = this.categoryPolicyRows();
+      this.categoryPolicyRows.set([]);
+    }
+    this.categoryPolicyApplicable.set(on);
+  }
+
+  addCategoryPolicyRow(): void {
+    this.categoryPolicyRows.update(rows => [...rows, this.blankCategoryPolicyRow(false)]);
+  }
+
+  removeCategoryPolicyRow(index: number): void {
+    this.categoryPolicyRows.update(rows => rows.filter((_, i) => i !== index));
+    if (!this.categoryPolicyRows().length) this.categoryPolicyApplicable.set(false);
+  }
+
+    // For each row: the policies not used in another row (plus the row's own choice).
+  // A computed signal, so ng-select gets the same array until the rows change
+  // (a method returning a new array on every refresh breaks selection).
+  readonly categoryPolicyRowOptions = computed((): string[][] => {
+    const rows = this.categoryPolicyRows();
+    const all = this.serialPolicyOptions || [];
+    return rows.map((_, index) => {
+      const usedElsewhere = rows
+        .filter((__, i) => i !== index)
+        .map(r => this.normalizeKey(r.policyName))
+        .filter(Boolean);
+      return all.filter(name => !usedElsewhere.includes(this.normalizeKey(name)));
+    });
+  });
+
+  setCategoryPolicyRowPolicy(index: number, name: string | null): void {
+    this.categoryPolicyRows.update(rows => rows.map((r, i) =>
+      i === index ? { ...r, policyName: String(name || '').trim(), policyId: null } : r));
+  }
+
+  setCategoryPolicyRowStage(index: number, label: string | null): void {
+    this.categoryPolicyRows.update(rows => rows.map((r, i) =>
+      i === index && !r.isUniqueIdentifier ? { ...r, captureStage: this.policyStageCode(label) } : r));
+  }
+
+  setCategoryPolicyRowMandatory(index: number, mandatory: boolean): void {
+    this.categoryPolicyRows.update(rows => rows.map((r, i) =>
+      i === index && !r.isUniqueIdentifier ? { ...r, isMandatory: mandatory } : r));
+  }
+
+   // Radio: one row is the Unique Identifier. It is always mandatory and
+  // captured at Stock Inward, so those two are fixed on that row while it is
+  // the identifier; its own values come back when another row takes over.
+  setCategoryPolicyUniqueIdentifier(index: number): void {
+    this.categoryPolicyRows.update(rows => rows.map((r, i) => {
+      if (i === index) {
+        if (r.isUniqueIdentifier) return r;
+        return {
+          ...r,
+          savedStage: r.captureStage,
+          savedMandatory: r.isMandatory,
+          isUniqueIdentifier: true,
+          isMandatory: true,
+          captureStage: 'stock_inward'
+        };
+      }
+      return r.isUniqueIdentifier ? this.releaseCategoryPolicyIdentifier(r) : r;
+    }));
+  }
+
+  // Clicking the selected radio again: no Unique Identifier (stock by quantity)
+  clearCategoryPolicyUniqueIdentifier(): void {
+    this.categoryPolicyRows.update(rows => rows.map(r =>
+      r.isUniqueIdentifier ? this.releaseCategoryPolicyIdentifier(r) : r));
+  }
+
+  private releaseCategoryPolicyIdentifier(r: CategoryPolicyDraft): CategoryPolicyDraft {
+    return {
+      ...r,
+      isUniqueIdentifier: false,
+      captureStage: r.savedStage || r.captureStage,
+      isMandatory: r.savedMandatory ?? r.isMandatory,
+      savedStage: null,
+      savedMandatory: null
+    };
+  }
+
+  readonly categoryHasUniqueIdentifier = computed(() =>
+    this.categoryPolicyRows().some(r => r.isUniqueIdentifier));
 
   setCategoryBatchApplicable(required: boolean): void {
     this.categoryBatchApplicable.set(required);
@@ -6988,11 +7779,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
     const result = sortKey
       ? filtered.sort((a, b) => {
-          const left = String(a[sort!.columnIndex] ?? '');
-          const right = String(b[sort!.columnIndex] ?? '');
-          const cmp = left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
-          return sort!.direction === 'asc' ? cmp : -cmp;
-        })
+        const left = String(a[sort!.columnIndex] ?? '');
+        const right = String(b[sort!.columnIndex] ?? '');
+        const cmp = left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
+        return sort!.direction === 'asc' ? cmp : -cmp;
+      })
       : filtered;
 
     this._gridRowsCache.set(tableId, { sourceRef: rawSourceRows, search, sortKey, result });
@@ -7062,7 +7853,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   runGridToolbarAction(tableId: string, action: 'print' | 'pdf' | 'excel'): void {
     const docStyledKeys = ['purchaseInvoice', 'salesInvoice', 'deliveryChallan'];
     if ((action === 'print' || action === 'pdf') && tableId === 'records'
-        && docStyledKeys.includes(this.config?.key || '') && !this.expandedGrnId()) {
+      && docStyledKeys.includes(this.config?.key || '') && !this.expandedGrnId()) {
       this.saveMsg.set(`Expand a ${this.config?.title || 'record'} row first, then use Print or PDF for the document format.`);
       setTimeout(() => this.saveMsg.set(''), 3500);
       return;
@@ -7076,10 +7867,30 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
 
     if (action === 'print' || action === 'pdf') {
+      // Sales / Purchase Invoice: the expanded invoice prints with its copy
+      // type (Original / Duplicate for Recipient).
+      const invoiceKind = this.config?.key === 'salesInvoice' || this.config?.key === 'purchaseInvoice' ? this.config.key : null;
+      if (tableId === 'records' && invoiceKind) {
+        const record = this.segmentFilteredRecords(this.savedRecordObjects())
+          .find(item => Number(item.id) === Number(this.expandedGrnId()));
+        if (record) {
+          this.printInvoiceWithCopyType(invoiceKind, record, payload, action === 'pdf' ? 'Pdf' : 'Print');
+          return;
+        }
+      }
       this.printGridPayload(payload, action === 'pdf');
       return;
     }
 
+    // Sales Invoice Excel carries the same Previous Balance row as its PDF.
+    if (tableId === 'records' && this.config?.key === 'salesInvoice' && this.expandedGrnId()) {
+      const record = this.segmentFilteredRecords(this.savedRecordObjects())
+        .find(item => Number(item.id) === Number(this.expandedGrnId()));
+      if (record) {
+        this.withSalesInvoicePreviousBalance(record, payload, withBalance => this.downloadGridExcel(withBalance));
+        return;
+      }
+    }
     this.downloadGridExcel(payload);
   }
 
@@ -7117,7 +7928,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private selectedExpandedDocumentExportPayload(): GridExportPayload | null {
     const key = this.config?.key || '';
     if (key !== 'goodsReceipt' && key !== 'purchaseInvoice' && key !== 'debitNote' && key !== 'creditNote'
-        && key !== 'salesInvoice' && key !== 'deliveryChallan') return null;
+      && key !== 'salesInvoice' && key !== 'deliveryChallan') return null;
 
     const expandedId = this.expandedGrnId();
     if (!expandedId) return null;
@@ -7138,27 +7949,27 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         .map((item, index) => columnDefs.map(column => this.grnExpandedCell(item, column, index) || ''));
       const fields: Array<[string, string]> = isDebit
         ? [
-            ['Debit Note No', docNo],
-            ['Debit Note Date', this.gridDateDisplay(String(record.debit_note_date || record.debitNoteDate || ''))],
-            ['Vendor', String(record.vendor_name || record.vendorName || '')],
-            ['Reference', String(record.purchase_return_number || record.purchaseReturnNumber || record.purchase_invoice_number || record.purchaseInvoiceNumber || 'Direct')],
-            ['Reason', String(record.reason || '')],
-            ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
-            ['Return Amount', this.formatCurrency(record.subtotal ?? record.subTotal ?? 0)],
-            ['GST Amount', this.formatCurrency(record.tax_amount ?? record.taxAmount ?? 0)],
-            ['Total Amount', this.formatCurrency(record.total_amount ?? record.totalAmount ?? 0)]
-          ]
+          ['Debit Note No', docNo],
+          ['Debit Note Date', this.gridDateDisplay(String(record.debit_note_date || record.debitNoteDate || ''))],
+          ['Vendor', String(record.vendor_name || record.vendorName || '')],
+          ['Reference', String(record.purchase_return_number || record.purchaseReturnNumber || record.purchase_invoice_number || record.purchaseInvoiceNumber || 'Direct')],
+          ['Reason', String(record.reason || '')],
+          ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
+          ['Return Amount', this.formatCurrency(record.subtotal ?? record.subTotal ?? 0)],
+          ['GST Amount', this.formatCurrency(record.tax_amount ?? record.taxAmount ?? 0)],
+          ['Total Amount', this.formatCurrency(record.total_amount ?? record.totalAmount ?? 0)]
+        ]
         : [
-            ['Credit Note No', docNo],
-            ['Credit Note Date', this.gridDateDisplay(String(record.credit_note_date || record.creditNoteDate || ''))],
-            ['Customer', String(record.customer_name || record.customerName || '')],
-            ['Reference', String(record.sales_return_number || record.salesReturnNumber || record.sales_invoice_number || record.salesInvoiceNumber || 'Direct')],
-            ['Reason', String(record.reason || '')],
-            ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
-            ['Return Amount', this.formatCurrency(record.subtotal ?? record.subTotal ?? 0)],
-            ['GST Amount', this.formatCurrency(record.tax_amount ?? record.taxAmount ?? 0)],
-            ['Total Amount', this.formatCurrency(record.total_amount ?? record.totalAmount ?? 0)]
-          ];
+          ['Credit Note No', docNo],
+          ['Credit Note Date', this.gridDateDisplay(String(record.credit_note_date || record.creditNoteDate || ''))],
+          ['Customer', String(record.customer_name || record.customerName || '')],
+          ['Reference', String(record.sales_return_number || record.salesReturnNumber || record.sales_invoice_number || record.salesInvoiceNumber || 'Direct')],
+          ['Reason', String(record.reason || '')],
+          ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
+          ['Return Amount', this.formatCurrency(record.subtotal ?? record.subTotal ?? 0)],
+          ['GST Amount', this.formatCurrency(record.tax_amount ?? record.taxAmount ?? 0)],
+          ['Total Amount', this.formatCurrency(record.total_amount ?? record.totalAmount ?? 0)]
+        ];
 
       return { title: `${this.config?.title || 'Inventory'} - ${docNo || 'Selected Record'}`, fields, columns, rows };
     }
@@ -7189,15 +8000,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
 
     const fields: Array<[string, string]> = [
-          ['GRN No', docNo],
-          ['GRN Date', String(record.grn_date || record.grnDate || '')],
-          ['Vendor', String(record.vendor_name || record.vendorName || '')],
-          ['PO Reference', String(record.po_number || record.poNumber || record.rfq_number || record.rfqNumber || 'Direct')],
-          ['Warehouse', String(record.warehouse_name || record.warehouseName || '')],
-          ['Vendor Invoice No', String(record.vendor_invoice_no || record.vendorInvoiceNo || '')],
-          ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
-          ['Total', `Rs. ${Number(record.total_amount ?? record.totalAmount ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`]
-        ];
+      ['GRN No', docNo],
+      ['GRN Date', String(record.grn_date || record.grnDate || '')],
+      ['Vendor', String(record.vendor_name || record.vendorName || '')],
+      ['PO Reference', String(record.po_number || record.poNumber || record.rfq_number || record.rfqNumber || 'Direct')],
+      ['Warehouse', String(record.warehouse_name || record.warehouseName || '')],
+      ['Vendor Invoice No', String(record.vendor_invoice_no || record.vendorInvoiceNo || '')],
+      ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
+      ['Total', `Rs. ${Number(record.total_amount ?? record.totalAmount ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`]
+    ];
 
     return { title: `${this.config?.title || 'Inventory'} - ${docNo || 'Selected Record'}`, fields, columns, rows };
   }
@@ -7301,7 +8112,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     gross: number; discount: number; taxable: number; tax: number; cgst: number; sgst: number; igst: number; isInterstate: boolean; total: number; roundOff: number;
   } {
     const computed = this.documentFinancials(record?.items || []);
-    const total = computed.taxable + computed.tax;
+    // Stored whole-rupee round off (migration 275); 0 on older invoices.
+    const roundOff = Number(record?.round_off ?? record?.roundOff ?? 0) || 0;
+    // Previous: const total = computed.taxable + computed.tax;
+    const total = computed.taxable + computed.tax + roundOff;
 
     const customer = this.customerForRecord(record);
     const branch = this.ourBranchForRecord(record);
@@ -7323,24 +8137,45 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       igst: isInterstate ? computed.tax : 0,
       isInterstate,
       total,
-      roundOff: 0
+      // Previous: roundOff: 0
+      roundOff
     };
   }
 
-  private purchaseInvoiceDocumentRows(record: any): string[][] {
-    return (record?.items || []).map((item: any, index: number) => [
-      String(index + 1),
-      this.purchaseInvoiceItemName(item),
-      this.purchaseInvoiceItemHsn(item),
-      this.moneyValue(item?.qty ?? 0),
-      this.grnExpandedValue(item, 'uom_name', 'uomName'),
-      this.moneyValue(item?.rate ?? 0),
-      this.moneyValue(item?.mrp ?? item?.Mrp ?? 0),
-      this.moneyValue(item?.selling_price ?? item?.sellingPrice ?? 0),
-      String(item?.discount_pct ?? item?.discountPct ?? 0),
-      String(item?.gst_rate ?? item?.gstRate ?? 0),
-      this.moneyValue(item?.amount ?? 0)
-    ]);
+  // Previous: private purchaseInvoiceDocumentRows(record: any): string[][] {
+  private purchaseInvoiceDocumentRows(record: any, isInterstate = false): string[][] {
+    return (record?.items || []).map((item: any, index: number) => {
+      // Test point 39: line-wise Taxable Amt and CGST/SGST (or IGST) — same
+      // saved-value-first / computed-fallback rule documentFinancials() uses,
+      // so the columns add up to the summary.
+      const qty = Number(item?.qty ?? item?.accepted_qty ?? item?.acceptedQty ?? 0) || 0;
+      const rate = Number(item?.rate ?? 0) || 0;
+      const discPct = Number(item?.discount_pct ?? item?.discountPct ?? 0) || 0;
+      const gstPct = Number(item?.gst_rate ?? item?.gstRate ?? 0) || 0;
+      const lineGross = qty * rate;
+      const savedTaxable = this.firstNumericValue(item, ['taxable_amount', 'taxableAmount']);
+      const savedTax = this.firstNumericValue(item, ['tax_amount', 'taxAmount', 'gst_amount', 'gstAmount']);
+      const lineTaxable = savedTaxable || (lineGross - lineGross * discPct / 100);
+      const lineTax = savedTax || this.transactionLineTaxBreakup(qty, rate, discPct, gstPct, undefined, this.itemGstIncluded(item) ?? false).taxAmount;
+      return [
+        String(index + 1),
+        this.purchaseInvoiceItemName(item),
+        this.purchaseInvoiceItemHsn(item),
+        this.moneyValue(item?.qty ?? 0),
+        this.grnExpandedValue(item, 'uom_name', 'uomName'),
+        this.moneyValue(item?.rate ?? 0),
+        // Test point 39: MRP / Selling Price no longer printed on the PI PDF.
+        // Previous: this.moneyValue(item?.mrp ?? item?.Mrp ?? 0),
+        // Previous: this.moneyValue(item?.selling_price ?? item?.sellingPrice ?? 0),
+        String(item?.discount_pct ?? item?.discountPct ?? 0),
+        String(item?.gst_rate ?? item?.gstRate ?? 0),
+        this.moneyValue(lineTaxable),
+        ...(isInterstate
+          ? [this.moneyValue(lineTax)]
+          : [this.moneyValue(lineTax / 2), this.moneyValue(lineTax / 2)]),
+        this.moneyValue(item?.amount ?? 0)
+      ];
+    });
   }
 
   // MRP / Selling Price print only when at least one line actually carries a
@@ -7373,17 +8208,28 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const locationName = warehouseName || branchName;
     // Previous: const columns = ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'];
     // Previous: const rows = this.purchaseInvoiceDocumentRows(record);
+    // Test point 39: totals computed first so the rows know CGST/SGST vs IGST.
+    const totals = this.purchaseInvoiceFinancials(record);
     const { columns, rows } = this.withoutEmptyPriceColumns(
       record?.items || [],
-      ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
-      this.purchaseInvoiceDocumentRows(record)
+      // Test point 36: first column heading 'S.No' instead of '#'.
+      // Previous: ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
+      // Test point 38: heading 'HSN/SAC Code' instead of 'HSN'.
+      // Previous: ['S.No', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
+      // Test point 39: MRP / Selling Price dropped; Taxable Amt + CGST/SGST (or IGST) added.
+      // Previous: ['S.No', 'Product / Service', 'HSN/SAC Code', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
+      ['S.No', 'Product / Service', 'HSN/SAC Code', 'Qty', 'UOM', 'Rate (Rs.)', 'Disc %', 'GST %', 'Taxable Amt (Rs.)',
+        ...(totals.isInterstate ? ['IGST (Rs.)'] : ['CGST (Rs.)', 'SGST (Rs.)']), 'Amount (Rs.)'],
+      // Previous: this.purchaseInvoiceDocumentRows(record)
+      this.purchaseInvoiceDocumentRows(record, totals.isInterstate)
     );
     const exportColumns = rows.length ? columns : fallbackColumns;
     const exportRows = rows.length ? rows : fallbackRows;
-    const totals = this.purchaseInvoiceFinancials(record);
-    const fields: Array<[string, string]> = [
+    // Previous: const totals = this.purchaseInvoiceFinancials(record);
+       const fields: Array<[string, string]> = [
       ['PI No', docNo],
-      ['PI Date', this.gridDateDisplay(String(record.pi_date || record.piDate || ''))],
+      // Point 5: full year (23-10-2026). Previous: this.gridDateDisplay(...)
+      ['PI Date', this.invoiceDateDisplay(record.pi_date || record.piDate)],
       ['Vendor', vendorName],
       ['GSTIN', vendorGstin],
       ['Vendor Phone', String(vendor?.mobile || vendor?.contact_mobile || '')],
@@ -7391,11 +8237,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['Branch / Warehouse', locationName],
       ['GRN Reference', String(record.grn_number || record.grnNumber || 'Direct')],
       ['Vendor Invoice No', String(record.vendor_invoice_no || record.vendorInvoiceNo || '')],
-      ['Vendor Invoice Date', this.gridDateDisplay(String(record.vendor_invoice_dt || record.vendorInvoiceDt || ''))],
+      ['Vendor Invoice Date', this.invoiceDateDisplay(record.vendor_invoice_dt || record.vendorInvoiceDt)],
       ['Payment Terms', String(record.payment_terms || record.paymentTerms || '')],
-      ['Due Date', this.gridDateDisplay(String(record.due_date || record.dueDate || ''))],
-      ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
-      ['Total', this.formatCurrency(totals.total)]
+      ['Due Date', this.invoiceDateDisplay(record.due_date || record.dueDate)]
+      // Points 2 and 3: 'Status' and 'Total' removed from the header.
+      // Previous: ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
+      // Previous: ['Total', this.invoiceGrandTotalText(totals.total)]
     ];
     const summaryRows = [
       ['Sub total', this.moneyValue(totals.gross)],
@@ -7406,32 +8253,111 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]]),
       ['Round off', this.moneyValue(totals.roundOff)]
     ];
+        // Point 4: amount in words in small letters: "Rupees three hundred and fifty four only".
+    const totalInWords = rupeesInWords(totals.total).toLowerCase();
+    const amountInWordsText = totalInWords ? totalInWords.charAt(0).toUpperCase() + totalInWords.slice(1) : '';
     return {
-      title: `Purchase Invoice - ${docNo || 'Selected Record'}`,
+      title: `Purchase Invoice`,
       fields,
       columns: exportColumns,
       rows: exportRows,
-      summary: [...summaryRows, ['Grand Total', this.formatCurrency(totals.total)]] as Array<[string, string]>,
+      // Previous: summary: [...summaryRows, ['Grand Total', this.formatCurrency(totals.total)]] as Array<[string, string]>,
+      summary: [...summaryRows, ['Grand Total', this.invoiceGrandTotalText(totals.total)]] as Array<[string, string]>,
       notes: String(record.remarks || ''),
       notesLabel: 'Notes / Terms',
+      // Test point 32: Grand Total in words, Indian format, capitals, rounded
+      // to rupees (no paise) - e.g. "RUPEES THREE HUNDRED AND FIFTY FOUR ONLY".
+      amountInWords: amountInWordsText,
+      // Test point 31: always print Portrait (like Sales Invoice). Without this
+      // the PDF builder chose Landscape for more than 7 columns, and a landscape
+      // page printed on A4 portrait paper came out sideways with the right side cut.
+      // Previous: (no orientation set -> landscape when more than 7 columns)
+      orientation: 'portrait',
+            // Points 6 and 7: words + totals joined under the table, then the
+      // Common Seal / Authorised Signatory row (old printed invoice layout).
+      gstInvoiceLayout: true,
+      signatureBlock: true,
       fileName: `Purchase_Invoice_${docNo || 'Selected_Record'}`
     };
   }
 
-  private salesInvoiceDocumentRows(record: any): string[][] {
-    return (record?.items || []).map((item: any, index: number) => [
-      String(index + 1),
-      this.purchaseInvoiceItemName(item),
-      this.purchaseInvoiceItemHsn(item),
-      this.moneyValue(item?.qty ?? 0),
-      this.grnExpandedValue(item, 'uom_name', 'uomName'),
-      this.moneyValue(item?.rate ?? 0),
-      this.moneyValue(item?.mrp ?? item?.Mrp ?? 0),
-      this.moneyValue(item?.selling_price ?? item?.sellingPrice ?? 0),
-      String(item?.discount_pct ?? item?.discountPct ?? 0),
-      String(item?.gst_rate ?? item?.gstRate ?? 0),
-      this.moneyValue(item?.amount ?? 0)
-    ]);
+    // Invoice prints show the full year: 2026-10-23 -> 23-10-2026.
+  private invoiceDateDisplay(value: any): string {
+    const text = String(value ?? '').trim();
+    const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) return `${iso[3]}-${iso[2]}-${iso[1]}`;
+    return this.gridDateDisplay(text);
+  }
+
+  // Previous: private salesInvoiceDocumentRows(record: any): string[][] {
+  // GST tax-invoice grid as on the old ACE TECH sale invoice: S.No | Product
+  // Description (batch number under it) | HSN/SAC | Qty | Rate | Amount |
+  // Disc. | Taxable Value | CGST Rate %/Amount | SGST Rate %/Amount (or IGST)
+  // | TOTAL, plus the Total row. UOM / MRP / Selling Price no longer print.
+  // Previous columns: S.No | Product / Service | HSN/SAC Code | Qty | UOM |
+  // Rate (Rs.) | MRP | Selling Price | Disc % | Taxable Value | GST % |
+  // CGST Amt | SGST Amt (or IGST Amt) | Amount (Rs.)
+  private salesInvoiceDocumentRows(record: any, isInterstate = false): { rows: string[][]; totalRow: string[] } {
+    const sum = { gross: 0, discount: 0, taxable: 0, cgst: 0, sgst: 0, total: 0 };
+    const rows = (record?.items || []).map((item: any, index: number) => {
+      // Product-wise GST: taxable value and CGST/SGST (or IGST) amount per line.
+      // SGST = tax - CGST so the two halves always add up to the line tax.
+      const { taxable, tax } = this.salesInvoiceLineTax(item);
+      const cgst = isInterstate ? tax : Math.round((tax / 2) * 100) / 100;
+      const sgst = isInterstate ? 0 : tax - cgst;
+      const qty = Number(item?.qty ?? 0) || 0;
+      const gross = qty * (Number(item?.rate ?? 0) || 0);
+      const discount = gross * (Number(item?.discount_pct ?? item?.discountPct ?? 0) || 0) / 100;
+      const lineTotal = Number(item?.amount ?? 0) || taxable + tax;
+      const gstRate = Number(item?.gst_rate ?? item?.gstRate ?? 0) || 0;
+      const halfRate = String(Math.round((gstRate / 2) * 100) / 100);
+      const batchNo = this.grnExpandedValue(item, 'batch_no', 'batchNo');
+      sum.gross += gross;
+      sum.discount += discount;
+      sum.taxable += taxable;
+      sum.cgst += cgst;
+      sum.sgst += sgst;
+      sum.total += lineTotal;
+      return [
+        String(index + 1),
+        [this.purchaseInvoiceItemName(item), batchNo ? `BATCH NUMBER : ${batchNo}` : ''].filter(Boolean).join('\n'),
+        this.purchaseInvoiceItemHsn(item),
+        Number.isInteger(qty) ? String(qty) : this.moneyValue(qty),
+        this.moneyValue(item?.rate ?? 0),
+        this.moneyValue(gross),
+        this.moneyValue(discount),
+        this.moneyValue(taxable),
+        ...(isInterstate
+          ? [String(gstRate), this.moneyValue(cgst)]
+          : [halfRate, this.moneyValue(cgst), halfRate, this.moneyValue(sgst)]),
+        this.moneyValue(lineTotal)
+      ];
+    });
+    const totalRow = [
+      'Total', '', '', '', '',
+      this.moneyValue(sum.gross),
+      this.moneyValue(sum.discount),
+      this.moneyValue(sum.taxable),
+      ...(isInterstate
+        ? ['', this.moneyValue(sum.cgst)]
+        : ['', this.moneyValue(sum.cgst), '', this.moneyValue(sum.sgst)]),
+      this.moneyValue(sum.total)
+    ];
+    return { rows, totalRow };
+  }
+
+  // Same per-line taxable/tax rule as documentFinancials(): saved values first,
+  // recomputed from qty/rate/discount/GST when the line has none.
+  private salesInvoiceLineTax(item: any): { taxable: number; tax: number } {
+    const qty = Number(item?.qty ?? 0) || 0;
+    const rate = Number(item?.rate ?? 0) || 0;
+    const discPct = Number(item?.discount_pct ?? item?.discountPct ?? 0) || 0;
+    const gstPct = Number(item?.gst_rate ?? item?.gstRate ?? 0) || 0;
+    const computedTaxable = qty * rate - (qty * rate * discPct / 100);
+    const taxable = this.firstNumericValue(item, ['taxable_amount', 'taxableAmount']) || computedTaxable;
+    const tax = this.firstNumericValue(item, ['tax_amount', 'taxAmount', 'gst_amount', 'gstAmount'])
+      || this.transactionLineTaxBreakup(qty, rate, discPct, gstPct, undefined, this.itemGstIncluded(item) ?? false).taxAmount;
+    return { taxable, tax };
   }
 
   // Full party address as entered in the master — the free-text address line
@@ -7468,63 +8394,112 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const bank = this.invoiceBankDetails();
     // Previous: const columns = ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'];
     // Previous: const rows = this.salesInvoiceDocumentRows(record);
-    const { columns, rows } = this.withoutEmptyPriceColumns(
-      record?.items || [],
-      ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
-      this.salesInvoiceDocumentRows(record)
-    );
+    const lineIsInterstate = this.salesInvoiceFinancials(record).isInterstate;
+    // Previous: const { columns, rows } = this.withoutEmptyPriceColumns(
+    //   record?.items || [],
+    //   ['S.No', 'Product / Service', 'HSN/SAC Code', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'Taxable Value', 'GST %',
+    //     ...(lineIsInterstate ? ['IGST Amt'] : ['CGST Amt', 'SGST Amt']), 'Amount (Rs.)'],
+    //   this.salesInvoiceDocumentRows(record, lineIsInterstate)
+    // );
+    const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate);
+    const columns = ['S.No', 'Product Description', 'HSN/SAC Code', 'Qty', 'Rate', 'Amount', 'Disc.', 'Taxable Value',
+      ...(lineIsInterstate ? ['Rate %', 'Amount'] : ['Rate %', 'Amount', 'Rate %', 'Amount']), 'TOTAL'];
+    const columnGroups: Array<[string, number]> = [
+      ['S.No', 1], ['Product Description', 1], ['HSN/SAC Code', 1], ['Qty', 1], ['Rate', 1], ['Amount', 1], ['Disc.', 1], ['Taxable Value', 1],
+      ...(lineIsInterstate ? [['IGST', 2]] : [['CGST', 2], ['SGST', 2]]) as Array<[string, number]>,
+      ['TOTAL', 1]
+    ];
     const exportColumns = rows.length ? columns : fallbackColumns;
     const exportRows = rows.length ? rows : fallbackRows;
     const totals = this.salesInvoiceFinancials(record);
     const soReference = String(record.so_number || record.soNumber || record.reference_no || record.referenceNo || 'Direct');
+    // The print lays fields out two per row (left | right) and drops empty
+    // ones, so every field up to State carries a '-' fallback to keep the
+    // columns fixed: GSTIN No prints under Customer, Bill To / Ship To share
+    // a row, and State prints under Ship To.
     const fields: Array<[string, string]> = [
-      ['Invoice No', docNo],
-      ['Invoice Date', this.gridDateDisplay(String(record.doc_date || record.docDate || ''))],
-      ['Due Date', this.gridDateDisplay(String(record.due_date || record.dueDate || ''))],
-      ['Customer', customerName],
-      ['Customer Phone', String(customer?.mobile || '')],
+      ['Invoice No', docNo || '-'],
+      // Previous: ['Invoice Date', this.gridDateDisplay(String(record.doc_date || record.docDate || ''))],
+      // Previous: ['Due Date', this.gridDateDisplay(String(record.due_date || record.dueDate || ''))],
+      ['Invoice Date', this.fullYearDateDisplay(record.doc_date || record.docDate) || '-'],
+      ['Due Date', this.fullYearDateDisplay(record.due_date || record.dueDate) || '-'],
+      ['Customer', customerName || '-'],
+      ['Customer Phone', String(customer?.mobile || '').trim() || '-'],
+      // Previous position: after State.
+      ['GSTIN No', customerGstin || '-'],
       // Previous: ['Customer Address', this.partyFullAddress(customer)],
       // Delivery Address entered on the invoice (customer master address when
       // none was entered); Ship Address falls back to the delivery address.
-      ['Delivery Address', deliveryAddress || '-'],
-      ['Ship Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
+      // Previous: ['Delivery Address', deliveryAddress || '-'],
+      ['Bill To Address', deliveryAddress || '-'],
+      // Previous: ['Ship Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
+      ['Ship To Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
+      // Previous position: after GSTIN No.
+      ['Place of Supply', String(record.place_of_supply || record.placeOfSupply || '').trim() || '-'],
       ['State', customerState || '-'],
-      ['GSTIN No', customerGstin || '-'],
-      ['Place of Supply', String(record.place_of_supply || record.placeOfSupply || '')],
       ['Warehouse', warehouseName],
       ['Vehicle No', String(record.vehicle_no || record.vehicleNo || '')],
       ['SO Reference', soReference],
-      ['Payment Terms', String(record.payment_terms || record.paymentTerms || '')],
-      ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
-      ['Total', this.formatCurrency(totals.total)]
+      ['Payment Terms', String(record.payment_terms || record.paymentTerms || '')]
+      // Header 'Status' removed from the Sales Invoice print.
+      // Previous: ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
+      // Header 'Total' removed - the amount already prints as Grand Total below the grid.
+      // Previous: ['Total', this.formatCurrency(totals.total)]
+      // Previous: ['Total', this.invoiceGrandTotalText(totals.total)]
     ];
-    const summaryRows = [
+    // Headings as before (user's choice), printed in the ruled box beside the
+    // amount in words; Previous Balance is added under Grand Total at print
+    // time (withSalesInvoicePreviousBalance).
+    // Previous (old-invoice headings): Total Amount Before Tax, CGST / SGST (or
+    // IGST), Total Tax Amount, Total Amount After Tax, Round Off, Total.
+    const summaryRows: Array<[string, string]> = [
       ['Sub total', this.moneyValue(totals.gross)],
       ['Discount', totals.discount ? `-${this.moneyValue(totals.discount)}` : this.moneyValue(0)],
       ['Taxable amount', this.moneyValue(totals.taxable)],
-      ...(totals.isInterstate
-        ? [['IGST', this.moneyValue(totals.igst)]]
-        : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]])
+      // User's list: one IGST row carrying the whole tax, no CGST / SGST rows
+      // and no Round off row (Grand Total already includes any round off).
+      // Previous: CGST + SGST rows (IGST only when inter-state), then
+      // 'Round off' when non-zero.
+      ['IGST', this.moneyValue(totals.tax)]
     ];
     return {
-      title: `Sales Invoice - ${docNo || 'Selected Record'}`,
+      // Previous: title: `Sales Invoice - ${docNo || 'Selected Record'}`,
+      // Previous: title: `Tax Invoice - ${docNo || 'Selected Record'}`,
+      title: 'Tax Invoice',
       fields,
       columns: exportColumns,
       rows: exportRows,
-      summary: [...summaryRows, ['Grand Total', this.formatCurrency(totals.total)]] as Array<[string, string]>,
+      columnGroups: rows.length ? columnGroups : undefined,
+      totalRow: rows.length ? totalRow : undefined,
+      // Previous: summary: [...summaryRows, ['Grand Total', this.formatCurrency(totals.total)]] as Array<[string, string]>,
+      // Previous: summary: [...summaryRows, ['Total', this.moneyValue(totals.total)]],
+      summary: [...summaryRows, ['Grand Total', this.invoiceGrandTotalText(totals.total)]],
       notes: String(record.customer_notes || record.customerNotes || ''),
       notesLabel: 'Notes',
+      // Test point 16: Grand Total in words (same helper as Purchase Invoice).
+      // Previous: amountInWords: rupeesInWords(totals.total),  (all capitals)
+      // Previous: amountInWords: rupeesInWords(totals.total).toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase()),
+      // Capitals again, as on the old invoice, in the box beside the totals.
+      amountInWords: rupeesInWords(totals.total),
+      amountInWordsPosition: 'box',
       terms: SALES_INVOICE_TERMS,
+      // Previous order: Bank Name, Branch Name, Account No, IFSC CODE.
+      // Account Name = login company name from session storage (CompanyDetails),
+      // same source as the letterhead.
       bankDetails: [
+        ['Account Name', String(this.exportService.companyDetails()?.companyName || '').trim()],
         ['Bank Name', bank?.bankName || ''],
-        ['Branch Name', bank?.branchName || ''],
         ['Account No', bank?.accountNo || ''],
-        ['IFSC CODE', bank?.ifscCode || '']
+        ['Branch Name', bank?.branchName || ''],
+        ['IFSC Code', bank?.ifscCode || '']
       ],
       // Portrait like the earlier invoice report, so the terms and the bank /
       // signatory box fit on the same page as the items (landscape A4 is too
       // short and pushed the box onto a second page).
       orientation: 'portrait',
+      // The whole invoice (grid, totals, terms, bank box) prints on one page;
+      // text and spacing shrink as needed for longer invoices.
+      fitOnePage: true,
       fileName: `Sales_Invoice_${docNo || 'Selected_Record'}`
     };
   }
@@ -7592,6 +8567,73 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.exportService.pdf(this.exportDocument(payload), asPdf ? 'Pdf' : 'Print');
   }
 
+  // Test point 22: a posted Sales / Purchase Invoice prints "Original for
+  // Recipient" the first time (the PDF that opens on Post) and "Duplicate for
+  // Recipient" on every print after it. The count is kept on the invoice
+  // (migrations 272 / 274) so it holds across users, refreshes and machines.
+  // Drafts, or a failed call, print without a copy type and are not counted.
+  private printInvoiceWithCopyType(kind: 'salesInvoice' | 'purchaseInvoice', record: any, payload: GridExportPayload, mode: 'Pdf' | 'Print' | 'Open'): void {
+    if (kind === 'salesInvoice' && !this.hasPreviousBalanceRow(payload)) {
+      this.withSalesInvoicePreviousBalance(record, payload, withBalance =>
+        this.printInvoiceWithCopyType(kind, record, withBalance, mode));
+      return;
+    }
+    const output = (copyType?: string) => this.exportService.pdf(this.exportDocument({ ...payload, copyType }), mode);
+    const id = Number(record?.id);
+    const status = this.normalizeKey(record?.status || '');
+    if (!id || (status !== 'posted' && status !== 'paid')) {
+      output();
+      return;
+    }
+    const markPrinted$ = kind === 'salesInvoice'
+      ? this.txService.markSalesInvoicePrinted(id)
+      : this.txService.markPurchaseInvoicePrinted(id);
+    markPrinted$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: res => {
+          const data: any = res?.data;
+          const previous = data?.previousPrintCount ?? data?.previous_print_count;
+          if (previous === null || previous === undefined) {
+            output();
+            return;
+          }
+          output(Number(previous) === 0 ? 'Original for Recipient' : 'Duplicate for Recipient');
+        },
+        error: () => output()
+      });
+  }
+
+  // Previous Balance on the printed Sales Invoice: what the customer still
+  // owes on earlier posted invoices (lower id than this one, so a reprint
+  // never counts later invoices) — the same outstanding list the screen
+  // footer and Customer Receipt read. Read at print time, not stored. If the
+  // list can't be read the invoice prints without the row.
+  private withSalesInvoicePreviousBalance(record: any, payload: GridExportPayload, done: (payload: GridExportPayload) => void): void {
+    const customerId = this.optionalNumber(record?.customer_id ?? record?.customerId) ?? this.customerForRecord(record)?.id;
+    const invoiceId = Number(record?.id) || 0;
+    const withRow = (balance: number): GridExportPayload => ({
+      ...payload,
+      summary: [...(payload.summary || []), ['Previous Balance', this.moneyValue(balance)]]
+    });
+    if (!customerId) {
+      done(withRow(0));
+      return;
+    }
+    this.paymentsService.getOutstandingInvoices('customer', Number(customerId))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: res => done(withRow((res?.data ?? [])
+          .filter(inv => !invoiceId || Number(inv.invoice_id) < invoiceId)
+          .reduce((sum, inv) => sum + (Number(inv.outstanding) || 0), 0))),
+        error: () => done(payload)
+      });
+  }
+
+  private hasPreviousBalanceRow(payload: GridExportPayload): boolean {
+    return (payload.summary || []).some(([label]) => label === 'Previous Balance');
+  }
+
   private exportDocument(payload: GridExportPayload) {
     return {
       title: payload.title,
@@ -7601,9 +8643,17 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       summary: payload.summary,
       notes: payload.notes,
       notesLabel: payload.notesLabel,
+      amountInWords: payload.amountInWords,
+      amountInWordsPosition: payload.amountInWordsPosition,
+      columnGroups: payload.columnGroups,
+      totalRow: payload.totalRow,
+      fitOnePage: payload.fitOnePage,
+      copyType: payload.copyType,
       terms: payload.terms,
       bankDetails: payload.bankDetails,
       orientation: payload.orientation,
+      gstInvoiceLayout: payload.gstInvoiceLayout,
+      signatureBlock: payload.signatureBlock,
       fileName: payload.fileName || payload.title
     };
   }
@@ -7829,10 +8879,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // sending them a null number would break them.
   private serverAssignsDocNumber(): boolean {
     return ['salesInvoice', 'salesQuotation', 'salesOrder', 'salesReturn',
-            'creditNote', 'estimation', 'proformaInvoice',
-            // Delivery Challan joined this set in migration 231 — it used to
-            // number itself inline, which is why it kept failing on uq_dc_doc.
-            'deliveryChallan'].includes(this.config?.key || '');
+      'creditNote', 'estimation', 'proformaInvoice',
+      // Delivery Challan joined this set in migration 231 — it used to
+      // number itself inline, which is why it kept failing on uq_dc_doc.
+      'deliveryChallan'].includes(this.config?.key || '');
   }
 
   // Payload value for a server-assigned number: whatever the user actually
@@ -7969,13 +9019,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Purchase Return is raised against a posted PI only -- no direct option.
       : this.config?.key === 'purchaseReturn'
         ? docs
-      : this.config?.key === 'debitNote'
-        ? ['Direct Debit Note', ...docs]
-      : this.config?.key === 'creditNote'
-        ? ['Direct Credit Note', ...docs]
-      : this.config?.key === 'goodsReceipt'
-        ? ['Direct Goods Receipt', ...docs]
-        : (docs.length ? docs : (field.options || []));
+        : this.config?.key === 'debitNote'
+          ? ['Direct Debit Note', ...docs]
+          : this.config?.key === 'creditNote'
+            ? ['Direct Credit Note', ...docs]
+            : this.config?.key === 'goodsReceipt'
+              ? ['Direct Goods Receipt', ...docs]
+              : (docs.length ? docs : (field.options || []));
     const cacheKey = `${this.config?.key || ''}:${field.key}:${options.join('|')}`;
     if (cacheKey === this.transactionReferenceOptionsCacheKey) return this.transactionReferenceOptionsCache;
     this.transactionReferenceOptionsCacheKey = cacheKey;
@@ -8548,7 +9598,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       purchaseInvoice: { dateKey: 'piDate', numberKey: 'pi_number' },
       purchaseReturn: { dateKey: 'returnDate', numberKey: 'return_number' },
       // Display only: sp_save_stock_transfer assigns the real number (migration 250).
-      stockTransfer: { dateKey: 'transferDate', numberKey: 'transfer_number' }
+      stockTransfer: { dateKey: 'transferDate', numberKey: 'transfer_number' },
+       // Display only: the server assigns MI00001/26-27 and PRD00001/26-27 (261 / 262).
+      materialIssueProduction: { dateKey: 'issueDate', numberKey: 'issue_number' },
+      productionEntry: { dateKey: 'productionDate', numberKey: 'production_number' }
     };
     return series[this.config?.key || ''] || null;
   }
@@ -8694,6 +9747,22 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return parts ? `${parts.day}-${parts.month}-${parts.year}` : String(value || '');
   }
 
+  // DD-MM-YYYY (gridDateDisplay trims the year to 2 digits); used by the
+  // Sales Invoice print for Invoice Date / Due Date.
+  private fullYearDateDisplay(value: any): string {
+    if (!value) return '';
+    if (value instanceof Date) {
+      if (Number.isNaN(value.getTime())) return '';
+      return `${String(value.getDate()).padStart(2, '0')}-${String(value.getMonth() + 1).padStart(2, '0')}-${value.getFullYear()}`;
+    }
+    const text = String(value).trim();
+    let match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) return `${match[3]}-${match[2]}-${match[1]}`;
+    match = text.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (match) return `${match[1].padStart(2, '0')}-${match[2].padStart(2, '0')}-${match[3]}`;
+    return this.gridDateDisplay(text);
+  }
+
   private paymentTermBySelection(value: any): PaymentTermItem | null {
     const raw = String(value ?? '').trim();
     if (!raw) return null;
@@ -8734,12 +9803,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return options;
   }
 
-  // BOM Version options = versions saved in BOM Master for the selected Finished Product only.
-  private bomVersionOptionsFromMaster(finishedProduct: any = this.formValues()['finishedProduct']): string[] {
-    const finishedKey = this.normalizeKey(String(finishedProduct || '').trim());
-    if (!finishedKey) return [];
+  // private bomVersionOptionsFromMaster(finishedProduct?: any): string[] {
+  //   // Only the versions of the selected finished product's BOMs.
+  //   const finished = this.normalizeKey(finishedProduct ?? this.formValues()['finishedProduct']);
+  //   return this.productionPlanningBomRecords()
+  //     .filter(record => !finished || this.normalizeKey(record.finishedProduct) === finished)
+  //     .map(record => record.version)
+  //     .filter(Boolean);
+  // }
+    private bomVersionOptionsFromMaster(finishedProduct?: any): string[] {
+    // Versions of the BOMs of one finished product. Uses the product passed in
+    // (e.g. from collectFormField, before formValues is updated), else the one on the form.
+    const finished = this.normalizeKey(finishedProduct ?? this.formValues()['finishedProduct']);
     return this.productionPlanningBomRecords()
-      .filter(record => this.normalizeKey(record.finishedProduct) === finishedKey)
+      .filter(record => !finished || this.normalizeKey(record.finishedProduct) === finished)
       .map(record => record.version)
       .filter(Boolean);
   }
@@ -9560,12 +10637,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return this.lineColumnIndex(column);
   }
 
-  lineGridColumnHeader(column: string): string {
-    // The header stays the generic column name ("Serial No") — one header can
-    // only ever name one policy, but a grid holds rows for different products,
-    // each with its own policy (IMEI Number, Chassis No, …). The policy is
-    // per-row information, so it belongs on the row's own button, which is
-    // where serialPickerSummaryForRow() now puts it.
+   lineGridColumnHeader(column: string): string {
+    // The header stays generic — one header can only ever name one policy, but
+    // a grid holds rows for different products, each with its own policy (IMEI
+    // Number, Chassis No, ...). The policy is per-row information, so it belongs
+    // on the row's own button (serialPickerSummaryForRow).
+    // Phase 2 (2.6g): on Stock Inward screens this column carries every policy
+    // value (per unit or per line), so it is titled "Policy" there.
+    if (this.lineGridColumnIsSerialPicker(column) && this.serialPickerModeForKey() === 'capture') return 'Policy';
     return column;
   }
 
@@ -9852,7 +10931,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (!dcItemId || !this.serialNumbersFromRecordItem(item).length) return;
       this.txService.getReservedSerialsForDcItem(dcItemId)
         .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe({ next: res => this.bindSalesInvoiceWarrantyFromSerials(startIndex + i, res.data || []), error: () => {} });
+        .subscribe({ next: res => this.bindSalesInvoiceWarrantyFromSerials(startIndex + i, res.data || []), error: () => { } });
     });
   }
 
@@ -9865,8 +10944,19 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   lineGridCellReadonly(rowIndex: number, row: string[], column: string): boolean {
+<<<<<<< HEAD
     // 259: Purchase Return may return part of the invoice - Return Qty stays editable
     // (any quantity up to what is still returnable; the server enforces the limit).
+=======
+    // 258: Purchase Return is the whole invoice - once a PI is picked,
+    // Return Qty is fixed to the invoice quantity and cannot be edited.
+    if (this.config?.key === 'purchaseReturn' && this.formValues()['piId']) {
+      const returnKey = this.normalizeKey(column);
+      if (returnKey.includes('return') && (returnKey.includes('qty') || returnKey.includes('quantity'))) {
+        return true;
+      }
+    }
+>>>>>>> 0646cff32ffebc37196f2e0468a5ae888a49f192
     if ((this.config?.key === 'salesInvoice' || this.config?.key === 'deliveryChallan') && this.normalizeKey(column) === 'warehouse') {
       return true;
     }
@@ -9904,7 +10994,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (this.lineGridColumnIsSerialPicker(column)) return false;
       return true;
     }
-    if (this.config?.key === 'productionPlanning' && this.normalizeKey(column) === 'batch req') {
+    if (this.config?.key === 'productionPlanning') {
       return true;
     }
     if (this.isManufacturingTransactionKey() && this.lineRefItemIdMap()[rowIndex]) {
@@ -9915,7 +11005,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         return true;
       }
       if (this.config?.key === 'productionEntry') {
-        if (refCellKey.includes('produced') || refCellKey.includes('rejected')) return false;
+        // Produced / Rejected are entered in the header and copied here (syncProductionEntryOutput)
         if (this.lineGridColumnIsSerialPicker(column)) return false;
         return true;
       }
@@ -9940,8 +11030,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   lineGridReadonlyCellText(rowIndex: number, row: string[], column: string, cellView: EntryLineColumnView | null | undefined, rowView?: EntryLineRowView): string {
-    if (this.lineGridColumnIsAttributeValue(column)) {
-      return this.lineGridAttributeSelection(rowView ?? this.entryLineRowViews()[rowIndex], column)?.value || '';
+    if (this.config?.key === 'materialIssueProduction' && this.normalizeKey(column) === 'available qty') {
+      return this.materialIssueAvailableText(row);
     }
     if (this.lineGridColumnIsSerialValue(column)) {
       const pickedSerials = this.lineSerialUnitsMap()[rowIndex];
@@ -10069,8 +11159,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       }
       return next;
     });
-    this.lineSerialWarrantyMap.update(map => {
-      const next: Record<number, Record<string, SerialWarrantyEntry>> = {};
+    // Phase 2: policy values move up with their rows too
+    this.lineSerialIdentifiersMap.update(map => {
+      const next: LineSerialIdentifiers = {};
+      for (const [key, val] of Object.entries(map)) {
+        const idx = Number(key);
+        if (idx < rowIndex) next[idx] = val;
+        else if (idx > rowIndex) next[idx - 1] = val;
+      }
+      return next;
+    });
+    this.lineIdentifierValuesMap.update(map => {
+      const next: LineIdentifierValues = {};
       for (const [key, val] of Object.entries(map)) {
         const idx = Number(key);
         if (idx < rowIndex) next[idx] = val;
@@ -10357,6 +11457,36 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return { value: fmt(value), discount: fmt(discount), gst: fmt(gst) };
   }
 
+  // Sales / Purchase Invoice: the whole-rupee Grand Total under the line grid
+  // and the Round Off that gets there. Lines are summed at paise the way the
+  // server does (migration 275 stores the same round off on save).
+  invoiceRoundOffFooter(): { roundOff: string; grandTotal: string; grandTotalValue: number } | null {
+    const key = this.config?.key;
+    if (key !== 'salesInvoice' && key !== 'purchaseInvoice') return null;
+    let total = 0;
+    this.directEntryLineRows().forEach((row, rowIndex) => {
+      const preview = this.transactionLineAmountPreview(row, rowIndex);
+      if (!preview) return;
+      total += this.roundLineAmount(preview.total - preview.taxAmount) + this.roundLineAmount(preview.taxAmount);
+    });
+    total = this.roundLineAmount(total);
+    const grandTotal = Math.round(total);
+    const roundOff = this.roundLineAmount(grandTotal - total);
+    return {
+      roundOff: `${roundOff < 0 ? '-' : '+'}${Math.abs(roundOff).toFixed(2)}`,
+      grandTotal: `Rs. ${grandTotal.toLocaleString('en-IN')}`,
+      grandTotalValue: grandTotal
+    };
+  }
+
+  // Grand Total on a printed invoice: whole rupees once the invoice carries a
+  // round off; older invoices (saved before 275) keep their paise.
+  private invoiceGrandTotalText(total: number): string {
+    return Math.abs(total - Math.round(total)) < 0.005
+      ? `Rs. ${Math.round(total).toLocaleString('en-IN')}`
+      : this.formatCurrency(total);
+  }
+
   // One footer cell of the line grid's Total row, by column: Qty columns and
   // Amount columns are summed as the existing Total rows do; on a priced grid
   // (one with a Rate column) the Rate / Disc % / GST columns show Total
@@ -10439,10 +11569,17 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   private productSerialColumnLabels(product: ProductItem | null | undefined): string[] {
     if (!product?.serial_applicable) return [];
-    // The serial column keeps its own name: always "Serial No", never renamed
-    // from the product's Serial Number Policy name or format (e.g. "Sh").
-    // The policy still drives serial behaviour; only the header stays fixed.
-    return ['Serial No'];
+    // --- Previous (08-Oct) rule, kept for reference ---
+    // // The serial column keeps its own name: always "Serial No", never renamed
+    // // from the product's Serial Number Policy name or format (e.g. "Sh").
+    // // The policy still drives serial behaviour; only the header stays fixed.
+    // return ['Serial No'];
+    // --- End previous rule ---
+
+    // The serial column header is "Policy" for every serial product (one shared
+    // column). Each row's own Serial Number Policy name is shown inside the cell,
+    // on the serial button -- see serialPickerSummaryForRow().
+    return ['Policy'];
     // --- Previous code (kept for reference) ---
     // const policy = this.serialPolicyForProduct(product);
     // const format = String(policy?.serial_format || '').trim();
@@ -10458,6 +11595,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     //   .filter(Boolean);
     // return labels.length ? [...new Set(labels)] : ['Serial No'];
     // --- End previous code ---
+  }
+
+  // The product's Serial Number Policy name as saved in Product Master.
+  private productSerialPolicyName(product: ProductItem | null | undefined): string {
+    if (!product?.serial_applicable) return '';
+    return String(this.serialPolicyForProduct(product)?.policy_name || product.serial_policy_name || '').trim();
   }
 
   private lineGridSerialColumnNamesForRow(row: string[]): string[] {
@@ -10573,6 +11716,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const product = this.findProductBySelection(productName);
     if (!product) return false;
 
+    // Phase 2 (2.6g): quantity product with Stock Inward policies -> its Policy cell applies
+    if (this.lineGridColumnIsSerialPicker(column) && this.rowHasLinePolicies(row)) return true;
+
     return this.productSupportsLinePolicy(product, column);
   }
 
@@ -10631,9 +11777,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const fallbackUom = conversions.length === 1
       ? conversions[0]
       : conversions.find(conversion => {
-          const candidate = Number(conversion.conversion_factor);
-          return Number.isFinite(candidate) && candidate > 1;
-        });
+        const candidate = Number(conversion.conversion_factor);
+        return Number.isFinite(candidate) && candidate > 1;
+      });
     const factor = Number((purchaseUom ?? fallbackUom)?.conversion_factor);
     return Number.isFinite(factor) && factor > 0 ? factor : 1;
   }
@@ -10753,7 +11899,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const factor = this.parseDecimalNumber(row[columnIndex]);
     if (!Number.isFinite(factor) || factor <= 0) return '';
     const baseUom = String(this.formValues()['baseUom'] ?? '').trim();
-    const altUom  = String(row[0] ?? '').trim();
+    const altUom = String(row[0] ?? '').trim();
     if (!baseUom || !altUom) return '';
     return `1 ${altUom} = ${factor} ${baseUom}`;
   }
@@ -11301,7 +12447,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // of a single "here" figure.
     const warehouseField = key === 'deliveryChallan' || key === 'stockTransfer' ? (this.formValues()['fromWarehouse'] || this.formValues()['fromWarehouseId'])
       : key === 'salesInvoice' ? (this.formValues()['warehouse'] || this.formValues()['warehouseId'])
-      : null;
+        : null;
     // Item 1: DC's "From Warehouse / Branch" and SI's "Warehouse / Branch"
     // header fields are both merged pickers now (Full Warehouse/Branch
     // Independence) — findWarehouseBySelection() alone silently returns
@@ -11899,8 +13045,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // screen not in that set, is always visible — this only ever hides
   // columns that are structurally irrelevant right now, never one the user
   // could otherwise type into (Rate/GST/Qty/etc. are untouched).
-  isLineColumnVisible(column: string): boolean {
+    isLineColumnVisible(column: string): boolean {
     if (!this.isPolicyColumnHidingScreen()) return true;
+    // Phase 2 (2.6g): the Policy column is also needed for quantity products
+    // that capture policy values at Stock Inward
+    if (this.lineGridColumnIsSerialPicker(column) && this.anyRowHasLinePolicies()) return true;
     return this.shouldShowPolicyLineColumn(column);
   }
 
@@ -12097,15 +13246,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const qtyIndex = qtyColumn
       ? this.lineColumnIndex(qtyColumn)
       : key === 'purchaseReturn' || key === 'salesReturn'
-      ? this.lineColumnIndex('Return Qty')
-      : key === 'goodsReceipt'
-        ? this.lineColumnIndex('Accepted Qty')
-        // Item 5: a GRN-linked Purchase Invoice bills on Accepted Qty (what
-        // the GRN recorded); a direct invoice has no such column rendered
-        // at all and uses the plain Qty column instead.
-        : key === 'purchaseInvoice'
-          ? (this.isGrnLinkedPurchaseInvoice() ? this.lineColumnIndex('Accepted Qty') : this.lineColumnIndex('Qty'))
-          : this.findColumnIndex(['qty', 'quantity', 'received', 'accepted', 'produced']);
+        ? this.lineColumnIndex('Return Qty')
+        : key === 'goodsReceipt'
+          ? this.lineColumnIndex('Accepted Qty')
+          // Item 5: a GRN-linked Purchase Invoice bills on Accepted Qty (what
+          // the GRN recorded); a direct invoice has no such column rendered
+          // at all and uses the plain Qty column instead.
+          : key === 'purchaseInvoice'
+            ? (this.isGrnLinkedPurchaseInvoice() ? this.lineColumnIndex('Accepted Qty') : this.lineColumnIndex('Qty'))
+            : this.findColumnIndex(['qty', 'quantity', 'received', 'accepted', 'produced']);
     const rateIndex = this.findColumnIndex(['rate', 'price', 'cost']);
     const discountIndex = this.findColumnIndex(['disc', 'discount']);
     const taxIndex = this.findColumnIndex(['gst', 'tax']);
@@ -12118,7 +13267,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const discountPercent = discountIndex >= 0 ? this.parseCurrency(row[discountIndex]) : 0;
     const taxPercent = taxIndex >= 0 ? this.transactionLineGstPercent(row, this.config?.lineColumns?.[taxIndex]) : this.transactionLineGstPercent(row);
     const total = this.transactionLineTaxBreakup(qty, rate, discountPercent, taxPercent, rowIndex).total;
-    row[amountIndex] = Math.round(total).toLocaleString('en-IN');
+    // Line Amount keeps paise (it is saved per line); only the invoice Grand
+    // Total is rounded to whole rupees, through Round Off (migration 275).
+    // Previous: row[amountIndex] = Math.round(total).toLocaleString('en-IN');
+    row[amountIndex] = this.roundLineAmount(total).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
   private amountColumnIndex(): number {
@@ -12513,14 +13665,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   private referenceDocsForType(type: string, docs: PurchaseRefDoc[]): PurchaseRefDoc[] {
-    if (type === 'PR')  return docs.filter(doc => this.normalizeKey(doc.status) === 'approved');
+    if (type === 'PR') return docs.filter(doc => this.normalizeKey(doc.status) === 'approved');
     if (type === 'RFQ') return docs.filter(doc => ['accepted', 'responsereceived'].includes(this.normalizeKey(doc.status)));
-    if (type === 'PO')  return docs.filter(doc => ['approved', 'confirmed'].includes(this.normalizeKey(doc.status)));
+    if (type === 'PO') return docs.filter(doc => ['approved', 'confirmed'].includes(this.normalizeKey(doc.status)));
     if (type === 'GRN') return this.filterPurchaseInvoiceAvailableGrnDocs(docs.filter(doc => this.normalizeKey(doc.status) === 'posted'));
-    if (type === 'PI')  return this.filterPurchaseReturnAvailablePiDocs(docs.filter(doc => this.normalizeKey(doc.status) === 'posted'));
-    if (type === 'SO')  return docs.filter(doc => this.normalizeKey(doc.status) === 'posted');
-    if (type === 'SI')  return this.filterSalesReturnAvailableInvoiceDocs(docs.filter(doc => this.normalizeKey(doc.status) === 'posted'));
-    if (type === 'DC')  return docs.filter(doc => this.normalizeKey(doc.status) === 'posted');
+    if (type === 'PI') return this.filterPurchaseReturnAvailablePiDocs(docs.filter(doc => this.normalizeKey(doc.status) === 'posted'));
+    if (type === 'SO') return docs.filter(doc => this.normalizeKey(doc.status) === 'posted');
+    if (type === 'SI') return this.filterSalesReturnAvailableInvoiceDocs(docs.filter(doc => this.normalizeKey(doc.status) === 'posted'));
+    if (type === 'DC') return docs.filter(doc => this.normalizeKey(doc.status) === 'posted');
     if (type === 'PURCHASERETURN' || type === 'SALESRETURN') return this.filterDocumentNoteAvailableReturnDocs(docs);
     return docs;
   }
@@ -12534,15 +13686,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (this.config?.key === 'debitNote') return 'Pick Purchase Return / Invoice';
     if (this.config?.key === 'creditNote') return 'Pick Sales Return / Invoice';
     const type = this.purchaseReferenceType() || this.salesReferenceType();
-    if (type === 'PR')  return 'Pick PR';
+    if (type === 'PR') return 'Pick PR';
     if (type === 'RFQ') return 'Pick RFQ';
-    if (type === 'PO')  return 'Pick PO';
+    if (type === 'PO') return 'Pick PO';
     if (type === 'GRN') return 'Pick GRN';
-    if (type === 'PI')  return 'Pick Invoice';
+    if (type === 'PI') return 'Pick Invoice';
     if (type === 'PURCHASERETURN') return 'Pick Purchase Return';
-    if (type === 'SO')  return 'Pick Sales Order';
-    if (type === 'DC')  return 'Pick Delivery Challan';
-    if (type === 'SI')  return 'Pick Sales Invoice';
+    if (type === 'SO') return 'Pick Sales Order';
+    if (type === 'DC') return 'Pick Delivery Challan';
+    if (type === 'SI') return 'Pick Sales Invoice';
     if (type === 'SALESRETURN') return 'Pick Sales Return';
     return 'Pick Reference';
   }
@@ -12675,6 +13827,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const source = Array.isArray(records) ? records : [];
     return source
       .filter(record => this.normalizeKey(record?.status || 'posted') === 'posted')
+      .filter(record => type !== 'PRODUCTIONPLAN' || this.config?.key !== 'materialIssueProduction' || this.planHasRemainingToIssue(record))
+       .filter(record => type !== 'PRODUCTIONPLAN' || this.config?.key !== 'productionEntry'
+        || Number(record?.producible_qty ?? record?.producibleQty ?? 0) > 0)
       .map(record => type === 'PRODUCTIONPLAN'
         ? this.productionPlanReferenceDoc(record)
         : this.materialIssueReferenceDoc(record));
@@ -12702,7 +13857,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       finished_product_name: plan?.finished_product_name || plan?.finishedProductName || '',
       planned_qty: plan?.planned_qty ?? plan?.plannedQty,
       bom_version: plan?.bom_version || plan?.bomVersion || '',
-      work_center: plan?.work_center || plan?.workCenter || ''
+      work_center: plan?.work_center || plan?.workCenter || '',
+      // What the issued material can still make, and its real cost per finished unit (from 262)
+      producible_qty: Number(plan?.producible_qty ?? plan?.producibleQty ?? 0) || 0,
+      produced_so_far: Number(plan?.produced_so_far ?? plan?.producedSoFar ?? 0) || 0,
+      material_cost_per_unit: Number(plan?.material_cost_per_unit ?? plan?.materialCostPerUnit ?? 0) || 0
     };
     return doc as PurchaseRefDoc;
   }
@@ -13042,12 +14201,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   ): PurchaseRefDoc[] {
     const soDocs = so.success
       ? this.referenceDocsForType('SO', so.data || [])
-          .map(doc => ({ ...doc, doc_type: 'SO' }))
-          .filter(doc => !this.salesOrderHasDirectInvoiceProgress(doc))
+        .map(doc => ({ ...doc, doc_type: 'SO' }))
+        .filter(doc => !this.salesOrderHasDirectInvoiceProgress(doc))
       : [];
     const siDocs = si.success
       ? this.referenceDocsForType('SI', si.data || [])
-          .map(doc => ({ ...doc, doc_type: 'SI' }))
+        .map(doc => ({ ...doc, doc_type: 'SI' }))
       : [];
     return [...soDocs, ...siDocs];
   }
@@ -13107,8 +14266,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   ): PurchaseRefDoc[] {
     const soDocs = so.success
       ? this.referenceDocsForType('SO', so.data || [])
-          .map(doc => ({ ...doc, doc_type: 'SO' }))
-          .filter(doc => !this.salesOrderHasDeliveryProgress(doc))
+        .map(doc => ({ ...doc, doc_type: 'SO' }))
+        .filter(doc => !this.salesOrderHasDeliveryProgress(doc))
       : [];
     const dcDocs = dc.success
       ? this.referenceDocsForType('DC', dc.data || []).map(doc => ({ ...doc, doc_type: 'DC' }))
@@ -13360,7 +14519,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return (amt === undefined || amt === null || amt === '') ? '-' : String(amt);
   }
 
-    // ── 257: Purchase Return → PI Reference popup — where the rest of a PI line went ──
+  // ── 257: Purchase Return → PI Reference popup — where the rest of a PI line went ──
   // sp_get_purchase_docs_for_ref('PI') returns each item with the database field
   // names (sold_qty, transferred_out_qty, ...); camelCase is accepted too.
   // Serial products: exact split. Others: only not_at_location_qty is known.
@@ -13389,7 +14548,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   refPickerItemNotHereQty(item: any): number {
     return this.refPickerBreakdownQty(item?.not_at_location_qty ?? item?.notAtLocationQty);
   }
-    // 258: PI Reference popup (Purchase Return - whole invoice)
+  // 258: PI Reference popup (Purchase Return - whole invoice)
   refPickerDocTotal(doc: any): number {
     const total = (doc?.items || []).reduce((sum: number, item: any) => sum + (Number(item?.amount) || 0), 0);
     return Math.round(total * 100) / 100;
@@ -13399,8 +14558,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const serials = item?.returnable_serial_numbers ?? item?.returnableSerialNumbers ?? [];
     return Array.isArray(serials) && serials.length ? serials.join(', ') : '-';
   }
-    // 258: Purchase Return - the serials bound to a row, for the read-only cell's tooltip
-    // 258: Purchase Return - the serials bound to a row (tooltip of the read-only cell)
+  // 258: Purchase Return - the serials bound to a row, for the read-only cell's tooltip
+  // 258: Purchase Return - the serials bound to a row (tooltip of the read-only cell)
   purchaseReturnRowSerialsText(rowIndex: number): string {
     return (this.lineSerialUnitsMap()[rowIndex] || []).join(', ');
   }
@@ -13457,10 +14616,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const docs = this.refPickerAvailableDocs();
     const filtered = q
       ? docs.filter(doc =>
-          String(doc.doc_number || '').toLowerCase().includes(q)
-          || String(doc.party_name || '').toLowerCase().includes(q)
-          || String(doc.doc_date || '').toLowerCase().includes(q)
-        )
+        String(doc.doc_number || '').toLowerCase().includes(q)
+        || String(doc.party_name || '').toLowerCase().includes(q)
+        || String(doc.doc_date || '').toLowerCase().includes(q)
+      )
       : docs;
     return filtered.slice(0, 100);
   }
@@ -13470,10 +14629,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const docs = this.refPickerAvailableDocs();
     const total = q
       ? docs.filter(doc =>
-          String(doc.doc_number || '').toLowerCase().includes(q)
-          || String(doc.party_name || '').toLowerCase().includes(q)
-          || String(doc.doc_date || '').toLowerCase().includes(q)
-        ).length
+        String(doc.doc_number || '').toLowerCase().includes(q)
+        || String(doc.party_name || '').toLowerCase().includes(q)
+        || String(doc.doc_date || '').toLowerCase().includes(q)
+      ).length
       : docs.length;
     return Math.max(0, total - this.refPickerDisplayDocs().length);
   }
@@ -13524,9 +14683,25 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.boundReferenceFields.set({});
     this.lineRefItemIdMap.set({});
     this.lineSerialUnitsMap.set({});
+    this.lineSerialIdentifiersMap.set({});
+    this.lineIdentifierValuesMap.set({});
     this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
     this.entryLineRowsKey.set(key);
     this.entryLineRows.set([this.blankLineRow()]);
+  }
+
+  // Production Entry: the header Produced Qty / Rejected Qty bind into the
+  // output grid row as they are typed, the same way Production Cost does
+  // (applyProductionEntryTentativeCost). Without this the grid kept the
+  // values from when the Production Plan was picked.
+  private syncProductionEntryQtyToGrid(key: 'producedQty' | 'rejectedQty', value: any): void {
+    const label = key === 'producedQty' ? 'Produced Qty' : 'Rejected Qty';
+    this.entryLineRows.update(rows => rows.map((row, index) => {
+      if (index !== 0) return row;
+      const next = this.normalizeLineRow(row);
+      this.setManufacturingLineCell(next, [label], value);
+      return next;
+    }));
   }
 
   private setManufacturingLineCell(row: string[], labels: string[], value: any): void {
@@ -13543,7 +14718,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       && ['finishedProduct', 'plannedQty', 'bomVersion'].includes(fieldKey);
   }
 
-  private selectedProductionPlanningBom(values = this.formValues()): ManufacturingBomRecord | null {
+   private selectedProductionPlanningBom(values = this.formValues()): ManufacturingBomRecord | null {
     const finishedProduct = String(values['finishedProduct'] || '').trim();
     if (!finishedProduct) return null;
     const finishedKey = this.normalizeKey(finishedProduct);
@@ -13551,10 +14726,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const candidates = this.productionPlanningBomRecords()
       .filter(record => this.normalizeKey(record.finishedProduct) === finishedKey);
     if (!candidates.length) return null;
-    if (versionKey && versionKey !== 'latest') {
-      return candidates.find(record => this.normalizeKey(record.version) === versionKey) || null;
-    }
-    return candidates[0] || null;
+    // Version not chosen yet, or it belongs to another product: use the first BOM.
+    return candidates.find(record => this.normalizeKey(record.version) === versionKey) || candidates[0];
   }
 
   private formatBomRequirementQty(value: number): string {
@@ -13575,31 +14748,42 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.setManufacturingLineCell(row, ['Batch Req'], product?.batch_applicable ? 'Yes' : 'No');
     return this.normalizeLineRow(row);
   }
-
   private syncProductionPlanningBomRequirementRows(force = true): void {
     if (this.config?.key !== 'productionPlanning') return;
     if (!force && this.activeManufacturingLineRows().length) return;
 
     const values = this.formValues();
-    const plannedQty = Number(values['plannedQty']) || 0;
-    if (plannedQty <= 0) return;
-
-    const bom = this.selectedProductionPlanningBom(values);
-    if (!bom) return;
-
-    const rows = bom.rawMaterials
-      .map(rawMaterial => this.productionPlanningBomRequirementRow(rawMaterial, bom.quantityPerUnit * plannedQty))
-      .filter(row => row.some(cell => String(cell || '').trim()));
-    if (!rows.length) return;
-
-    if (!String(values['bomVersion'] || '').trim() && bom.version) {
-      this.formValues.update(current => ({ ...current, bomVersion: bom.version }));
-    }
+    const finishedProduct = String(values['finishedProduct'] || '').trim();
     this.entryLineRowsKey.set('productionPlanning');
-    this.entryLineRows.set(rows);
     this.lineRefItemIdMap.set({});
     this.lineSerialUnitsMap.set({});
-    this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
+    this.lineSerialIdentifiersMap.set({});
+    this.lineIdentifierValuesMap.set({});
+    this.lineSerialWarrantyMap.set({});
+    this.lineSalesWarrantyBoundMap.set({});
+
+    if (!finishedProduct) {
+      this.entryLineRows.set([this.blankLineRow()]);
+      return;
+    }
+
+    const bom = this.selectedProductionPlanningBom(values);
+    if (!bom) {
+      this.entryLineRows.set([this.blankLineRow()]);
+      this.saveError.set(`No active BOM found for ${finishedProduct}. Create it in BOM Master first.`);
+      return;
+    }
+
+    if (!this.optionEquals(values['bomVersion'] || '', bom.version || '')) {
+      this.formValues.update(current => ({ ...current, bomVersion: bom.version }));
+    }
+
+    // Required Qty = BOM qty per 1 unit x Planned Qty (wastage does not add to it)
+    const plannedQty = Number(values['plannedQty']) || 0;
+    const rows = bom.materials.map(material =>
+      this.productionPlanningBomRequirementRow(material.productName, material.quantity * plannedQty));
+    this.entryLineRows.set(rows.length ? rows : [this.blankLineRow()]);
+    this.saveError.set('');
   }
 
   private manufacturingLineRefMapFromItems(
@@ -13624,16 +14808,29 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return map;
   }
 
-  private productionPlanMaterialToIssueLineRow(item: any): string[] {
+  // private productionPlanMaterialToIssueLineRow(item: any): string[] {
+  //   const row = this.blankLineRow();
+  //   this.setManufacturingLineCell(row, ['Raw Material', 'Material'], item.product_name || item.productName || '');
+  //   this.setManufacturingLineCell(row, ['Variant'], item.variant_name || item.variantName || '');
+  //   this.setManufacturingLineCell(row, ['Attribute'], item.attribute_value || item.attributeValue || item.attribute_name || item.attributeName || '');
+  //   this.setManufacturingLineCell(row, ['UOM'], item.uom_name || item.uomName || '');
+  //   this.setManufacturingLineCell(row, ['Required Qty'], item.required_qty ?? item.requiredQty ?? '');
+  //   this.setManufacturingLineCell(row, ['Issued Qty'], item.required_qty ?? item.requiredQty ?? '');
+  //   this.setManufacturingLineCell(row, ['Batch / Lot No', 'Batch / Serial'], item.batch_no || item.batchNo || '');
+  //   this.setManufacturingLineCell(row, ['Serial No'], item.serial_no || item.serialNo || '');
+  //   return this.normalizeLineRow(row);
+  // }
+    private productionPlanMaterialToIssueLineRow(item: any): string[] {
     const row = this.blankLineRow();
     this.setManufacturingLineCell(row, ['Raw Material', 'Material'], item.product_name || item.productName || '');
     this.setManufacturingLineCell(row, ['Variant'], item.variant_name || item.variantName || '');
     this.setManufacturingLineCell(row, ['Attribute'], item.attribute_value || item.attributeValue || item.attribute_name || item.attributeName || '');
     this.setManufacturingLineCell(row, ['UOM'], item.uom_name || item.uomName || '');
-    this.setManufacturingLineCell(row, ['Required Qty'], item.required_qty ?? item.requiredQty ?? '');
-    this.setManufacturingLineCell(row, ['Issued Qty'], item.required_qty ?? item.requiredQty ?? '');
+    // Required = still to be issued (plan Required - already issued). Partial issues allowed.
+    this.setManufacturingLineCell(row, ['Required Qty'], this.formatStockLimitQty(this.planItemRemainingQty(item)));
+    // Issued is typed by the user (what is actually sent today).
+    this.setManufacturingLineCell(row, ['Issued Qty'], '');
     this.setManufacturingLineCell(row, ['Batch / Lot No', 'Batch / Serial'], item.batch_no || item.batchNo || '');
-    this.setManufacturingLineCell(row, ['Serial No'], item.serial_no || item.serialNo || '');
     return this.normalizeLineRow(row);
   }
 
@@ -13761,23 +14958,32 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       patch['fromBranchId'] = doc.branch_id ?? null;
       patch['toWorkCenter'] = anyDoc.work_center || this.formValues()['toWorkCenter'] || '';
       patch['issueDate'] = this.isoDateValue(this.formValues()['issueDate']) || this.todayIso();
-      rows = (doc.items || []).map((item: any) => this.productionPlanMaterialToIssueLineRow(item));
-      refMap = this.manufacturingLineRefMapFromItems(doc.items || [], 'productionPlanItemId');
+      const openItems = (doc.items || []).filter((item: any) => this.planItemRemainingQty(item) > 0);
+      rows = openItems.map((item: any) => this.productionPlanMaterialToIssueLineRow(item));
+      refMap = this.manufacturingLineRefMapFromItems(openItems, 'productionPlanItemId');
+      patch['bomVersion'] = anyDoc.bom_version || anyDoc.bomVersion || '';
     } else if (key === 'productionEntry') {
-      const cost = this.productionPlanEstimatedMaterialCost(doc);
-      const plannedQty = anyDoc.planned_qty ?? anyDoc.plannedQty ?? '';
+       // Can Produce and cost per set come from the issued material (262).
+      // The user enters Produced / Rejected; cost and grid follow (Step 4).
+      const producible = Number(anyDoc.producible_qty ?? anyDoc.producibleQty ?? 0) || 0;
+      const perSet = Number(anyDoc.material_cost_per_unit ?? anyDoc.materialCostPerUnit ?? 0) || 0;
       patch['productionPlanId'] = doc.id;
       patch['planRef'] = doc.doc_number;
-      patch['productionDate'] = this.isoDateValue(this.formValues()['productionDate']) || anyDoc.production_date || this.todayIso();
+      patch['productionDate'] = this.isoDateValue(this.formValues()['productionDate']) || this.todayIso();
       patch['finishedProduct'] = anyDoc.finished_product_name || anyDoc.finishedProductName || doc.party_name || '';
       patch['finishedProductId'] = anyDoc.finished_product_id ?? anyDoc.finishedProductId ?? doc.vendor_id ?? null;
-      patch['producedQty'] = plannedQty;
-      patch['rejectedQty'] = this.formValues()['rejectedQty'] || '0';
-      patch['productionCost'] = this.formatProductionCostValue(cost);
+      patch['producibleQty'] = String(producible);
+      patch['materialCostPerUnit'] = perSet;
+      patch['producedQty'] = '';
+      patch['rejectedQty'] = '';
+      patch['productionCost'] = '';
       patch['toWarehouse'] = locationName || this.formValues()['toWarehouse'] || '';
       patch['toWarehouseId'] = doc.warehouse_id ?? null;
       patch['toBranchId'] = doc.branch_id ?? null;
-      rows = [this.productionPlanOutputLineRow(doc, cost)];
+      const outputRow = this.productionPlanOutputLineRow(doc, 0);
+      this.setManufacturingLineCell(outputRow, ['Produced Qty'], '');
+      this.setManufacturingLineCell(outputRow, ['Rejected Qty'], '');
+      rows = [outputRow];
       refMap = { 0: { productionPlanItemId: null } };
     } else if (key === 'productionReturn') {
       patch['materialIssueId'] = doc.id;
@@ -13799,12 +15005,53 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.entryLineRows.set(rows.length ? rows : [this.blankLineRow()]);
     this.lineRefItemIdMap.set(refMap);
     this.lineSerialUnitsMap.set({});
+    this.lineSerialIdentifiersMap.set({});
+    this.lineIdentifierValuesMap.set({});
     this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
     this.boundReferenceLabels.set([doc.doc_number]);
     this.boundReferenceFields.set(patch);
-    if (key === 'productionEntry') {
-      this.refreshProductionEntryTentativeCostFromIssues(doc, this.productionPlanEstimatedMaterialCost(doc));
+   
+  }
+
+    // Production Entry: Produced / Rejected typed in the header drive the
+  // cost and the output grid.  Cost = (Produced + Rejected) x cost per set,
+  // where cost per set is the real issued cost from the server (262).
+  private syncProductionEntryOutput(): void {
+    if (this.config?.key !== 'productionEntry') return;
+    const values = this.formValues();
+    const produced = Number(values['producedQty']) || 0;
+    const rejected = Number(values['rejectedQty']) || 0;
+    const perSet = Number(values['materialCostPerUnit']) || 0;
+    const cost = Math.round((produced + rejected) * perSet * 100) / 100;
+    const costText = cost > 0 ? this.formatProductionCostValue(cost) : '';
+
+    if (String(values['productionCost'] ?? '') !== costText) {
+      this.formValues.update(v => ({ ...v, productionCost: costText }));
     }
+    this.entryLineRows.update(rows => rows.map((row, index) => {
+      if (index !== 0) return row;
+      const next = this.normalizeLineRow(row);
+      this.setManufacturingLineCell(next, ['Produced Qty'], values['producedQty'] ?? '');
+      this.setManufacturingLineCell(next, ['Rejected Qty'], values['rejectedQty'] ?? '');
+      this.setManufacturingLineCell(next, ['Production Cost', 'Cost'], costText);
+      return next;
+    }));
+    // Serials are for produced units only: drop extras if Produced went down
+    this.trimLineSerialUnitsToCurrentQty(0);
+  }
+
+    // Production Entry: message shown under Produced Qty while typing,
+  // when Produced + Rejected is more than Can Produce. Empty = no message.
+  productionEntryQtyLimitText(): string {
+    if (this.config?.key !== 'productionEntry') return '';
+    const values = this.formValues();
+    const producible = Number(values['producibleQty']) || 0;
+    const used = (Number(values['producedQty']) || 0) + (Number(values['rejectedQty']) || 0);
+    if (producible > 0 && used > producible) {
+      return `Produced + Rejected (${used}) is more than Can Produce (${producible}). ` +
+             `Reduce the quantity, or issue more material against this plan first.`;
+    }
+    return '';
   }
 
   selectPrimaryReference(doc: PurchaseRefDoc): void {
@@ -13952,7 +15199,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // surfaced as "Serial number X is not available" at Post (or the
       // openSerialPicker self-heal notice on reopen). The user must pick
       // from openSerialPicker's live, source-scoped, in-stock list instead.
-            const applyRows = () => {
+      const applyRows = () => {
         this.entryLineRowsKey.set(key);
         this.entryLineRows.set(rows);
         if (key === 'purchaseReturn' || key === 'goodsReceipt') {
@@ -14138,14 +15385,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           }
         }
         if (key === 'deliveryChallan' || key === 'salesInvoice') {
-        // Carry each picked SO item's own id forward so DC/SI posting can
-        // advance that SO item's delivered_qty/invoiced_qty (rule 4) — the
-        // ref-docs endpoint only started returning SO item ids once this was
-        // added (sp_get_purchase_docs_for_ref's WHEN 'SO' branch). Merged
-        // with the same item's own attribute_id/attribute_value (see
-        // attributeRefMapFromItems' doc comment) — DC/SI's own serial
-        // picker and save payload need that too, same reasoning as
-        // Purchase/Sales Return below.
+          // Carry each picked SO item's own id forward so DC/SI posting can
+          // advance that SO item's delivered_qty/invoiced_qty (rule 4) — the
+          // ref-docs endpoint only started returning SO item ids once this was
+          // added (sp_get_purchase_docs_for_ref's WHEN 'SO' branch). Merged
+          // with the same item's own attribute_id/attribute_value (see
+          // attributeRefMapFromItems' doc comment) — DC/SI's own serial
+          // picker and save payload need that too, same reasoning as
+          // Purchase/Sales Return below.
           const attrMap = this.attributeRefMapFromItems(doc.items || []);
           const nextMap: Record<number, { soItemId?: number; dcItemId?: number; siItemId?: number; attributeId?: number | null; attributeName?: string | null; attributeValue?: string | null }> = {};
           (doc.items || []).forEach((item: any, i: number) => {
@@ -14924,10 +16171,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.lineSerialUnitsMap.update(map => ({ ...map, [rowIndex]: serials.slice(0, qtyNeeded) }));
   }
 
-  serialPickerSummaryForRow(rowIndex: number, row: string[]): string {
+   serialPickerSummaryForRow(rowIndex: number, row: string[]): string {
     const count = (this.lineSerialUnitsMap()[rowIndex] || []).length;
     const productName = this.lineValue(row, ['product', 'item', 'sku', 'material']);
     const product = this.findProductBySelection(productName);
+    // Phase 2 (2.6g): quantity product with Stock Inward policies, e.g. "Batch Ref (1/1)"
+    if (product && !product.serial_applicable) {
+      const linePolicies = this.productInwardPolicies(product);
+      if (linePolicies.length) {
+        const values = this.lineIdentifierValuesMap()[rowIndex] || {};
+        const filled = linePolicies.filter(p => String(values[p.policyId] ?? '').trim()).length;
+        const lineLabel = linePolicies.length === 1 ? linePolicies[0].policyName : 'Policy Values';
+        return `${lineLabel} (${filled}/${linePolicies.length})`;
+      }
+    }
     const qty = this.serialPickerBaseQtyForRow(row, product);
     const inheritedSource = this.inheritedSalesSerialSource(rowIndex);
     const dcItemId = inheritedSource?.dcItemId ?? null;
@@ -14937,11 +16194,26 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // number this line wants (IMEI Number, Chassis No, ...). The captured/
     // required count stays alongside it: it is the only place the qty cap is
     // visible before the picker opens.
-    const label = this.productSerialColumnLabels(product)[0] || 'Serial No';
+    // Previous: const label = this.productSerialColumnLabels(product)[0] || 'Serial No';
+    // The column header is "Policy", so the button shows this row's policy name
+    // as saved in Product Master (e.g. "IMEI Required").
+    const label = this.productSerialPolicyName(product) || 'Serial No';
     if (dcItemId) return count ? `${count} ${label}(s) from DC` : 'Loading…';
 
     if (siItemId) return count ? `${count} ${label}(s) from SI` : 'Loading...';
     return `${label} (${count}/${qty || 0})`;
+  }
+
+    // Phase 2 (2.6g): a quantity product whose category captures policies at Stock Inward
+  rowHasLinePolicies(row: string[]): boolean {
+    if (this.serialPickerModeForKey() !== 'capture') return false;
+    const product = this.findProductBySelection(this.lineValue(row, ['product', 'item', 'sku', 'material']));
+    return !!product && !product.serial_applicable && this.productInwardPolicies(product).length > 0;
+  }
+
+    // Phase 2 (2.6g): at least one line is a quantity product with Stock Inward policies
+  anyRowHasLinePolicies(): boolean {
+    return this.entryLineRows().some(row => this.rowHasLinePolicies(row));
   }
 
   // Compact "{policy name} · {count}" badge text for a row whose serial cell
@@ -14956,7 +16228,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!product?.serial_applicable) return '';
     const count = (this.lineSerialUnitsMap()[rowIndex] || []).length;
     if (!count) return '';
-    const policyName = String(product.serial_policy_name || '').trim() || this.productSerialColumnLabels(product)[0] || 'Serial No';
+    // Previous: const policyName = String(product.serial_policy_name || '').trim() || this.productSerialColumnLabels(product)[0] || 'Serial No';
+    const policyName = this.productSerialPolicyName(product) || 'Serial No';
     return `${policyName} · ${count}`;
   }
 
@@ -15013,12 +16286,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // still reads 'in_stock'/'sold' until this document is actually saved, so
   // nothing server-side stops the same physical unit being picked twice
   // across two rows in one draft. This is the client-side backstop for that.
-  private serialUnitsUsedInOtherRows(excludeRowIndex: number): Set<string> {
+   private serialUnitsUsedInOtherRows(excludeRowIndex: number, productId: number | null = null): Set<string> {
+    // Serials picked in OTHER rows of this same document, for the SAME product only.
+    // Serial "1" of a motor and serial "1" of a frame are different physical units.
     const used = new Set<string>();
     const map = this.lineSerialUnitsMap();
+    const rows = this.entryLineRows();
     for (const key of Object.keys(map)) {
-      if (Number(key) === excludeRowIndex) continue;
-      for (const serial of map[Number(key)] || []) used.add(serial);
+      const rowIndex = Number(key);
+      if (rowIndex === excludeRowIndex) continue;
+      if (productId != null) {
+        const otherProduct = this.lineRowProduct(this.normalizeLineRow(rows[rowIndex] || []));
+        if (Number(otherProduct?.id) !== Number(productId)) continue;
+      }
+      for (const serial of map[rowIndex] || []) used.add(serial);
     }
     return used;
   }
@@ -15026,7 +16307,24 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   openSerialPicker(rowIndex: number, row: string[]): void {
     const productName = this.lineValue(row, ['product', 'item', 'sku', 'material']);
     const product = this.findProductBySelection(productName);
-    if (!product?.serial_applicable) return;
+    if (!product) return;
+
+     // Phase 2 (2.6g): a quantity product (no Unique Identifier) whose category
+    // captures policies at Stock Inward: one value per policy for the whole line.
+    if (!product.serial_applicable) {
+      if (this.serialPickerModeForKey() !== 'capture') return;
+      const linePolicies = this.productInwardPolicies(product);
+      if (!linePolicies.length) return;
+      this.activeSerialPicker.set({
+        rowIndex, mode: 'lineValues', qtyNeeded: 0, productId: product.id,
+        productName: product.product_name || productName, warrantyApplicable: false, inwardPolicies: linePolicies
+      });
+      this.serialPickerLineValuesDraft.set({ ...(this.lineIdentifierValuesMap()[rowIndex] || {}) });
+      this.serialPickerIdentifierWarnings.set({});
+      this.serialPickerError.set('');
+      this.serialPickerMessage.set('');
+      return;
+    }
 
     const qtyNeeded = this.serialPickerBaseQtyForRow(row, product);
     const inheritedSource = this.inheritedSalesSerialSource(rowIndex);
@@ -15063,7 +16361,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const warrantyApplicable = mode === 'capture' && !!product.warranty_applicable;
     // Sales Invoice: a unit with no purchase warranty can get one added here.
     const saleWarrantyApplicable = mode === 'select' && this.config?.key === 'salesInvoice' && !!product.warranty_applicable;
-    this.activeSerialPicker.set({ rowIndex, mode, qtyNeeded, productId: product.id, productName: product.product_name || productName, warrantyApplicable, saleWarrantyApplicable });
+    
+    // Phase 2: other Stock Inward policies are entered where units are created (capture mode)
+    const inwardPolicies = mode === 'capture' ? this.productInwardPolicies(product) : [];
+    this.activeSerialPicker.set({ rowIndex, mode, qtyNeeded, productId: product.id, productName: product.product_name || productName, warrantyApplicable, saleWarrantyApplicable, inwardPolicies });
+    this.serialPickerIdentifierDraft.set(JSON.parse(JSON.stringify(this.lineSerialIdentifiersMap()[rowIndex] || {})));
+    this.serialPickerIdentifierWarnings.set({});
     const savedSaleWarranty: Record<string, string> = {};
     if (saleWarrantyApplicable) {
       for (const [serial, entry] of Object.entries(this.lineSerialWarrantyMap()[rowIndex] || {})) {
@@ -15133,13 +16436,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       const attributeValue = refAttrForPicker?.attributeValue !== undefined ? refAttrForPicker.attributeValue : resolvedAttrForPicker.attribute_value;
       const obs = purchaseReturnPiId
         ? this.txService.getInstockSerialsForSource(purchaseReturnGrnId
-            ? { productId: product.id, sourceDocType: 'grn', sourceDocId: purchaseReturnGrnId, variantId, attributeId, attributeValue }
-            : { productId: product.id, sourceDocType: 'purchase_invoice', sourceDocId: purchaseReturnPiId, variantId, attributeId, attributeValue })
+          ? { productId: product.id, sourceDocType: 'grn', sourceDocId: purchaseReturnGrnId, variantId, attributeId, attributeValue }
+          : { productId: product.id, sourceDocType: 'purchase_invoice', sourceDocId: purchaseReturnPiId, variantId, attributeId, attributeValue })
         : this.config?.key === 'salesReturn'
           ? this.txService.getSoldSerialsForReturn({ productId: product.id, invoiceId: salesReturnInvoiceId, variantId, attributeId, attributeValue })
           : this.txService.getAvailableSerials({ productId: product.id, variantId, attributeId, attributeValue, ...this.resolveHeaderLocationForSerialPicker() });
-      const usedElsewhere = this.serialUnitsUsedInOtherRows(rowIndex);
-      const previouslySaved = [...this.serialPickerDraftValues()];
+      const usedElsewhere = this.serialUnitsUsedInOtherRows(rowIndex, product.id);      const previouslySaved = [...this.serialPickerDraftValues()];
       obs.pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: res => {
@@ -15195,7 +16497,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return this.serialPickerSelectedIds().has(optionId);
   }
 
-  toggleSerialPickerOption(option: { id: number; serial_no: string }): void {
+  toggleSerialPickerOption(option: { id: number; serial_no: string; missing_registration?: string | null }): void {
     const picker = this.activeSerialPicker();
     if (!picker || picker.mode === 'inherited') return;
     const selected = this.serialPickerSelectedIds();
@@ -15204,11 +16506,22 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       next.delete(option.id);
     } else {
       if (next.size >= picker.qtyNeeded) return;
+      // Phase 3: a unit that still needs a mandatory registration cannot be sold
+      if (this.serialPickerOptionBlockedReason(option)) return;
       next.add(option.id);
     }
     this.serialPickerSelectedIds.set(next);
     const options = this.serialPickerAvailableOptions();
     this.serialPickerDraftValues.set(options.filter(o => next.has(o.id)).map(o => o.serial_no));
+  }
+
+  // Phase 3 (267): on selling screens, a unit with a MANDATORY Registration
+  // before Sale value missing (e.g. UIN) is shown but cannot be selected.
+  // Other screens (returns, issues, transfers) are not affected.
+  serialPickerOptionBlockedReason(option: { missing_registration?: string | null }): string {
+    if (!['salesInvoice', 'deliveryChallan'].includes(this.config?.key || '')) return '';
+    const missing = String(option?.missing_registration || '').trim();
+    return missing ? `${missing} missing — register it in Identifier Registration before selling.` : '';
   }
 
   // Sales Invoice "+" warranty for a unit with no purchase warranty.
@@ -15239,6 +16552,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return isDuplicateText ? `${option.serial_no} (Unit #${option.id})` : option.serial_no;
   }
 
+  // The name of the policy that identifies a product's units (its category's
+  // Unique Identifier), e.g. "IMEI 1", "Chassis No". Falls back to "Serial No.".
+  protected unitIdentifierLabel(productId: number | null | undefined): string {
+    const product: any = productId
+      ? this.loadedProductObjects?.().find((p: any) => Number(p?.id) === Number(productId))
+      : null;
+    return String(product?.serial_policy_name || product?.serialPolicyName || '').trim() || 'Serial No.';
+  }
   // Local-only "already entered" check (same row's draft list) runs first —
   // instant, no round trip. Once that passes, sp_check_serial_duplicate asks
   // whether this serial already exists anywhere else in the system for this
@@ -15275,8 +16596,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const exists = !!res.data?.exists;
           const allowDuplicate = !!res.data?.allowDuplicate;
           if (exists && !allowDuplicate) {
+            const label = this.unitIdentifierLabel(picker.productId);
             this.serialPickerError.set(
-              `This serial no. already exists: "${text}". Remove the duplicate, or enable "Allow Duplicate" on its Serial Number Policy if repeats are expected.`
+              `${label} "${text}" already exists. Each unit's ${label} must be unique; please check and enter the correct one.`
             );
             return;
           }
@@ -15301,9 +16623,126 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.serialPickerMessageTimer = setTimeout(() => this.serialPickerMessage.set(''), 1800);
   }
 
-  removeSerialPickerCaptureValue(value: string): void {
+    removeSerialPickerCaptureValue(value: string): void {
     this.serialPickerDraftValues.set(this.serialPickerDraftValues().filter(s => s !== value));
     this.clearSerialPickerWarrantyOverride(value);
+    this.serialPickerIdentifierWarnings.update(w => {
+        const next: Record<string, string> = {};
+        for (const [key, msg] of Object.entries(w)) if (!key.startsWith(`${value}|`)) next[key] = msg;
+        return next;
+      });
+  }
+    serialPickerIdentifierValue(serial: string, policyId: number): string {
+    return this.serialPickerIdentifierDraft()[serial]?.[policyId] ?? '';
+  }
+
+  setSerialPickerIdentifierValue(serial: string, policyId: number, value: string): void {
+    this.serialPickerIdentifierDraft.update(draft => ({
+      ...draft,
+      [serial]: { ...(draft[serial] || {}), [policyId]: String(value ?? '') }
+    }));
+    this.clearSerialPickerIdentifierWarning(serial, policyId);
+  }
+
+  // Units still missing a mandatory value (shown in the popup footer)
+  serialPickerMissingMandatoryCount(): number {
+    const policies = (this.activeSerialPicker()?.inwardPolicies || []).filter(p => p.isMandatory);
+    if (!policies.length) return 0;
+    return this.serialPickerDraftValues().filter(serial =>
+      policies.some(p => !String(this.serialPickerIdentifierValue(serial, p.policyId)).trim())).length;
+  }
+
+    serialPickerIdentifierWarning(serial: string, policyId: number): string {
+    return this.serialPickerIdentifierWarnings()[`${serial}|${policyId}`] || '';
+  }
+
+  private clearSerialPickerIdentifierWarning(serial: string, policyId: number): void {
+    const key = `${serial}|${policyId}`;
+    if (!this.serialPickerIdentifierWarnings()[key]) return;
+    this.serialPickerIdentifierWarnings.update(w => { const next = { ...w }; delete next[key]; return next; });
+  }
+
+  private setSerialPickerIdentifierWarning(serial: string, policyId: number, message: string): void {
+    this.serialPickerIdentifierWarnings.update(w => ({ ...w, [`${serial}|${policyId}`]: message }));
+  }
+
+  // Called when the user leaves a policy cell. Only mandatory values are
+  // protected (optional ones may repeat), matching the posting rule (266).
+  checkSerialPickerIdentifierValue(serial: string, policy: InwardPolicy): void {
+    if (!policy?.isMandatory) return;
+    const value = String(this.serialPickerIdentifierValue(serial, policy.policyId) || '').trim();
+    this.clearSerialPickerIdentifierWarning(serial, policy.policyId);
+    if (!value) return;
+
+    // 1. The same value in another unit of this popup
+    const sameHere = this.serialPickerDraftValues().find(other =>
+      other !== serial &&
+      String(this.serialPickerIdentifierValue(other, policy.policyId) || '').trim().toUpperCase() === value.toUpperCase());
+    if (sameHere) {
+      this.setSerialPickerIdentifierWarning(serial, policy.policyId,
+        `${policy.policyName} "${value}" is also entered for unit ${sameHere}.`);
+      return;
+    }
+
+    // 2. Already stored (and protected) in the company
+    this.txService.checkIdentifierDuplicate(policy.policyId, value)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: res => {
+          // The user may have changed the value meanwhile
+          const current = String(this.serialPickerIdentifierValue(serial, policy.policyId) || '').trim();
+          if (current.toUpperCase() !== value.toUpperCase()) return;
+          if (res.data?.exists && res.data?.enforceUnique) {
+            const on = res.data.usedOn;
+            this.setSerialPickerIdentifierWarning(serial, policy.policyId,
+              `${policy.policyName} "${value}" is already used` +
+              (on?.docNo ? ` on ${on.docNo}` : '') +
+              (on?.productName ? ` (${on.productName})` : '') + '.');
+          }
+        },
+        // A failed lookup must not block entry; posting checks again anyway
+        error: () => { }
+      });
+  }
+
+  serialPickerIdentifierWarningCount(): number {
+    return Object.keys(this.serialPickerIdentifierWarnings()).length;
+  }
+
+    serialPickerLineValue(policyId: number): string {
+    return this.serialPickerLineValuesDraft()[policyId] ?? '';
+  }
+
+  setSerialPickerLineValue(policyId: number, value: string): void {
+    this.serialPickerLineValuesDraft.update(draft => ({ ...draft, [policyId]: String(value ?? '') }));
+    this.clearSerialPickerIdentifierWarning('__line__', policyId);
+  }
+
+  serialPickerLineMissingMandatoryCount(): number {
+    return (this.activeSerialPicker()?.inwardPolicies || [])
+      .filter(p => p.isMandatory && !String(this.serialPickerLineValue(p.policyId)).trim()).length;
+  }
+
+  // Live check for a line value (mandatory values only, like the per-unit cells)
+  checkSerialPickerLineValue(policy: InwardPolicy): void {
+    if (!policy?.isMandatory) return;
+    const value = String(this.serialPickerLineValue(policy.policyId) || '').trim();
+    this.clearSerialPickerIdentifierWarning('__line__', policy.policyId);
+    if (!value) return;
+    this.txService.checkIdentifierDuplicate(policy.policyId, value)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: res => {
+          if (String(this.serialPickerLineValue(policy.policyId) || '').trim().toUpperCase() !== value.toUpperCase()) return;
+          if (res.data?.exists && res.data?.enforceUnique) {
+            const on = res.data.usedOn;
+            this.setSerialPickerIdentifierWarning('__line__', policy.policyId,
+              `${policy.policyName} "${value}" is already used` +
+              (on?.docNo ? ` on ${on.docNo}` : '') + (on?.productName ? ` (${on.productName})` : '') + '.');
+          }
+        },
+        error: () => { }
+      });
   }
 
   // Bulk counterpart to addSerialPickerCaptureValue — adds a whole
@@ -15335,15 +16774,137 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return toAdd.length;
   }
 
-  closeSerialPicker(save: boolean): void {
+    // Phase 2 (2.6h): paste rows from Excel into the capture popup.
+  // With a header row: columns are matched by NAME (Unique Identifier and each
+  // Stock Inward policy, any order; unknown columns are ignored).
+  // Without a header: by POSITION (identifier first, then the policies in order).
+  // Tab-separated (Excel) or comma-separated.
+  applySerialPickerPaste(text: string): { added: number; updated: number; skipped: string[]; ignoredColumns: string[] } {
+    const result = { added: 0, updated: 0, skipped: [] as string[], ignoredColumns: [] as string[] };
     const picker = this.activeSerialPicker();
-    if (picker && save) {
+    if (!picker || picker.mode !== 'capture') return result;
+
+    const policies = picker.inwardPolicies || [];
+    const label = this.unitIdentifierLabel(picker.productId);
+    const split = (line: string) => (line.includes('\t') ? line.split('\t') : line.split(',')).map(cell => cell.trim());
+    const lines = String(text || '').split(/\r?\n/).filter(line => line.trim()).map(split);
+    if (!lines.length) return result;
+
+    // Column map: index -> 'id' (the Unique Identifier) or a policy id
+    let columnMap: Array<'id' | number | null>;
+    let firstDataLine = 0;
+    const first = lines[0];
+    const nameToTarget = (name: string): 'id' | number | null => {
+      const key = this.normalizeKey(name);
+      if (!key) return null;
+      if (key === this.normalizeKey(label)) return 'id';
+      const policy = policies.find(p => this.normalizeKey(p.policyName) === key);
+      return policy ? policy.policyId : null;
+    };
+    const looksLikeHeader = first.some(cell => nameToTarget(cell) !== null);
+
+    if (looksLikeHeader) {
+      columnMap = first.map(nameToTarget);
+      first.forEach((cell, i) => { if (cell && columnMap[i] === null) result.ignoredColumns.push(cell); });
+      if (!columnMap.includes('id')) {
+        result.skipped.push(`The header has no "${label}" column, so no rows were added.`);
+        return result;
+      }
+      firstDataLine = 1;
+    } else {
+      columnMap = first.map((_, i) => i === 0 ? 'id' : (policies[i - 1]?.policyId ?? null));
+      // Columns beyond the policies are ignored
+      const maxCols = Math.max(...lines.map(l => l.length));
+      if (maxCols > policies.length + 1) result.ignoredColumns.push(`${maxCols - policies.length - 1} extra column(s)`);
+      for (let i = columnMap.length; i < maxCols; i++) columnMap.push(i === 0 ? 'id' : (policies[i - 1]?.policyId ?? null));
+    }
+
+    const idIndex = columnMap.indexOf('id');
+    const serials = [...this.serialPickerDraftValues()];
+    const draft: Record<string, Record<number, string>> = JSON.parse(JSON.stringify(this.serialPickerIdentifierDraft()));
+
+    for (let index = firstDataLine; index < lines.length; index++) {
+      const cells = lines[index];
+      const serial = cells[idIndex] || '';
+      if (!serial) {
+        result.skipped.push(`Line ${index + 1}: no ${label}.`);
+        continue;
+      }
+
+      let key = serials.find(s => s.toUpperCase() === serial.toUpperCase());
+      if (key) {
+        result.updated++;
+      } else {
+        if (serials.length >= picker.qtyNeeded) {
+          result.skipped.push(`Line ${index + 1}: ${serial} — quantity of ${picker.qtyNeeded} already complete.`);
+          continue;
+        }
+        serials.push(serial);
+        key = serial;
+        result.added++;
+      }
+
+      cells.forEach((value, i) => {
+        const target = columnMap[i];
+        if (typeof target === 'number' && value) {
+          draft[key!] = { ...(draft[key!] || {}), [target]: value };
+        }
+      });
+    }
+
+    this.serialPickerDraftValues.set(serials);
+    this.serialPickerIdentifierDraft.set(draft);
+
+    // Same live checks as typing (mandatory values only)
+    for (const serial of serials) {
+      for (const policy of policies) {
+        if (policy.isMandatory && String(this.serialPickerIdentifierValue(serial, policy.policyId)).trim()) {
+          this.checkSerialPickerIdentifierValue(serial, policy);
+        }
+      }
+    }
+
+    this.serialPickerMessage.set(
+      `${result.added} added, ${result.updated} updated` +
+      (result.skipped.length ? `, ${result.skipped.length} skipped` : '') +
+      (result.ignoredColumns.length ? `; ignored: ${result.ignoredColumns.join(', ')}` : '') + '.');
+    if (this.serialPickerMessageTimer) clearTimeout(this.serialPickerMessageTimer);
+    this.serialPickerMessageTimer = setTimeout(() => this.serialPickerMessage.set(''), 4000);
+    return result;
+  }
+
+    // The column order shown as a hint in the paste box, e.g. "IMEI ⇥ IMEI 1"
+  serialPickerPasteColumnHint(): string {
+    const picker = this.activeSerialPicker();
+    if (!picker) return '';
+    return [this.unitIdentifierLabel(picker.productId), ...(picker.inwardPolicies || []).map(p => p.policyName)].join('  ⇥  ');
+  }
+
+   closeSerialPicker(save: boolean): void {
+    const picker = this.activeSerialPicker();
+    // Phase 2 (2.6g): quantity products keep one value per policy for the line
+    if (picker && save && picker.mode === 'lineValues') {
+      const kept: Record<number, string> = {};
+      for (const [policyId, value] of Object.entries(this.serialPickerLineValuesDraft())) {
+        if (String(value ?? '').trim()) kept[Number(policyId)] = String(value).trim();
+      }
+      this.lineIdentifierValuesMap.update(map => {
+        const next = { ...map };
+        if (Object.keys(kept).length) next[picker.rowIndex] = kept; else delete next[picker.rowIndex];
+        return next;
+      });
+    }
+    // Phase 2 (2.6g): the serial logic below is for per-unit products only
+    if (picker && save && picker.mode !== 'lineValues') {
       this.lineSerialUnitsMap.update(map => ({ ...map, [picker.rowIndex]: [...this.serialPickerDraftValues()] }));
-      if (picker.mode === 'select' || picker.mode === 'inherited') {
-        // Sales Invoice: Warranty Upto from the chosen units' purchase warranty.
-        const chosen = new Set(this.serialPickerDraftValues());
-        this.bindSalesInvoiceWarrantyFromSerials(picker.rowIndex,
-          this.serialPickerAvailableOptions().filter(option => chosen.has(option.serial_no)));
+      // Phase 2: keep the policy values of the units that are still on the line
+      if (picker.mode === 'capture' && (picker.inwardPolicies || []).length) {
+        const draft = this.serialPickerIdentifierDraft();
+        const kept: Record<string, Record<number, string>> = {};
+        for (const serial of this.serialPickerDraftValues()) {
+          if (draft[serial]) kept[serial] = draft[serial];
+        }
+        this.lineSerialIdentifiersMap.update(map => ({ ...map, [picker.rowIndex]: kept }));
       }
       if (picker.warrantyApplicable) {
         // Every captured serial gets an entry — the shared default for
@@ -15376,6 +16937,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.serialPickerSaleWarrantyEdits.set({});
     this.activeSerialPicker.set(null);
     this.serialPickerDraftValues.set([]);
+    this.serialPickerIdentifierDraft.set({});
+    this.serialPickerLineValuesDraft.set({});
+    this.serialPickerIdentifierWarnings.set({});
     this.serialPickerAvailableOptions.set([]);
     this.serialPickerSelectedIds.set(new Set());
     this.serialPickerWarrantyOverrides.set({});
@@ -15501,6 +17065,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.isLineGridFullscreen.set(false);
     this._autoCodeFields.clear();
     this.genericNameValue.set('');
+    this.categoryPolicyApplicable.set(false);
+    this.categoryPolicyRows.set([]);
+    this.categoryPolicyRowsBackup = [];
+    this.categoryPolicyRows.set([]);
     this.isCurrentProductLocked.set(false);
     this.editingId.set(null);
     this.txDocId.set(null);
@@ -15524,6 +17092,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.lineAttrValueMap.set({});
     this.lineSerialValueMap.set({});
     this.lineSerialUnitsMap.set({});
+    this.lineSerialIdentifiersMap.set({});
+    this.lineIdentifierValuesMap.set({});
     this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
     this.categorySerialApplicable.set(false);
     this.categoryBatchApplicable.set(false);
@@ -15577,7 +17147,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.lineSerialValueMap.set({});
       this.lineRefItemIdMap.set({});
       this.lineSerialUnitsMap.set({});
-    this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
+      this.lineSerialIdentifiersMap.set({});
+      this.lineIdentifierValuesMap.set({});
+      this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
       this.applyDefaultLocationToCurrentTransaction(true);
       return;
     }
@@ -15592,6 +17164,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.lineSerialValueMap.set({});
       this.lineRefItemIdMap.set({});
       this.lineSerialUnitsMap.set({});
+      this.lineSerialIdentifiersMap.set({});
+      this.lineIdentifierValuesMap.set({});
       this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
       this.applyDefaultLocationToCurrentTransaction(true);
       return;
@@ -15736,6 +17310,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     });
     if (this.shouldSyncProductionPlanningBomRows(key)) {
       this.syncProductionPlanningBomRequirementRows(true);
+    }
+   
+    // Production Entry: Produced / Rejected -> cost (from issued material) and output grid
+    if (this.config?.key === 'productionEntry' && (key === 'producedQty' || key === 'rejectedQty')) {
+      this.syncProductionEntryOutput();
     }
     if (key === 'segment' && normalizedValue && !this.optionEquals(this.selectedSegment(), normalizedValue)) {
       this.selectedSegment.set(normalizedValue);
@@ -15937,6 +17516,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (this.config?.key === 'deliveryChallan') {
       Object.assign(next, this.dcAddressPatchFromSource(customer, false, next));
     }
+    // Sales Invoice: fill the Delivery / Ship Address from the customer master.
+    // A different customer clears the previous customer's address first, so
+    // the new one is not left behind the old values.
+    if (this.config?.key === 'salesInvoice') {
+      const customerChanged = !this.optionEquals(this.formValues()[key], value);
+      if (customerChanged) {
+        Object.assign(next, {
+          deliveryHouseNo: '', deliveryStreet: '', deliveryState: '', deliveryDistrict: '',
+          deliveryCity: '', deliveryPincode: '', deliveryAddress: '',
+          shipSameAsDelivery: 'Yes', shipAddress: ''
+        });
+      }
+      Object.assign(next, this.dcAddressPatchFromSource(customer, false, next));
+    }
   }
 
   private applySalesTransactionPaymentDefaults(next: Record<string, any>, key: string): void {
@@ -16073,7 +17666,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             this.transportDetailsForm.set({ ...data });
           }
         },
-        error: () => {}
+        error: () => { }
       });
   }
 
@@ -16083,7 +17676,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const payload: TransportDetails = { ...this.transportDetailsForm(), docType, docId } as TransportDetails;
     this.txService.saveTransportDetails(payload)
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: () => {}, error: () => {} });
+      .subscribe({ next: () => { }, error: () => { } });
   }
 
   dcDistrictOptions(): string[] {
@@ -16194,7 +17787,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           area: postOffice.Name || ''
         });
       })
-      .catch(() => {});
+      .catch(() => { });
   }
 
   private localDcPincodeLookup(pincode: string): { state: string; district: string; city: string; area: string } | null {
@@ -16288,7 +17881,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           area: postOffice.Name || ''
         });
       })
-      .catch(() => {});
+      .catch(() => { });
   }
 
   private applyPartyPincodeLookup(lookup: { state: string; district: string; city: string; area: string }): void {
@@ -16444,9 +18037,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   //   return this.config?.kind === 'transaction' ? [] : (this.config?.rows || []);
   // });
 
-  private readonly _stableLiveRows = computed((): string[][] => {
+   private readonly _stableLiveRows = computed((): string[][] => {
     if (this.isApiWired()) {
-      return this.mapToGridRows(this.newestFirstRecords(this.segmentFilteredRecords(this.savedRecordObjects())));
+      const records = this.savedRecordObjects();
+      // Policies are a company-wide library (migration 265): Policy Master lists
+      // every policy of the company, whatever segment it was created in.
+      const visible = this.config?.key === 'serialNumberPolicy'
+        ? records
+        : this.segmentFilteredRecords(records);
+      return this.mapToGridRows(this.newestFirstRecords(visible));
     }
     return this.config?.kind === 'transaction' ? [] : (this.config?.rows || []);
   });
@@ -16456,8 +18055,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // returns A–Z because every product dropdown in the app reads it. Row
   // clicks resolve by product_code (findRecordByRow), not position, so the
   // reorder is safe; a column-header click still re-sorts as before.
+  // Category Master follows the same rule (rows resolve by category_code).
   private newestFirstRecords(records: any[]): any[] {
-    if (this.config?.key !== 'productServiceMaster') return records;
+    const key = this.config?.key;
+    if (key !== 'productServiceMaster' && key !== 'categoryMaster') return records;
     return [...records].sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0));
   }
 
@@ -16516,53 +18117,53 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const key = this.config?.key;
     const segmentId = this.selectedSegmentId();
     switch (key) {
-      case 'businessSegments':     obs$ = this.inventoryConfigService.getSegments(true);            break;
-      case 'branchMaster':         obs$ = this.inventoryConfigService.getBranchesInv(true);         break;
-      case 'warehouseMaster':      obs$ = this.inventoryConfigService.getWarehouses(true);          break;
-      case 'uomMaster':            obs$ = this.inventoryConfigService.getUoms(true, segmentId);     break;
-      case 'categoryMaster':       obs$ = this.inventoryConfigService.getCategories(true);          break;
-      case 'hsnSacMapping':        obs$ = this.inventoryConfigService.getHsnSac(undefined, true);   break;
-      case 'paymentTermsMaster':   obs$ = this.inventoryConfigService.getPaymentTerms(true);        break;
-      case 'brandMaster':          obs$ = this.inventoryConfigService.getBrands(segmentId, true);        break;
-      case 'attributeMaster':      obs$ = this.inventoryConfigService.getAttributes(segmentId, true);    break;
-      case 'productGroupMaster':   obs$ = this.inventoryConfigService.getProductGroups(segmentId, null, true); break;
-      case 'variantMaster':        obs$ = this.inventoryConfigService.getVariants(segmentId, null, true);     break;
-      case 'serialNumberPolicy':   obs$ = this.inventoryConfigService.getSerialPolicies(segmentId, null, true); break;
-      case 'batchLotPolicy':       obs$ = this.inventoryConfigService.getBatchPolicies(segmentId, null, true);  break;
-      case 'barcodeConfiguration':  obs$ = this.inventoryConfigService.getBarcodeConfigurations(true);     break;
-      case 'substituteProducts':    obs$ = this.inventoryConfigService.getSubstituteProducts(true);        break;
-      case 'consumptionTypeMaster': obs$ = this.inventoryConfigService.getConsumptionTypes(segmentId, true);   break;
-      case 'productTypeMaster':     obs$ = this.inventoryConfigService.getProductTypes(true);                  break;
-      case 'bomMaster':             obs$ = this.inventoryConfigService.getBoms(true);                          break;
-      case 'workCenterMaster':      obs$ = this.inventoryConfigService.getWorkCenters(true);                   break;
-      case 'priceListMaster':       obs$ = this.inventoryConfigService.getPriceLists(true);                    break;
-      case 'vendorMaster':         obs$ = this.inventoryConfigService.getVendors(null, true);            break;
-      case 'customerMaster':       obs$ = this.inventoryConfigService.getCustomers(null, true);          break;
-      case 'channelPartnerMaster': obs$ = this.inventoryConfigService.getChannelPartners(null, true);    break;
+      case 'businessSegments': obs$ = this.inventoryConfigService.getSegments(true); break;
+      case 'branchMaster': obs$ = this.inventoryConfigService.getBranchesInv(true); break;
+      case 'warehouseMaster': obs$ = this.inventoryConfigService.getWarehouses(true); break;
+      case 'uomMaster': obs$ = this.inventoryConfigService.getUoms(true, segmentId); break;
+      case 'categoryMaster': obs$ = this.inventoryConfigService.getCategories(true); break;
+      case 'hsnSacMapping': obs$ = this.inventoryConfigService.getHsnSac(undefined, true); break;
+      case 'paymentTermsMaster': obs$ = this.inventoryConfigService.getPaymentTerms(true); break;
+      case 'brandMaster': obs$ = this.inventoryConfigService.getBrands(segmentId, true); break;
+      case 'attributeMaster': obs$ = this.inventoryConfigService.getAttributes(segmentId, true); break;
+      case 'productGroupMaster': obs$ = this.inventoryConfigService.getProductGroups(segmentId, null, true); break;
+      case 'variantMaster': obs$ = this.inventoryConfigService.getVariants(segmentId, null, true); break;
+      case 'serialNumberPolicy': obs$ = this.inventoryConfigService.getSerialPolicies(segmentId, null, true); break;
+      case 'batchLotPolicy': obs$ = this.inventoryConfigService.getBatchPolicies(segmentId, null, true); break;
+      case 'barcodeConfiguration': obs$ = this.inventoryConfigService.getBarcodeConfigurations(true); break;
+      case 'substituteProducts': obs$ = this.inventoryConfigService.getSubstituteProducts(true); break;
+      case 'consumptionTypeMaster': obs$ = this.inventoryConfigService.getConsumptionTypes(segmentId, true); break;
+      case 'productTypeMaster': obs$ = this.inventoryConfigService.getProductTypes(true); break;
+      case 'bomMaster': obs$ = this.inventoryConfigService.getBoms(true); break;
+      case 'workCenterMaster': obs$ = this.inventoryConfigService.getWorkCenters(true); break;
+      case 'priceListMaster': obs$ = this.inventoryConfigService.getPriceLists(true); break;
+      case 'vendorMaster': obs$ = this.inventoryConfigService.getVendors(null, true); break;
+      case 'customerMaster': obs$ = this.inventoryConfigService.getCustomers(null, true); break;
+      case 'channelPartnerMaster': obs$ = this.inventoryConfigService.getChannelPartners(null, true); break;
       case 'productServiceMaster': obs$ = this.inventoryConfigService.getProducts(segmentId, null, true); break;
-      case 'purchaseRequisition':  obs$ = this.txService.getPurchaseRequisitions(undefined, segmentId); break;
-      case 'requestForQuotation':  obs$ = this.txService.getRfqs(undefined, segmentId); break;
-      case 'purchaseOrder':        obs$ = this.txService.getPurchaseOrders(undefined, segmentId); break;
-      case 'goodsReceipt':         obs$ = this.txService.getGrns(undefined, segmentId); break;
-      case 'stockTransfer':        obs$ = this.txService.getStockTransfers(undefined, segmentId); break;
-      case 'stockAdjustment':      obs$ = this.txService.getStockAdjustments(undefined, segmentId); break;
-      case 'openingStockEntry':    obs$ = this.txService.getOpeningStockEntries(undefined, segmentId); break;
-      case 'cycleCount':           obs$ = this.txService.getCycleCounts(undefined, segmentId); break;
-      case 'purchaseInvoice':      obs$ = this.txService.getPurchaseInvoices(undefined, segmentId); break;
-      case 'purchaseReturn':       obs$ = this.txService.getPurchaseReturns(undefined, segmentId); break;
-      case 'debitNote':            obs$ = this.txService.getDebitNotes(undefined, segmentId); break;
-      case 'productionPlanning':    obs$ = this.txService.getProductionPlans(undefined, segmentId); break;
+      case 'purchaseRequisition': obs$ = this.txService.getPurchaseRequisitions(undefined, segmentId); break;
+      case 'requestForQuotation': obs$ = this.txService.getRfqs(undefined, segmentId); break;
+      case 'purchaseOrder': obs$ = this.txService.getPurchaseOrders(undefined, segmentId); break;
+      case 'goodsReceipt': obs$ = this.txService.getGrns(undefined, segmentId); break;
+      case 'stockTransfer': obs$ = this.txService.getStockTransfers(undefined, segmentId); break;
+      case 'stockAdjustment': obs$ = this.txService.getStockAdjustments(undefined, segmentId); break;
+      case 'openingStockEntry': obs$ = this.txService.getOpeningStockEntries(undefined, segmentId); break;
+      case 'cycleCount': obs$ = this.txService.getCycleCounts(undefined, segmentId); break;
+      case 'purchaseInvoice': obs$ = this.txService.getPurchaseInvoices(undefined, segmentId); break;
+      case 'purchaseReturn': obs$ = this.txService.getPurchaseReturns(undefined, segmentId); break;
+      case 'debitNote': obs$ = this.txService.getDebitNotes(undefined, segmentId); break;
+      case 'productionPlanning': obs$ = this.txService.getProductionPlans(undefined, segmentId); break;
       case 'materialIssueProduction': obs$ = this.txService.getMaterialIssueProductions(undefined, segmentId); break;
-      case 'productionEntry':       obs$ = this.txService.getProductionEntries(undefined, segmentId); break;
-      case 'productionReturn':      obs$ = this.txService.getProductionReturns(undefined, segmentId); break;
-      case 'estimation':           obs$ = this.txService.getEstimations(undefined, segmentId); break;
-      case 'proformaInvoice':      obs$ = this.txService.getProformaInvoices(undefined, segmentId); break;
-      case 'salesInvoice':         obs$ = this.txService.getSalesInvoices(undefined, segmentId); break;
-      case 'salesOrder':           obs$ = this.txService.getSalesOrders(undefined, segmentId); break;
-      case 'salesQuotation':       obs$ = this.txService.getSalesQuotations(undefined, segmentId); break;
-      case 'deliveryChallan':      obs$ = this.txService.getDeliveryChallans(undefined, segmentId, undefined, this.dcPendingInvoiceFilter()); break;
-      case 'salesReturn':          obs$ = this.txService.getSalesReturns(undefined, segmentId); break;
-      case 'creditNote':           obs$ = this.txService.getCreditNotes(undefined, segmentId); break;
+      case 'productionEntry': obs$ = this.txService.getProductionEntries(undefined, segmentId); break;
+      case 'productionReturn': obs$ = this.txService.getProductionReturns(undefined, segmentId); break;
+      case 'estimation': obs$ = this.txService.getEstimations(undefined, segmentId); break;
+      case 'proformaInvoice': obs$ = this.txService.getProformaInvoices(undefined, segmentId); break;
+      case 'salesInvoice': obs$ = this.txService.getSalesInvoices(undefined, segmentId); break;
+      case 'salesOrder': obs$ = this.txService.getSalesOrders(undefined, segmentId); break;
+      case 'salesQuotation': obs$ = this.txService.getSalesQuotations(undefined, segmentId); break;
+      case 'deliveryChallan': obs$ = this.txService.getDeliveryChallans(undefined, segmentId, undefined, this.dcPendingInvoiceFilter()); break;
+      case 'salesReturn': obs$ = this.txService.getSalesReturns(undefined, segmentId); break;
+      case 'creditNote': obs$ = this.txService.getCreditNotes(undefined, segmentId); break;
       default: return;
     }
     obs$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
@@ -16571,7 +18172,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           this.savedRecordObjects.set(res.data);
         }
       },
-      error: () => {}
+      error: () => { }
     });
   }
 
@@ -16754,9 +18355,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
               ? 'Sales Invoice posted. Delivery Challan generated and posted.'
               : 'Sales Invoice posted. Delivery Challan created as Draft for review.');
             setTimeout(() => this.saveMsg.set(''), 4000);
-            if (dcStatus === 'posted') {
-              this.printAutoGeneratedDocument('deliveryChallan', dcRes.data);
-            }
+            // The auto-created DC no longer opens the print popup; only the
+            // Sales Invoice PDF opens after Post. The DC can still be printed
+            // from the Delivery Challan screen.
+            // Previous: if (dcStatus === 'posted') {
+            // Previous:   this.printAutoGeneratedDocument('deliveryChallan', dcRes.data);
+            // Previous: }
             if (this.config?.key === 'deliveryChallan') {
               this.loadApiRecords();
             }
@@ -16879,15 +18483,47 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // indirection those normally read from — both builders already ignore
   // their `_row` param and only fall back to the passed-in columns/rows
   // when the record itself has no items, so this is a safe, minimal reuse.
-  private printAutoGeneratedDocument(kind: 'salesInvoice' | 'deliveryChallan', record: any): void {
+  // Purchase Invoice added: Post PI opens the same PI document the grid's
+  // PDF button prints (purchaseInvoiceDocumentExportPayload), from the saved
+  // record the post returned. Protected so the Purchase Invoice screen can call it.
+  // Previous: private printAutoGeneratedDocument(kind: 'salesInvoice' | 'deliveryChallan', record: any): void {
+  protected printAutoGeneratedDocument(kind: 'salesInvoice' | 'deliveryChallan' | 'purchaseInvoice', record: any): void {
+    if (kind === 'purchaseInvoice') {
+      const piNo = String(record?.pi_number || record?.piNumber || '');
+      // Opens in a new tab with the browser's PDF viewer (not the print popup).
+      // Previous: this.printGridPayload(this.purchaseInvoiceDocumentExportPayload(record, piNo, [], [], []), false);
+      // Previous: this.exportService.pdf(this.exportDocument(this.purchaseInvoiceDocumentExportPayload(record, piNo, [], [], [])), 'Open');
+      this.printInvoiceWithCopyType('purchaseInvoice', record, this.purchaseInvoiceDocumentExportPayload(record, piNo, [], [], []), 'Open');
+      return;
+    }
     const docNo = kind === 'salesInvoice'
       ? String(record?.doc_number || record?.docNumber || '')
       : String(record?.dc_number || record?.dcNumber || '');
+    // Sales Invoice: every Post opens the SI (see the Sales Invoice screen's
+    // afterConfigRecordSaved). The Direct-SI DC flow asks for the same SI again
+    // right after, so the same invoice is opened only once.
+    if (kind === 'salesInvoice') {
+      const openedKey = `salesInvoice:${record?.id ?? docNo}`;
+      if (this.lastAutoOpenedDocKey === openedKey) return;
+      this.lastAutoOpenedDocKey = openedKey;
+    }
     const payload = kind === 'salesInvoice'
       ? this.salesInvoiceDocumentExportPayload(record, docNo, [], [], [])
       : this.deliveryChallanDocumentExportPayload(record, docNo, [], [], []);
-    this.printGridPayload(payload, false);
+    // Sales Invoice opens in a new tab with the browser's PDF viewer; Delivery
+    // Challan keeps the print popup.
+    // Previous: this.printGridPayload(payload, false);
+    if (kind === 'salesInvoice') {
+      // Previous: this.exportService.pdf(this.exportDocument(payload), 'Open');
+      this.printInvoiceWithCopyType('salesInvoice', record, payload, 'Open');
+    } else {
+      this.printGridPayload(payload, false);
+    }
   }
+
+  // Last document opened by printAutoGeneratedDocument(), so one post never
+  // opens the same Sales Invoice twice.
+  private lastAutoOpenedDocKey = '';
 
   saveConfigRecord(forceDocumentStatus?: 'draft' | 'posted' | 'sent'): void {
     if (this.isSaving()) return;
@@ -17091,53 +18727,53 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.saveError.set('');
     let obs$: Observable<ApiResponse<any>>;
     switch (this.config?.key) {
-      case 'businessSegments':      obs$ = this.inventoryConfigService.saveSegment(payload, id);          break;
-      case 'branchMaster':          obs$ = this.inventoryConfigService.saveBranchInv(payload, id);       break;
-      case 'warehouseMaster':       obs$ = this.inventoryConfigService.saveWarehouse(payload, id);        break;
-      case 'uomMaster':             obs$ = this.inventoryConfigService.saveUom(payload, id);              break;
-      case 'categoryMaster':        obs$ = this.inventoryConfigService.saveCategory(payload, id);         break;
-      case 'hsnSacMapping':         obs$ = this.inventoryConfigService.saveHsnSac(payload, id);           break;
-      case 'paymentTermsMaster':    obs$ = this.inventoryConfigService.savePaymentTerm(payload, id);      break;
-      case 'brandMaster':           obs$ = this.inventoryConfigService.saveBrand(payload, id);            break;
-      case 'attributeMaster':       obs$ = this.inventoryConfigService.saveAttribute(payload, id);        break;
-      case 'productGroupMaster':    obs$ = this.inventoryConfigService.saveProductGroup(payload, id);     break;
-      case 'variantMaster':         obs$ = this.inventoryConfigService.saveVariant(payload, id);          break;
-      case 'serialNumberPolicy':    obs$ = this.inventoryConfigService.saveSerialPolicy(payload, id);     break;
-      case 'batchLotPolicy':        obs$ = this.inventoryConfigService.saveBatchPolicy(payload, id);      break;
-      case 'barcodeConfiguration':   obs$ = this.inventoryConfigService.saveBarcodeConfiguration(payload, id); break;
-      case 'substituteProducts':     obs$ = this.inventoryConfigService.saveSubstituteProduct(payload, id); break;
-      case 'consumptionTypeMaster': obs$ = this.inventoryConfigService.saveConsumptionType(payload, id);  break;
-      case 'productTypeMaster':     obs$ = this.inventoryConfigService.saveProductType(payload, id);       break;
-      case 'vendorMaster':          obs$ = this.saveVendorWithContactWriteback(payload, id);              break;
-      case 'customerMaster':        obs$ = this.saveCustomerWithContactWriteback(payload, id);            break;
-      case 'channelPartnerMaster':  obs$ = this.saveChannelPartnerWithContactWriteback(payload, id);      break;
-      case 'productServiceMaster':  obs$ = this.inventoryConfigService.saveProduct(payload, id);          break;
-      case 'bomMaster':             obs$ = this.inventoryConfigService.saveBom(payload, id);              break;
-      case 'workCenterMaster':      obs$ = this.inventoryConfigService.saveWorkCenter(payload, id);       break;
-      case 'priceListMaster':       obs$ = this.inventoryConfigService.savePriceList(payload, id);        break;
-      case 'purchaseRequisition':   obs$ = this.txService.savePurchaseRequisition(payload, id);           break;
-      case 'requestForQuotation':   obs$ = this.txService.saveRfq(payload, id);                           break;
-      case 'purchaseOrder':         obs$ = this.txService.savePurchaseOrder(payload, id);                  break;
-      case 'goodsReceipt':          obs$ = this.txService.saveGrn(payload, id);                           break;
-      case 'stockTransfer':         obs$ = this.txService.saveStockTransfer(payload, id);                 break;
-      case 'stockAdjustment':       obs$ = this.txService.saveStockAdjustment(payload, id);               break;
-      case 'openingStockEntry':     obs$ = this.txService.saveOpeningStockEntry(payload, id);             break;
-      case 'cycleCount':            obs$ = this.txService.saveCycleCount(payload, id);                    break;
-      case 'purchaseInvoice':       obs$ = this.txService.savePurchaseInvoice(payload, id);                break;
-      case 'purchaseReturn':        obs$ = this.txService.savePurchaseReturn(payload, id);                 break;
-      case 'debitNote':             obs$ = this.txService.saveDebitNote(payload, id);                      break;
-      case 'productionPlanning':     obs$ = this.txService.saveProductionPlan(payload, id);                 break;
-      case 'materialIssueProduction': obs$ = this.txService.saveMaterialIssueProduction(payload, id);       break;
-      case 'productionEntry':        obs$ = this.txService.saveProductionEntry(payload, id);                break;
-      case 'productionReturn':       obs$ = this.txService.saveProductionReturn(payload, id);               break;
-      case 'estimation':            obs$ = this.txService.saveEstimation(payload, id);                     break;
-      case 'proformaInvoice':       obs$ = this.txService.saveProformaInvoice(payload, id);                break;
-      case 'salesInvoice':          obs$ = this.txService.saveSalesInvoice(payload, id);                   break;
-      case 'salesOrder':            obs$ = this.txService.saveSalesOrder(payload, id);                     break;
-      case 'salesQuotation':        obs$ = this.txService.saveSalesQuotation(payload, id);                 break;
-      case 'deliveryChallan':       obs$ = this.txService.saveDeliveryChallan(payload, id);                break;
-      case 'salesReturn':           obs$ = this.txService.saveSalesReturn(payload, id);                    break;
-      case 'creditNote':            obs$ = this.txService.saveCreditNote(payload, id);                     break;
+      case 'businessSegments': obs$ = this.inventoryConfigService.saveSegment(payload, id); break;
+      case 'branchMaster': obs$ = this.inventoryConfigService.saveBranchInv(payload, id); break;
+      case 'warehouseMaster': obs$ = this.inventoryConfigService.saveWarehouse(payload, id); break;
+      case 'uomMaster': obs$ = this.inventoryConfigService.saveUom(payload, id); break;
+      case 'categoryMaster': obs$ = this.inventoryConfigService.saveCategory(payload, id); break;
+      case 'hsnSacMapping': obs$ = this.inventoryConfigService.saveHsnSac(payload, id); break;
+      case 'paymentTermsMaster': obs$ = this.inventoryConfigService.savePaymentTerm(payload, id); break;
+      case 'brandMaster': obs$ = this.inventoryConfigService.saveBrand(payload, id); break;
+      case 'attributeMaster': obs$ = this.inventoryConfigService.saveAttribute(payload, id); break;
+      case 'productGroupMaster': obs$ = this.inventoryConfigService.saveProductGroup(payload, id); break;
+      case 'variantMaster': obs$ = this.inventoryConfigService.saveVariant(payload, id); break;
+      case 'serialNumberPolicy': obs$ = this.inventoryConfigService.saveSerialPolicy(payload, id); break;
+      case 'batchLotPolicy': obs$ = this.inventoryConfigService.saveBatchPolicy(payload, id); break;
+      case 'barcodeConfiguration': obs$ = this.inventoryConfigService.saveBarcodeConfiguration(payload, id); break;
+      case 'substituteProducts': obs$ = this.inventoryConfigService.saveSubstituteProduct(payload, id); break;
+      case 'consumptionTypeMaster': obs$ = this.inventoryConfigService.saveConsumptionType(payload, id); break;
+      case 'productTypeMaster': obs$ = this.inventoryConfigService.saveProductType(payload, id); break;
+      case 'vendorMaster': obs$ = this.saveVendorWithContactWriteback(payload, id); break;
+      case 'customerMaster': obs$ = this.saveCustomerWithContactWriteback(payload, id); break;
+      case 'channelPartnerMaster': obs$ = this.saveChannelPartnerWithContactWriteback(payload, id); break;
+      case 'productServiceMaster': obs$ = this.inventoryConfigService.saveProduct(payload, id); break;
+      case 'bomMaster': obs$ = this.inventoryConfigService.saveBom(payload, id); break;
+      case 'workCenterMaster': obs$ = this.inventoryConfigService.saveWorkCenter(payload, id); break;
+      case 'priceListMaster': obs$ = this.inventoryConfigService.savePriceList(payload, id); break;
+      case 'purchaseRequisition': obs$ = this.txService.savePurchaseRequisition(payload, id); break;
+      case 'requestForQuotation': obs$ = this.txService.saveRfq(payload, id); break;
+      case 'purchaseOrder': obs$ = this.txService.savePurchaseOrder(payload, id); break;
+      case 'goodsReceipt': obs$ = this.txService.saveGrn(payload, id); break;
+      case 'stockTransfer': obs$ = this.txService.saveStockTransfer(payload, id); break;
+      case 'stockAdjustment': obs$ = this.txService.saveStockAdjustment(payload, id); break;
+      case 'openingStockEntry': obs$ = this.txService.saveOpeningStockEntry(payload, id); break;
+      case 'cycleCount': obs$ = this.txService.saveCycleCount(payload, id); break;
+      case 'purchaseInvoice': obs$ = this.txService.savePurchaseInvoice(payload, id); break;
+      case 'purchaseReturn': obs$ = this.txService.savePurchaseReturn(payload, id); break;
+      case 'debitNote': obs$ = this.txService.saveDebitNote(payload, id); break;
+      case 'productionPlanning': obs$ = this.txService.saveProductionPlan(payload, id); break;
+      case 'materialIssueProduction': obs$ = this.txService.saveMaterialIssueProduction(payload, id); break;
+      case 'productionEntry': obs$ = this.txService.saveProductionEntry(payload, id); break;
+      case 'productionReturn': obs$ = this.txService.saveProductionReturn(payload, id); break;
+      case 'estimation': obs$ = this.txService.saveEstimation(payload, id); break;
+      case 'proformaInvoice': obs$ = this.txService.saveProformaInvoice(payload, id); break;
+      case 'salesInvoice': obs$ = this.txService.saveSalesInvoice(payload, id); break;
+      case 'salesOrder': obs$ = this.txService.saveSalesOrder(payload, id); break;
+      case 'salesQuotation': obs$ = this.txService.saveSalesQuotation(payload, id); break;
+      case 'deliveryChallan': obs$ = this.txService.saveDeliveryChallan(payload, id); break;
+      case 'salesReturn': obs$ = this.txService.saveSalesReturn(payload, id); break;
+      case 'creditNote': obs$ = this.txService.saveCreditNote(payload, id); break;
       default: this.isSaving.set(false); return;
     }
     obs$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
@@ -17164,7 +18800,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             : '';
           const finishSave = () => {
             const forcedStatusMessage = this.forcedDocumentStatusMessage(forceDocumentStatus);
-            const savedMessage = forcedStatusMessage || (wasEditing ? 'Record updated.' : 'Record saved.');
+            const savedMessage = forcedStatusMessage || (wasEditing ? 'Updated successfully.' : 'Saved successfully.');
             // Advisory captured before the save (e.g. Rate over MRP) rides
             // along with the confirmation instead of having blocked it.
             const saveNotice = this.pendingSaveNotice;
@@ -17219,7 +18855,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             this.clearConfigForm();
             this.loadApiRecords();
             this.loadLookupOptions();
-            if (['purchaseInvoice', 'purchaseReturn', 'debitNote', 'creditNote', 'salesInvoice', 'deliveryChallan', 'salesReturn'].includes(this.config?.key || '')) {
+            if (['purchaseInvoice', 'purchaseReturn', 'debitNote', 'creditNote', 'salesInvoice', 'deliveryChallan', 'salesReturn','materialIssueProduction'].includes(this.config?.key || '')) {
               // Refresh the reference-doc list (the just-saved doc must drop
               // out of it — see the duplicate-reference exclusion below) but
               // don't auto-reopen the picker tray right after a save; that
@@ -17229,7 +18865,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
               this.loadTransactionReferenceDocs(true, false);
             }
             // A confirmation carrying an advisory needs longer on screen than
-            // a bare "Record saved." — it's the only place the user sees it.
+            // a bare "Saved successfully." — it's the only place the user sees it.
             setTimeout(() => this.saveMsg.set(''), saveNotice ? 8000 : 3000);
             if (savedSalesInvoiceId > 0 && savedSalesInvoiceStatus === 'posted') {
               this.loadSalesInvoiceBundleConsumption(savedSalesInvoiceId, savedSalesInvoiceNo);
@@ -17984,10 +19620,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   generateSku(name: string, category?: string, brand?: string, variant?: string): string {
-    const catAbbr     = category ? category.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) : '';
-    const brandAbbr   = brand    ? brand.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3)    : '';
-    const variantAbbr = variant  ? variant.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3)  : '';
-    const words    = String(name || '').trim().split(/\s+/).filter(Boolean);
+    const catAbbr = category ? category.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) : '';
+    const brandAbbr = brand ? brand.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) : '';
+    const variantAbbr = variant ? variant.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) : '';
+    const words = String(name || '').trim().split(/\s+/).filter(Boolean);
     const nameParts = words.slice(0, 2)
       .map(w => w.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3))
       .filter(Boolean);
@@ -18015,7 +19651,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     } else if (fieldKey === 'consumptionType') {
       codeKey = 'typeCode';
     } else if (fieldKey === 'name' &&
-               (this.config?.key === 'vendorMaster' || this.config?.key === 'customerMaster')) {
+      (this.config?.key === 'vendorMaster' || this.config?.key === 'customerMaster')) {
       codeKey = 'code';
     }
     if (!codeKey) return;
@@ -18035,9 +19671,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (current && String(current).trim() && !this._autoCodeFields.has(codeKey)) return;
     const sourceText = this.config?.key === 'bomMaster'
       ? [fieldKey === 'finishedProduct' ? value : this.formValues()['finishedProduct'], fieldKey === 'version' ? value : this.formValues()['version']]
-          .map(part => String(part || '').trim())
-          .filter(Boolean)
-          .join(' ')
+        .map(part => String(part || '').trim())
+        .filter(Boolean)
+        .join(' ')
       : value;
     const generated = this.generateCodeFromName(sourceText);
     if (!generated) return;
@@ -18056,16 +19692,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const display = this.mapToGridRows([displaySource])[0] || [];
     const formSnapshot: Record<string, any> = { ...this.formValues() };
     if (this.config?.key === 'productServiceMaster') {
-      formSnapshot['__productName']             = this.productName();
+      formSnapshot['__productName'] = this.productName();
       formSnapshot['__selectedProductCategory'] = this.selectedProductCategory();
-      formSnapshot['__hsnSacCode']              = this.hsnSacCode();
-      formSnapshot['__gstRate']                 = this.gstRate();
-      formSnapshot['__productBatchApplicable']  = this.productBatchApplicable();
+      formSnapshot['__hsnSacCode'] = this.hsnSacCode();
+      formSnapshot['__gstRate'] = this.gstRate();
+      formSnapshot['__productBatchApplicable'] = this.productBatchApplicable();
       formSnapshot['__productSerialApplicable'] = this.productSerialApplicable();
       formSnapshot['__productExpiryApplicable'] = this.productExpiryApplicable();
-      formSnapshot['__productQcRequired']       = this.productQcRequired();
+      formSnapshot['__productQcRequired'] = this.productQcRequired();
       formSnapshot['__productWarrantyApplicable'] = this.productWarrantyApplicable();
-      formSnapshot['__entryLineRows']           = JSON.stringify(this.entryLineRows());
+      formSnapshot['__entryLineRows'] = JSON.stringify(this.entryLineRows());
     }
     if (this.config?.key === 'uomMaster' || this.config?.key === 'variantMaster') {
       formSnapshot['__entryLineRows'] = JSON.stringify(this.entryLineRows());
@@ -18092,21 +19728,21 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.formValues.set({ ...row.formSnapshot });
     if (this.config?.key === 'productServiceMaster') {
       const s = row.formSnapshot;
-      if (s['__productName'] !== undefined)             this.productName.set(s['__productName']);
+      if (s['__productName'] !== undefined) this.productName.set(s['__productName']);
       if (s['__selectedProductCategory'] !== undefined) this.selectedProductCategory.set(s['__selectedProductCategory']);
-      if (s['__hsnSacCode'] !== undefined)              this.hsnSacCode.set(s['__hsnSacCode']);
-      if (s['__gstRate'] !== undefined)                 this.gstRate.set(s['__gstRate']);
-      if (s['__productBatchApplicable'] !== undefined)  this.productBatchApplicable.set(s['__productBatchApplicable']);
+      if (s['__hsnSacCode'] !== undefined) this.hsnSacCode.set(s['__hsnSacCode']);
+      if (s['__gstRate'] !== undefined) this.gstRate.set(s['__gstRate']);
+      if (s['__productBatchApplicable'] !== undefined) this.productBatchApplicable.set(s['__productBatchApplicable']);
       if (s['__productSerialApplicable'] !== undefined) this.productSerialApplicable.set(s['__productSerialApplicable']);
       if (s['__productExpiryApplicable'] !== undefined) this.productExpiryApplicable.set(s['__productExpiryApplicable']);
-      if (s['__productQcRequired'] !== undefined)       this.productQcRequired.set(s['__productQcRequired']);
+      if (s['__productQcRequired'] !== undefined) this.productQcRequired.set(s['__productQcRequired']);
       if (s['__productWarrantyApplicable'] !== undefined) this.productWarrantyApplicable.set(s['__productWarrantyApplicable']);
       if (s['__entryLineRows']) {
         try {
           const rows = JSON.parse(s['__entryLineRows']);
           this.entryLineRowsKey.set('productServiceMaster');
           this.entryLineRows.set(rows);
-        } catch {}
+        } catch { }
       }
     }
     if (this.config?.key === 'uomMaster' || this.config?.key === 'variantMaster') {
@@ -18117,7 +19753,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const rows = JSON.parse(s['__entryLineRows']);
           this.entryLineRowsKey.set(this.config.key);
           this.entryLineRows.set(rows);
-        } catch {}
+        } catch { }
       }
     }
     this.saveError.set('');
@@ -18142,30 +19778,30 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
     const saveOne = (payload: Record<string, any>): Observable<ApiResponse<any>> => {
       switch (this.config?.key) {
-        case 'businessSegments':     return this.inventoryConfigService.saveSegment(payload, null);
-        case 'branchMaster':         return this.inventoryConfigService.saveBranchInv(payload, null);
-        case 'warehouseMaster':      return this.inventoryConfigService.saveWarehouse(payload, null);
-        case 'uomMaster':            return this.inventoryConfigService.saveUom(payload, null);
-        case 'categoryMaster':       return this.inventoryConfigService.saveCategory(payload, null);
-        case 'hsnSacMapping':        return this.inventoryConfigService.saveHsnSac(payload, null);
-        case 'paymentTermsMaster':   return this.inventoryConfigService.savePaymentTerm(payload, null);
-        case 'brandMaster':          return this.inventoryConfigService.saveBrand(payload, null);
-        case 'attributeMaster':      return this.inventoryConfigService.saveAttribute(payload, null);
-        case 'productGroupMaster':   return this.inventoryConfigService.saveProductGroup(payload, null);
-        case 'variantMaster':        return this.inventoryConfigService.saveVariant(payload, null);
-        case 'serialNumberPolicy':   return this.inventoryConfigService.saveSerialPolicy(payload, null);
-        case 'batchLotPolicy':       return this.inventoryConfigService.saveBatchPolicy(payload, null);
+        case 'businessSegments': return this.inventoryConfigService.saveSegment(payload, null);
+        case 'branchMaster': return this.inventoryConfigService.saveBranchInv(payload, null);
+        case 'warehouseMaster': return this.inventoryConfigService.saveWarehouse(payload, null);
+        case 'uomMaster': return this.inventoryConfigService.saveUom(payload, null);
+        case 'categoryMaster': return this.inventoryConfigService.saveCategory(payload, null);
+        case 'hsnSacMapping': return this.inventoryConfigService.saveHsnSac(payload, null);
+        case 'paymentTermsMaster': return this.inventoryConfigService.savePaymentTerm(payload, null);
+        case 'brandMaster': return this.inventoryConfigService.saveBrand(payload, null);
+        case 'attributeMaster': return this.inventoryConfigService.saveAttribute(payload, null);
+        case 'productGroupMaster': return this.inventoryConfigService.saveProductGroup(payload, null);
+        case 'variantMaster': return this.inventoryConfigService.saveVariant(payload, null);
+        case 'serialNumberPolicy': return this.inventoryConfigService.saveSerialPolicy(payload, null);
+        case 'batchLotPolicy': return this.inventoryConfigService.saveBatchPolicy(payload, null);
         case 'barcodeConfiguration': return this.inventoryConfigService.saveBarcodeConfiguration(payload, null);
-        case 'substituteProducts':   return this.inventoryConfigService.saveSubstituteProduct(payload, null);
-        case 'consumptionTypeMaster':return this.inventoryConfigService.saveConsumptionType(payload, null);
-        case 'vendorMaster':         return this.saveVendorWithContactWriteback(payload, null);
-        case 'customerMaster':       return this.saveCustomerWithContactWriteback(payload, null);
+        case 'substituteProducts': return this.inventoryConfigService.saveSubstituteProduct(payload, null);
+        case 'consumptionTypeMaster': return this.inventoryConfigService.saveConsumptionType(payload, null);
+        case 'vendorMaster': return this.saveVendorWithContactWriteback(payload, null);
+        case 'customerMaster': return this.saveCustomerWithContactWriteback(payload, null);
         case 'channelPartnerMaster': return this.saveChannelPartnerWithContactWriteback(payload, null);
         case 'productServiceMaster': return this.inventoryConfigService.saveProduct(payload, null);
-        case 'productTypeMaster':    return this.inventoryConfigService.saveProductType(payload, null);
-        case 'bomMaster':            return this.inventoryConfigService.saveBom(payload, null);
-        case 'workCenterMaster':     return this.inventoryConfigService.saveWorkCenter(payload, null);
-        case 'priceListMaster':      return this.inventoryConfigService.savePriceList(payload, null);
+        case 'productTypeMaster': return this.inventoryConfigService.saveProductType(payload, null);
+        case 'bomMaster': return this.inventoryConfigService.saveBom(payload, null);
+        case 'workCenterMaster': return this.inventoryConfigService.saveWorkCenter(payload, null);
+        case 'priceListMaster': return this.inventoryConfigService.savePriceList(payload, null);
         default: return of({ success: false, message: 'Unknown screen', data: null });
       }
     };
@@ -18970,28 +20606,28 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private findRecordByRow(row: string[]): any {
     const records = this.segmentFilteredRecords(this.savedRecordObjects());
     switch (this.config?.key) {
-      case 'businessSegments':   return records.find(r => r.segment_name === row[0]);
-      case 'branchMaster':       return records.find(r => r.branch_code === row[0]);
-      case 'warehouseMaster':    return records.find(r => r.warehouse_code === row[0]);
-      case 'uomMaster':          return records.find(r => r.uom_code === row[0]);
-      case 'categoryMaster':     return records.find(r => r.category_code === row[0]);
-      case 'hsnSacMapping':      return records.find(r => r.code === row[0]);
+      case 'businessSegments': return records.find(r => r.segment_name === row[0]);
+      case 'branchMaster': return records.find(r => r.branch_code === row[0]);
+      case 'warehouseMaster': return records.find(r => r.warehouse_code === row[0]);
+      case 'uomMaster': return records.find(r => r.uom_code === row[0]);
+      case 'categoryMaster': return records.find(r => r.category_code === row[0]);
+      case 'hsnSacMapping': return records.find(r => r.code === row[0]);
       case 'paymentTermsMaster': return records.find(r => r.term_code === row[0] || r.term_name === row[0]);
-      case 'brandMaster':        return records.find(r => r.brand_code === row[0]);
-      case 'attributeMaster':    return records.find(r => r.attribute_code === row[0] || r.attribute_name === row[1]);
+      case 'brandMaster': return records.find(r => r.brand_code === row[0]);
+      case 'attributeMaster': return records.find(r => r.attribute_code === row[0] || r.attribute_name === row[1]);
       case 'productGroupMaster': return records.find(r => r.group_code === row[0]);
-      case 'variantMaster':      return records.find(r => r.variant_code === row[0]);
+      case 'variantMaster': return records.find(r => r.variant_code === row[0]);
       case 'serialNumberPolicy': return records.find(r => r.policy_code === row[0]);
-      case 'batchLotPolicy':     return records.find(r => r.policy_code === row[0]);
+      case 'batchLotPolicy': return records.find(r => r.policy_code === row[0]);
       case 'barcodeConfiguration': return records.find(r => r.barcode_type === row[0] && String(r.prefix || '') === row[2]);
       case 'substituteProducts': return records.find(r => r.product_name === row[0] && r.substitute_product_name === row[1]);
       case 'consumptionTypeMaster': return records.find(r => r.type_code === row[0] || r.type_name === row[0]);
-      case 'productTypeMaster':   return records.find(r => r.type_code === row[0]);
-      case 'bomMaster':           return records.find(r => r.bom_code === row[0]);
-      case 'workCenterMaster':    return records.find(r => r.work_center_code === row[0]);
-      case 'priceListMaster':     return records.find(r => r.price_list_name === row[0] && String(r.product_name || '') === row[2]);
-      case 'vendorMaster':       return records.find(r => r.vendor_code === row[0]);
-      case 'customerMaster':     return records.find(r => r.customer_code === row[0]);
+      case 'productTypeMaster': return records.find(r => r.type_code === row[0]);
+      case 'bomMaster': return records.find(r => r.bom_code === row[0]);
+      case 'workCenterMaster': return records.find(r => r.work_center_code === row[0]);
+      case 'priceListMaster': return records.find(r => r.price_list_name === row[0] && String(r.product_name || '') === row[2]);
+      case 'vendorMaster': return records.find(r => r.vendor_code === row[0]);
+      case 'customerMaster': return records.find(r => r.customer_code === row[0]);
       case 'channelPartnerMaster': return records.find(r => r.partner_code === row[0]);
       case 'productServiceMaster': return records.find(r => r.product_code === row[0]);
       case 'purchaseRequisition': return records.find(r => r.pr_number === row[0] || r.prNumber === row[0]);
@@ -19032,9 +20668,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private deleteApiCall(record: any): Observable<ApiResponse<any>> | null {
     switch (this.config?.key) {
       case 'productTypeMaster': return this.inventoryConfigService.deleteProductType(record.id);
-      case 'bomMaster':         return this.inventoryConfigService.deleteBom(record.id);
-      case 'workCenterMaster':  return this.inventoryConfigService.deleteWorkCenter(record.id);
-      case 'priceListMaster':   return this.inventoryConfigService.deletePriceList(record.id);
+      case 'bomMaster': return this.inventoryConfigService.deleteBom(record.id);
+      case 'workCenterMaster': return this.inventoryConfigService.deleteWorkCenter(record.id);
+      case 'priceListMaster': return this.inventoryConfigService.deletePriceList(record.id);
       default: return null;
     }
   }
@@ -19138,7 +20774,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.saveError.set('Only admin can edit Product Master records.');
       return;
     }
-    const record = this.findRecordByRow(row);
+    // const record = this.findRecordByRow(row);
+        // Policies are a company-wide library (migration 265): look the record up
+    // among ALL of the company's policies by its code (column 1 of the grid),
+    // not only the selected segment's. Other masters keep findRecordByRow.
+    const record = this.config?.key === 'serialNumberPolicy'
+      ? this.savedRecordObjects().find((r: any) => this.optionEquals(r?.policy_code, row[0]))
+      : this.findRecordByRow(row);
     const cap = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Active';
     if (!record) {
       // Never fail silently here. A dead Edit button sends the user back to the
@@ -19149,6 +20791,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.saveError.set('Could not open that record for editing. Refresh the list and try again.');
       return;
     }
+    this.genericNameValue.set('');
+        // ...and an error from the previous record no longer applies.
+    this.saveError.set('');
+    this.saveMsg.set('');
     this.editingId.set(record.id ?? null);
     this._autoCodeFields.clear();
     this.loadTransportDetailsForRecord(record.id ?? null);
@@ -19302,19 +20948,32 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       case 'uomMaster':
         this.applyUomRecordToForm(record, true);
         break;
-      case 'categoryMaster':
+        case 'categoryMaster': {
         this.categorySerialApplicable.set(!!record.serial_applicable);
         this.categoryBatchApplicable.set(!!record.batch_applicable);
+        // Policies (migration 265)
+        const policyRows: CategoryPolicyDraft[] = [...(record.policies || [])]
+          .sort((a: any, b: any) => (Number(a.display_order) || 0) - (Number(b.display_order) || 0))
+          .map((p: any) => ({
+            policyId: p.policy_id ?? null,
+            policyName: p.policy_name || '',
+            captureStage: p.capture_stage || 'stock_inward',
+            isMandatory: !!p.is_mandatory,
+            isUniqueIdentifier: !!p.is_unique_identifier
+          }));
+        this.categoryPolicyApplicable.set(!!record.policy_applicable && policyRows.length > 0);
+        this.categoryPolicyRows.set(policyRows);
+        this.categoryPolicyRowsBackup = [];
         this.formValues.set({
           categoryCode: record.category_code || '',
           categoryName: record.category_name || '',
           description: record.description || '',
-          serialPolicyName: record.serial_policy_name || '',
           batchPolicyName: record.batch_policy_name || '',
           applicableUoms: (record.uoms || []).map((u: any) => u.uom_symbol || u.uom_name || u.uom_code).filter(Boolean),
           status: cap(record.status || 'active')
         });
         break;
+      }
       case 'hsnSacMapping':
         this.hsnSacCode.set(record.code || '');
         this.hsnSacDescription.set(record.description || '');
@@ -19348,13 +21007,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const rows = values
             .filter((v: any) => this.normalizeKey(v.status || 'active') !== 'inactive')
             .map((v: any) => [
-            v.value_code || '',
-            v.value_name || '',
-            cap(v.status || 'active'),
-            String(v.sort_order ?? 100),
-            v.id !== undefined && v.id !== null ? String(v.id) : '',
-            String(v.usage_count ?? 0)
-          ]);
+              v.value_code || '',
+              v.value_name || '',
+              cap(v.status || 'active'),
+              String(v.sort_order ?? 100),
+              v.id !== undefined && v.id !== null ? String(v.id) : '',
+              String(v.usage_count ?? 0)
+            ]);
           // rows is kept as the edit-time snapshot (name -> code/id) even though the
           // grid UI is gone — buildPayload's attributeMaster case diffs the tag list
           // typed into `possibleValues` against this snapshot so existing value
@@ -19398,8 +21057,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           this.entryLineRows.set(rows.length ? rows : [this.blankLineRow()]);
         }
         break;
-      case 'serialNumberPolicy':
-        this.formValues.set({ policyCode: record.policy_code || '', policyName: record.policy_name || '', applicableCategory: record.category_name || '', serialFormat: record.serial_format || '', captureStage: record.capture_stage || '', allowDuplicate: record.allow_duplicate ? 'Yes' : 'No', warrantyApplicable: record.warranty_applicable ? 'Yes' : 'No', status: cap(record.status || 'active') });
+        case 'serialNumberPolicy':
+        this.formValues.set({
+          policyCode: record.policy_code || '',
+          policyName: record.policy_name || '',
+          serialFormat: record.serial_format || '',
+          status: cap(record.status || 'active')
+        });
         break;
       case 'batchLotPolicy':
         this.formValues.set({ policyCode: record.policy_code || '', policyName: record.policy_name || '', applicableCategory: record.category_name || '', batchFormat: record.batch_format || '', expiryRequired: record.expiry_required ? 'Yes' : 'No', qcRequired: record.qc_required ? 'Yes' : 'No', status: cap(record.status || 'active') });
@@ -19413,17 +21077,28 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       case 'consumptionTypeMaster':
         this.formValues.set({ consumptionType: record.type_name || '', typeName: record.type_name || '', typeCode: record.type_code || '', department: record.department || '', approvalRequired: record.approval_required ? 'Yes' : 'No', approvalWorkflow: record.approval_workflow_name || '', remarks: record.remarks || '', status: cap(record.status || 'active') });
         break;
+      // case 'bomMaster':
+      //   this.formValues.set({
+      //     bomCode: record.bom_code || '',
+      //     finishedProduct: record.finished_product_name || '',
+      //     version: record.bom_version || '',
+      //     // Stored as rows; the form's Raw Materials control is a multiselect.
+      //     rawMaterials: (record.items || []).map((item: any) => item.product_name).filter(Boolean),
+      //     quantity: record.quantity ?? 1,
+      //     wastagePercent: record.wastage_percent ?? 0,
+      //     productionCost: record.production_cost ?? 0,
+      //     status: cap(record.status || 'active')
+      //   });
+      //   break;
       case 'bomMaster':
         this.formValues.set({
           bomCode: record.bom_code || '',
           finishedProduct: record.finished_product_name || '',
           version: record.bom_version || '',
-          // Stored as rows; the form's Raw Materials control is a multiselect.
-          rawMaterials: (record.items || []).map((item: any) => item.product_name).filter(Boolean),
-          quantity: record.quantity ?? 1,
-          wastagePercent: record.wastage_percent ?? 0,
           productionCost: record.production_cost ?? 0,
-          status: cap(record.status || 'active')
+          status: cap(record.status || 'active'),
+          bomLines: this.bomLinesFromRecord(record),
+          ...this.emptyBomDraft()
         });
         break;
       case 'workCenterMaster':
@@ -19516,6 +21191,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         this.productName.set(record.product_name || '');
         this.selectedProductCategory.set(record.category_name || '');
         this.hsnSacCode.set(record.hsn_sac_code || '');
+        const savedHsn = this.loadedHsnSacObjects().find(item => this.optionEquals(item.code, record.hsn_sac_code));
+        this.hsnSacDescription.set(savedHsn?.description || '');
         this.gstRate.set(record.gst_rate ?? null);
         this.productBatchApplicable.set(!!record.batch_applicable);
         this.productSerialApplicable.set(!!record.serial_applicable);
@@ -19579,7 +21256,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           this.applyApplicableVariantSelection(savedVariants);
         } else if (record.variant_name || record.variant_label) {
           const rawLabel = String(record.variant_label || record.variant_name || '').trim();
-          const rawName  = String(record.variant_name || '').trim();
+          const rawName = String(record.variant_name || '').trim();
           const match = this.loadedVariantObjects().find(v =>
             this.variantDisplayLabel(v) === rawLabel || v.variant_name === rawName
           );
@@ -19619,9 +21296,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // .set() (never merge) so switching to edit a different record can't leak
   // a previously-edited record's serials into the new one.
   private hydrateLineSerialUnitsFromRecord(record: any): void {
-    this.lineSerialUnitsMap.set(this.lineSerialMapFromItems(record?.items || []));
+    const items = record?.items || [];
+    this.lineSerialUnitsMap.set(this.lineSerialMapFromItems(items));
+    // Phase 2: the policy values (IMEI 1, ...) of the same lines
+    const identifiers = this.lineIdentifierMapsFromItems(items);
+    this.lineSerialIdentifiersMap.set(identifiers.serial);
+    this.lineIdentifierValuesMap.set(identifiers.line);
   }
-
   // Restores each line's per-serial warranty capture (migration 237) when
   // reopening a saved GRN/Direct PI draft before it posts — a no-op for any
   // other document type, since those items simply carry no serial_warranty.
@@ -19675,7 +21356,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           },
           error: () => { /* leave the row's summary on its existing fallback text */ }
         });
-      });
+    });
   }
 
   private manufacturingMaterialItemToLineRow(item: any): string[] {
@@ -19787,6 +21468,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           status
         });
         this.entryLineRowsKey.set('materialIssueProduction');
+        this.lineRefItemIdMap.set(this.manufacturingLineRefMapFromItems(items, 'materialIssueItemId'));
+        this.formValues.update(v => ({
+          ...v,
+          bomVersion: (this.transactionReferenceDocs().find(d => Number(d.id) === Number(record.production_plan_id)) as any)?.bom_version || ''
+        }));
         this.entryLineRows.set(items.length ? items.map((item: any) => this.manufacturingMaterialItemToLineRow(item)) : [this.blankLineRow()]);
         break;
       case 'productionEntry':
@@ -20404,17 +22090,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
   }
 
-  private normalizeCaptureStage(s: any): string | null {
-    const raw = String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-    return raw.includes('both') ? 'both' : raw || null;
-  }
-
   protected buildPayload(): Record<string, any> {
     const v = this.formValues();
     const lc = (s: string) => (s || 'Active').toLowerCase();
     const bool = (s: any) => s === true || s === 'Yes';
     const productType = (s: any) => String(s || '').trim() || 'Physical Stock';
-    const captureStage = (s: any) => this.normalizeCaptureStage(s);
     const selectedSegmentName = String(v['segment'] || this.selectedSegment() || '').trim() || null;
     const selectedSegmentId = this.segmentIdByName(selectedSegmentName);
     const idsFromSelection = <T extends { id: number }>(
@@ -20449,6 +22129,31 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           usage_note: v['usageNote'] || null,
           status: lc(v['status'] || 'active')
         };
+      // case 'bomMaster':
+      //   return {
+      //     id: this.editingId(),
+      //     segment_id: selectedSegmentId,
+      //     bom_code: String(v['bomCode'] || '').trim() || null,
+      //     bom_version: String(v['version'] || '').trim() || null,
+      //     finished_product_id: this.findProductBySelection(v['finishedProduct'])?.id ?? null,
+      //     finished_product_name: String(v['finishedProduct'] || '').trim(),
+      //     quantity: this.parseCurrency(v['quantity']) || 1,
+      //     wastage_percent: this.parseCurrency(v['wastagePercent']) || 0,
+      //     production_cost: this.parseCurrency(v['productionCost']) || 0,
+      //     status: lc(v['status'] || 'active'),
+      //     // Raw materials are rows now, not a comma-joined string, so a BOM can
+      //     // be queried and costed. sp_upsert_bom replaces them wholesale.
+      //     items: this.rawMaterialNamesFromBomValue(v['rawMaterials']).map(name => {
+      //       const product = this.findProductBySelection(name);
+      //       return {
+      //         product_id: product?.id ?? null,
+      //         product_name: name,
+      //         quantity: 1,
+      //         uom_id: null,
+      //         uom_name: this.productBaseUomLabel(product) || null
+      //       };
+      //     })
+      //   };
       case 'bomMaster':
         return {
           id: this.editingId(),
@@ -20457,22 +22162,19 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           bom_version: String(v['version'] || '').trim() || null,
           finished_product_id: this.findProductBySelection(v['finishedProduct'])?.id ?? null,
           finished_product_name: String(v['finishedProduct'] || '').trim(),
-          quantity: this.parseCurrency(v['quantity']) || 1,
-          wastage_percent: this.parseCurrency(v['wastagePercent']) || 0,
+          // A BOM is always for 1 finished unit; wastage lives on each line.
+          quantity: 1,
+          wastage_percent: 0,
           production_cost: this.parseCurrency(v['productionCost']) || 0,
           status: lc(v['status'] || 'active'),
-          // Raw materials are rows now, not a comma-joined string, so a BOM can
-          // be queried and costed. sp_upsert_bom replaces them wholesale.
-          items: this.rawMaterialNamesFromBomValue(v['rawMaterials']).map(name => {
-            const product = this.findProductBySelection(name);
-            return {
-              product_id: product?.id ?? null,
-              product_name: name,
-              quantity: 1,
-              uom_id: null,
-              uom_name: this.productBaseUomLabel(product) || null
-            };
-          })
+          items: this.bomLines().map(line => ({
+            product_id: line.productId,
+            product_name: line.productName,
+            quantity: line.quantity,
+            wastage_percent: line.wastagePercent,
+            uom_id: line.uomId,
+            uom_name: line.uomName || null
+          }))
         };
       case 'workCenterMaster':
         return {
@@ -20548,14 +22250,29 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           status: lc(v['status'])
         };
       }
-      case 'categoryMaster':
+           case 'categoryMaster': {
+        // Policies (migration 265): serial applicable, serial policy and UIN are
+        // derived from these rows on the server.
+        const policyApplicable = this.categoryPolicyApplicable();
+        const policies = policyApplicable
+          ? this.categoryPolicyRows()
+              .filter(r => String(r.policyName || '').trim())
+              .map((r, index) => ({
+                policy_id: r.policyId,
+                policy_name: r.policyName,
+                capture_stage: r.isUniqueIdentifier ? 'stock_inward' : r.captureStage,
+                is_mandatory: r.isUniqueIdentifier ? true : r.isMandatory,
+                is_unique_identifier: r.isUniqueIdentifier,
+                display_order: index + 1
+              }))
+          : [];
         return {
           segment_id: selectedSegmentId,
           category_code: v['categoryCode'] || '',
           category_name: v['categoryName'] || '',
           description: v['description'] || '',
-          serial_applicable: this.categorySerialApplicable(),
-          serial_policy_name: v['serialPolicyName'] || null,
+          policy_applicable: policyApplicable,
+          policies,
           batch_applicable: this.categoryBatchApplicable(),
           batch_policy_name: v['batchPolicyName'] || null,
           uom_ids: idsFromSelection(v['applicableUoms'], this.loadedUomObjects(), (item, selected) =>
@@ -20563,6 +22280,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           ),
           status: lc(v['status'])
         };
+      }
       case 'hsnSacMapping': {
         const code = String(v['code'] || this.hsnSacCode()).trim();
         const gstRate = this.gstRate() ?? (v['gstRate'] !== undefined && v['gstRate'] !== '' ? Number(v['gstRate']) : 0);
@@ -20674,13 +22392,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             status: lc(v['status'] || 'active')
           };
         }
-      case 'serialNumberPolicy': {
-        const categoryName = v['applicableCategory'] || null;
-        const categoryId = categoryName
-          ? this.loadedCategoryObjects().find(item => this.optionEquals(item.category_name, categoryName))?.id ?? null
-          : null;
-        return { segment_id: selectedSegmentId, policy_code: v['policyCode'] || null, policy_name: v['policyName'] || '', category_id: categoryId, category_name: categoryName, serial_format: v['serialFormat'] || null, capture_stage: captureStage(v['captureStage']), allow_duplicate: bool(v['allowDuplicate']), warranty_applicable: bool(v['warrantyApplicable']), status: lc(v['status']) };
-      }
+        case 'serialNumberPolicy':
+        // Library fields only: stage / mandatory / Unique Identifier are set per category (migration 265)
+        return {
+          segment_id: selectedSegmentId,
+          policy_code: v['policyCode'] || null,
+          policy_name: v['policyName'] || '',
+          serial_format: v['serialFormat'] || null,
+          status: lc(v['status'])
+        };
       case 'batchLotPolicy': {
         const categoryName = v['applicableCategory'] || v['applicableFor'] || null;
         const categoryId = categoryName
@@ -21769,6 +23489,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         expiry_date: this.isoDateValue(this.lineValue(row, ['expiry']) || v['expiryDate']) || null,
         serial_no: this.lineValue(row, ['serial']) || null,
         serial_numbers: product?.serial_applicable ? (this.serialNumbersForLine(row, index).length ? this.serialNumbersForLine(row, index) : null) : null,
+        ...this.lineIdentifierPayload(index),
         remarks: this.lineValue(row, ['remarks']) || null
       };
     });
@@ -22093,7 +23814,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const grouped = new Map<string, string[]>();
     for (const attr of items) {
       const name = (attr.name || '').trim();
-      const val  = (attr.value || '').trim();
+      const val = (attr.value || '').trim();
       if (!name) continue;
       if (!grouped.has(name)) grouped.set(name, []);
       if (val && !grouped.get(name)!.includes(val)) grouped.get(name)!.push(val);
@@ -22422,6 +24143,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         serial_no: this.transactionLineSerialText(row, index),
         serial_numbers: this.lineSerialUnitsMap()[index] || null,
         serial_warranty: this.lineSerialWarrantyMap()[index] || null,
+        ...this.lineIdentifierPayload(index),
         expiry_date: this.lineValue(row, ['expiry']) || null,
         warehouse_name: this.lineValue(row, ['warehouse', 'location']) || defaultWarehouse || null,
         amount: this.lineNumber(row, ['amount']) || taxPayload.amount,
@@ -22484,6 +24206,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         serial_no: this.transactionLineSerialText(row, index),
         serial_numbers: this.lineSerialUnitsMap()[index] || null,
         serial_warranty: this.lineSerialWarrantyMap()[index] || null,
+        ...this.lineIdentifierPayload(index),
         expiry_date: this.lineValue(row, ['expiry']) || null,
         warranty_upto: this.isoDateValue(this.lineValue(row, ['warranty'])) || null,
         amount: this.lineNumber(row, ['amount']) || taxPayload.amount,
@@ -22668,7 +24391,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return this.parseCurrency(this.lineValue(row, needles));
   }
 
-  private optionalNumber(value: any): number | null {
+  protected optionalNumber(value: any): number | null {
     const n = Number(value);
     return Number.isFinite(n) && n > 0 ? n : null;
   }
@@ -22707,8 +24430,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           const recordSegmentId = Number(r.segment_id ?? r.segmentId);
           const sameSegment = payloadSegmentId > 0
             ? (Number.isFinite(recordSegmentId) && recordSegmentId > 0
-                ? recordSegmentId === payloadSegmentId
-                : this.segmentMappedIds('uoms').has(Number(r.id)))
+              ? recordSegmentId === payloadSegmentId
+              : this.segmentMappedIds('uoms').has(Number(r.id)))
             : (!Number.isFinite(recordSegmentId) || recordSegmentId <= 0);
           const hasPayloadCode = String(payload['uom_code'] ?? '').trim().length > 0;
           const hasPayloadSymbol = String(payload['uom_symbol'] ?? '').trim().length > 0;
@@ -22833,20 +24556,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       return this.validateManufacturingMaterialItems(payload['items'], 'plan');
     }
 
-    if (key === 'materialIssueProduction') {
+       if (key === 'materialIssueProduction') {
+      if (!this.payloadHasValue(payload['production_plan_id']) && !this.payloadHasValue(payload['production_plan_number'])) {
+        return 'Select the Production Plan this material is issued for.';
+      }
       if (isPosting && !this.payloadHasValue(payload['from_branch_id']) && !this.payloadHasValue(payload['from_warehouse_id'])) {
         return 'From Warehouse / Branch is required before posting Material Issue for Production.';
       }
-      const directIssue = !this.payloadHasValue(payload['production_plan_id']) && !this.payloadHasValue(payload['production_plan_number']);
-      if (directIssue) {
-        const forFinished = this.productByIdOrSelection(payload['for_finished_product_id'], payload['for_finished_product_name']);
-        if (!this.payloadHasValue(payload['for_finished_product_name']) && !payload['for_finished_product_id']) {
-          return 'For Finished Product is required for direct Material Issue.';
-        }
-        if (!forFinished || !this.productIsManufacturingFinished(forFinished)) {
-          return 'For Finished Product must be a Finished Product or Semi-Finished Product.';
-        }
-      }
+      const rowsMessage = this.materialIssueRowsValidationMessage(isPosting);
+      if (rowsMessage) return rowsMessage;
       return this.validateManufacturingMaterialItems(payload['items'], 'issue', isPosting);
     }
 
@@ -22859,6 +24577,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (!finished || !this.productIsManufacturingFinished(finished)) return 'Production Entry Finished Product must be a Finished Product or Semi-Finished Product.';
       if (!(Number(payload['produced_qty']) > 0) && !((payload['items'] || []).some((item: any) => Number(item?.produced_qty) > 0))) {
         return 'Produced Qty must be greater than zero for Production Entry.';
+      }
+      // Produced + Rejected cannot be more than the issued material can make (server checks this too)
+      const producible = Number(this.formValues()['producibleQty']) || 0;
+      const used = (Number(payload['produced_qty']) || 0) + (Number(payload['rejected_qty']) || 0);
+      if (producible > 0 && used > producible) {
+        return `Produced + Rejected (${used}) is more than the issued material can make (${producible}).`;
       }
       return this.validateProductionEntryItems(payload['items'], isPosting);
     }
@@ -22951,9 +24675,29 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (serialMessage) return serialMessage;
     }
 
+    // if (this.config?.key === 'bomMaster') {
+    //   if (!hasValue(payload['bom_code'])) return 'BOM Code is required.';
+    //   if (!hasValue(payload['finished_product_name'])) return 'Select the Finished Product this BOM produces.';
+    //   const bomMessage = this.validateBomMasterPayload(payload);
+    //   if (bomMessage) return bomMessage;
+    // }
+
     if (this.config?.key === 'bomMaster') {
       if (!hasValue(payload['bom_code'])) return 'BOM Code is required.';
-      if (!hasValue(payload['finished_product_name'])) return 'Select the Finished Product this BOM produces.';
+      if (!hasValue(payload['finished_product_name'])) return 'Select the Finished Product this BOM makes.';
+      if (!this.bomFinishedOptions().some(name => this.optionEquals(name, payload['finished_product_name']))) {
+        return 'The Finished Product must have Product Nature Finished Product or Semi-Finished Product.';
+      }
+      if (!this.bomLines().length) return 'Add at least one raw material to the BOM.';
+      if (Number(payload['production_cost']) < 0) return 'Production Cost cannot be negative.';
+      const editingId = this.editingId();
+      const duplicate = this.savedRecordObjects().some(record =>
+        Number(record.id) !== Number(editingId)
+        && this.optionEquals(record.finished_product_name, payload['finished_product_name'])
+        && this.optionEquals(record.bom_version || '', payload['bom_version'] || ''));
+      if (duplicate) {
+        return `A BOM for ${payload['finished_product_name']} with version "${payload['bom_version'] || '(blank)'}" already exists. Edit that BOM, or use a different version.`;
+      }
       const bomMessage = this.validateBomMasterPayload(payload);
       if (bomMessage) return bomMessage;
     }
@@ -22989,13 +24733,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (!hasValue(payload['uom_name'])) return 'UOM name is required.';
     }
 
-    if (this.config?.key === 'categoryMaster') {
+      if (this.config?.key === 'categoryMaster') {
       if (!hasValue(payload['category_name'])) return 'Category name is required.';
-      // Previous (Serial No. Policy forced on every category):
-      // if (!payload['serial_applicable']) return 'Serial No. Policy is mandatory. Set Serial No. Policy Applicable to Yes and select a policy.';
-      // if (!hasValue(payload['serial_policy_name'])) return 'Select or add a Serial Number Policy.';
-      // Serial is optional now; a policy is only required when it is switched on.
-      if (payload['serial_applicable'] && !hasValue(payload['serial_policy_name'])) return 'Select or add a Serial Number Policy.';
+      // Policies (migration 265): optional; when switched on, every row needs a policy and a stage.
+      if (this.categoryPolicyApplicable()) {
+        const rows = this.categoryPolicyRows();
+        if (!rows.length) return 'Policy Applicable is Yes: add at least one policy, or set it to No.';
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i];
+          if (!String(row.policyName || '').trim()) return `Policy row ${i + 1}: select a policy.`;
+          if (!row.isUniqueIdentifier && !row.captureStage) return `Policy "${row.policyName}": select the Capture Stage.`;
+        }
+      }
     }
 
     if (this.config?.key === 'variantMaster') {
@@ -23084,10 +24833,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         const retWarehouse = this.optionalNumber(payload['return_to_warehouse_id']);
 
         if ((srcBranch ?? null) !== (retBranch ?? null)
-            || (srcWarehouse ?? null) !== (retWarehouse ?? null)) {
+          || (srcWarehouse ?? null) !== (retWarehouse ?? null)) {
           const where = srcDoc.warehouse_name || srcDoc.branch_name || 'the invoice location';
           return `Sales Return must go back to ${where}, the location `
-               + `${srcDoc.doc_number || 'the referenced invoice'} sold from.`;
+            + `${srcDoc.doc_number || 'the referenced invoice'} sold from.`;
         }
       }
     }
@@ -23181,7 +24930,6 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // Tax Details: Tax Category is mandatory too (HSN/SAC and GST Rate above).
     if (!hasValue(payload['tax_category'])) return 'Tax Category is mandatory.';
     if (this.categoryRequiresBatchPolicy() && !hasValue(payload['batch_policy_name'])) return 'Selected category requires Batch / Lot Policy.';
-    if (this.categoryRequiresSerialPolicy() && !hasValue(payload['serial_policy_name'])) return 'Selected category requires Serial Number Policy.';
     const variantRows = payload['applicable_variants'] || [];
     if (this.productVariantRequired() && (!Array.isArray(variantRows) || !variantRows.length)) {
       return 'Map at least one product Variant with its attributes.';
@@ -23297,16 +25045,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           r.decimal_allowed ? 'Yes' : 'No',
           cap(r.status || 'active')
         ]);
-      case 'categoryMaster':
+        case 'categoryMaster':
         return records.map(r => [
           r.category_code || '',
           r.category_name || '',
           r.parent_name || '',
-          r.serial_applicable ? (r.serial_policy_name || 'Yes') : 'No',
+          r.policies_text || (r.policy_applicable ? '' : 'No'),
           r.batch_applicable ? (r.batch_policy_name || 'Yes') : 'No',
           r.description || '',
           (r.uoms || []).map((u: any) => u.uom_symbol || u.uom_name || u.uom_code).filter(Boolean).join(', ')
-            || (Array.isArray(r.applicable_uom_names) ? r.applicable_uom_names.join(', ') : ''),
+          || (Array.isArray(r.applicable_uom_names) ? r.applicable_uom_names.join(', ') : ''),
           cap(r.status || 'active')
         ]);
       case 'hsnSacMapping':
@@ -23347,8 +25095,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             : [r.attribute_name, r.attribute_value].filter(Boolean).join(': '),
           cap(r.status || 'active')
         ]);
-      case 'serialNumberPolicy':
-        return records.map(r => [r.policy_code || '', r.policy_name || '', r.category_name || '', r.serial_format || '', r.capture_stage || '', r.allow_duplicate ? 'Yes' : 'No', r.warranty_applicable ? 'Yes' : 'No', cap(r.status || 'active')]);
+        case 'serialNumberPolicy':
+        return records.map(r => {
+          const usedCount = Number(r.used_in_categories ?? r.usedInCategories ?? 0) || 0;
+          const usedNames = r.used_in || r.usedIn || '';
+          return [
+            r.policy_code || '',
+            r.policy_name || '',
+            r.serial_format || '',
+            usedCount > 0 ? `${usedCount}: ${usedNames}` : 'Not used yet',
+            cap(r.status || 'active')
+          ];
+        });
       case 'batchLotPolicy':
         return records.map(r => [r.policy_code || '', r.policy_name || '', r.category_name || '', r.batch_format || '', r.expiry_required ? 'Yes' : 'No', r.qc_required ? 'Yes' : 'No', cap(r.status || 'active')]);
       case 'barcodeConfiguration':
@@ -23390,19 +25148,37 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           String(r.gst_rate ?? ''),
           cap(r.item_status || 'active')
         ]);
+      // case 'bomMaster':
+      //   return records.map(r => [
+      //     r.bom_code || r.bomCode || '',
+      //     r.finished_product_name || r.finishedProductName || r.finishedProduct || '',
+      //     r.bom_version || r.bomVersion || r.version || '',
+      //     Array.isArray(r.raw_materials || r.rawMaterials)
+      //       ? (r.raw_materials || r.rawMaterials).join(', ')
+      //       : (r.raw_materials || r.rawMaterials || ''),
+      //     String(r.quantity ?? r.qty ?? ''),
+      //     String(r.wastage_percent ?? r.wastagePercent ?? ''),
+      //     String(r.production_cost ?? r.productionCost ?? ''),
+      //     cap(r.status || 'active')
+      //   ]);
       case 'bomMaster':
-        return records.map(r => [
-          r.bom_code || r.bomCode || '',
-          r.finished_product_name || r.finishedProductName || r.finishedProduct || '',
-          r.bom_version || r.bomVersion || r.version || '',
-          Array.isArray(r.raw_materials || r.rawMaterials)
-            ? (r.raw_materials || r.rawMaterials).join(', ')
-            : (r.raw_materials || r.rawMaterials || ''),
-          String(r.quantity ?? r.qty ?? ''),
-          String(r.wastage_percent ?? r.wastagePercent ?? ''),
-          String(r.production_cost ?? r.productionCost ?? ''),
-          cap(r.status || 'active')
-        ]);
+        return records.map(r => {
+          const items: any[] = r.items || [];
+          const materials = items.map(item => {
+            const uom = item.uom_name ? ` ${item.uom_name}` : '';
+            const wastage = Number(item.wastage_percent) > 0 ? ` (wastage ${this.bomQtyText(item.wastage_percent)}%)` : '';
+            return `${item.product_name} × ${this.bomQtyText(item.quantity)}${uom}${wastage}`;
+          }).join(', ');
+          return [
+            r.bom_code || '',
+            r.finished_product_name || '',
+            r.bom_version || '',
+            materials,
+            String(items.length),
+            `Rs. ${Number(r.production_cost || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
+            cap(r.status || 'active')
+          ];
+        });
       case 'priceListMaster':
         return records.map(r => [
           r.price_list_name || r.priceListName || '',

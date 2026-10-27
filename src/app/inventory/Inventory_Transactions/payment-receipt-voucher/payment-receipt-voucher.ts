@@ -21,7 +21,11 @@ type VoucherMode = 'pay' | 'receipt';
 // <app-payment-mode-selector> (same Cash/Bank -> Cheque/Online/Debit
 // Card/Credit Card UX as Accounts' General Receipt) -- this row just pairs
 // its output with the amount split across this mode, same as before.
-type ModeRow = { details: PaymentModeSelectorValue; amount: number };
+// partyId: which customer this mode pays for when Customer Receipt has more
+// than one customer selected (one voucher is posted per customer).
+type ModeRow = { details: PaymentModeSelectorValue; amount: number; partyId: number | null };
+
+type PartySummary = { id: number; name: string; previousBalance: number; allocated: number; remainingDue: number; notes: number; reference: number; modeTotal: number; cashTotal: number; diff: number };
 
 // Item 21: fallback only, used if the live taxation.tds_codes fetch (see
 // tdsCodes signal) comes back empty — mirrors migration 149's seed values
@@ -88,7 +92,15 @@ export class PaymentReceiptVoucherComponent {
   readonly mode = signal<VoucherMode>('pay');
   readonly parties = signal<(VendorItem | CustomerItem)[]>([]);
   readonly loadingParties = signal(false);
-  readonly selectedPartyId = signal<number | null>(null);
+  // Vendor Payment selects one vendor; Customer Receipt can select several
+  // customers, and Save posts one receipt voucher per customer.
+  readonly selectedPartyIds = signal<number[]>([]);
+  // Which selected party each loaded invoice / note belongs to.
+  private readonly invoicePartyIds = signal<Record<number, number>>({});
+  private readonly notePartyIds = signal<Record<number, number>>({});
+  // Bumped on every full reset so responses for an earlier selection are ignored.
+  private partyLoadSeq = 0;
+  private invoiceLoadsPending = 0;
 
   // Item 22: TCS — vendor-level FY-cumulative-purchases threshold, Vendor
   // Payment only. Unlike TDS's per-invoice Service gate, this is fetched
@@ -130,6 +142,8 @@ export class PaymentReceiptVoucherComponent {
   readonly bankDetailsByBankId = signal<Record<string, { chequeNumbers: PaymentModeOption[]; upiNames: PaymentModeOption[] }>>({});
   private readonly bankDetailsRequested = new Set<string>();
   readonly narration = signal('');
+  // Matches the Accounts payment voucher narration column (varchar(250)).
+  readonly narrationMaxLength = 250;
   readonly tdsSection = signal<string>('');
   // Stored as a local-date 'YYYY-MM-DD' string (what the save API expects).
   // p-datepicker can't parse that string against dateFormat="dd-M-yy" and
@@ -152,6 +166,11 @@ export class PaymentReceiptVoucherComponent {
 
   readonly drawerInvoice = signal<OutstandingInvoice | null>(null);
   readonly drawerHistory = signal<{ voucherNumber: string; date?: string; amount: number }[]>([]);
+  readonly drawerParty = computed(() => {
+    const inv = this.drawerInvoice();
+    const partyId = inv ? this.partyOfInvoice(inv.invoice_id) : null;
+    return partyId == null ? null : this.parties().find(p => p.id === partyId) ?? null;
+  });
 
   readonly vouchers = signal<PaymentVoucher[]>([]);
   readonly loadingVouchers = signal(false);
@@ -167,15 +186,26 @@ export class PaymentReceiptVoucherComponent {
   readonly guideConfig = computed(() => this.mode() === 'pay' ? vendorPaymentConfig : customerReceiptConfig);
   readonly cashLimit = computed(() => this.mode() === 'pay' ? CASH_PAYMENT_LIMIT : CASH_RECEIPT_LIMIT);
 
-  readonly selectedParty = computed(() => {
-    const id = this.selectedPartyId();
-    if (!id) return null;
-    return this.parties().find(p => p.id === id) ?? null;
+  readonly multiPartySelect = computed(() => this.mode() === 'receipt');
+  readonly partySelectModel = computed(() =>
+    this.multiPartySelect() ? this.selectedPartyIds() : (this.selectedPartyIds()[0] ?? null));
+
+  readonly selectedParties = computed(() => {
+    const all = this.parties();
+    return this.selectedPartyIds()
+      .map(id => all.find(p => p.id === id))
+      .filter((p): p is VendorItem | CustomerItem => !!p);
   });
+  readonly hasParty = computed(() => this.selectedParties().length > 0);
+  readonly isMultiParty = computed(() => this.selectedParties().length > 1);
+  // The one selected party, or null when none / several are selected.
+  readonly selectedParty = computed(() => this.selectedParties().length === 1 ? this.selectedParties()[0] : null);
 
   readonly partyName = (p: VendorItem | CustomerItem): string => (p as VendorItem).vendor_name ?? (p as CustomerItem).customer_name ?? '';
 
   readonly partyOptions = computed(() => this.parties().map(p => ({ id: p.id, name: this.partyName(p) })));
+  readonly selectedPartyOptions = computed(() => this.selectedParties().map(p => ({ id: p.id, name: this.partyName(p) })));
+  private readonly partyNameById = computed(() => new Map(this.parties().map(p => [p.id, this.partyName(p)])));
 
   readonly totalOutstanding = computed(() => this.outstandingInvoices().reduce((s, i) => s + i.outstanding, 0));
   readonly overdueTotal = computed(() => {
@@ -250,7 +280,8 @@ export class PaymentReceiptVoucherComponent {
   // AND a section has actually been picked (rate otherwise unknown).
   readonly tdsAmount = computed(() =>
     this.tdsApplicable() && this.tdsSection() && this.tdsRate() > 0
-      ? Math.round(this.tdsBaseAmount() * this.tdsRate() / 100 * 100) / 100
+      // Whole rupees (Previous: Math.round(this.tdsBaseAmount() * this.tdsRate() / 100 * 100) / 100)
+      ? Math.round(this.tdsBaseAmount() * this.tdsRate() / 100)
       : 0
   );
 
@@ -271,7 +302,8 @@ export class PaymentReceiptVoucherComponent {
   // GST-exclusion circular applies to TCS the way it does to TDS).
   readonly tcsAmount = computed(() =>
     this.tcsThresholdCrossed() && this.tcsPercentage() > 0
-      ? Math.round(this.referenceTotal() * this.tcsPercentage() / 100 * 100) / 100
+      // Whole rupees (Previous: Math.round(this.referenceTotal() * this.tcsPercentage() / 100 * 100) / 100)
+      ? Math.round(this.referenceTotal() * this.tcsPercentage() / 100)
       : 0
   );
 
@@ -288,7 +320,10 @@ export class PaymentReceiptVoucherComponent {
   readonly cashModeTotal = computed(() => this.modeRows()
     .filter(r => r.details.modeKey === 'cash')
     .reduce((s, r) => s + (r.amount || 0), 0));
-  readonly cashLimitExceeded = computed(() => this.cashModeTotal() > this.cashLimit() + 0.005);
+  // With several customers the cash limit applies to each customer's receipt.
+  readonly cashLimitExceeded = computed(() => this.isMultiParty()
+    ? this.partySummaries().some(s => s.cashTotal > this.cashLimit() + 0.005)
+    : this.cashModeTotal() > this.cashLimit() + 0.005);
   readonly cashLimitMessage = computed(() =>
     `Total cash ${this.mode() === 'pay' ? 'payment against Purchase Invoice' : 'receipt against Sales Invoice'} cannot exceed ${this.fmt(this.cashLimit())}.`
   );
@@ -304,11 +339,46 @@ export class PaymentReceiptVoucherComponent {
     (this.selectedInvoiceIds().size > 0 ? this.totalAllocated() : this.quickAmount()) - this.totalNotesApplied()
   ));
   readonly modeDiff = computed(() => this.modeTotal() - (this.referenceTotal() - this.tdsAmount() + this.tcsAmount()));
-  readonly modeShort = computed(() => this.modeDiff() < -0.005);
+  // A difference under 50 paise rounds to ₹ 0, so it counts as matched
+  // (only older invoices still carry paise). Previous: this.modeDiff() < -0.005
+  readonly modeShort = computed(() => this.modeDiff() <= -0.5);
+
+  // Per-customer totals — each one becomes its own voucher on Save.
+  readonly partySummaries = computed<PartySummary[]>(() => {
+    const multi = this.isMultiParty();
+    const alloc = this.allocAmounts();
+    const invoiceIds = this.selectedInvoiceIds();
+    const noteAmounts = this.noteApplyAmounts();
+    const noteIds = this.selectedNoteIds();
+    return this.selectedParties().map(p => {
+      let allocated = 0;
+      for (const id of invoiceIds) if (this.partyOfInvoice(id) === p.id) allocated += alloc[id] || 0;
+      let notes = 0;
+      for (const id of noteIds) if (this.partyOfNote(id) === p.id) notes += noteAmounts[id] || 0;
+      const rows = this.modeRows().filter(r => this.rowParty(r) === p.id);
+      const modeTotal = rows.reduce((s, r) => s + (r.amount || 0), 0);
+      const cashTotal = rows.filter(r => r.details.modeKey === 'cash').reduce((s, r) => s + (r.amount || 0), 0);
+      const previousBalance = this.outstandingInvoices()
+        .filter(inv => this.partyOfInvoice(inv.invoice_id) === p.id)
+        .reduce((s, inv) => s + inv.outstanding, 0);
+      const remainingDue = Math.max(0, previousBalance - allocated);
+      const reference = multi ? Math.max(0, allocated - notes) : this.referenceTotal();
+      return { id: p.id, name: this.partyName(p), previousBalance, allocated, remainingDue, notes, reference, modeTotal, cashTotal, diff: modeTotal - reference };
+    });
+  });
 
   readonly canSave = computed(() =>
-    !!this.selectedPartyId() && (this.totalAllocated() > 0 || this.modeTotal() > 0 || this.totalNotesApplied() > 0) && !this.isSaving()
+    this.hasParty() && (this.totalAllocated() > 0 || this.modeTotal() > 0 || this.totalNotesApplied() > 0) && !this.isSaving()
   );
+
+  private singlePartyId(): number | null {
+    const ids = this.selectedPartyIds();
+    return ids.length === 1 ? ids[0] : null;
+  }
+  partyOfInvoice(invoiceId: number): number | null { return this.invoicePartyIds()[invoiceId] ?? this.singlePartyId(); }
+  partyOfNote(noteId: number): number | null { return this.notePartyIds()[noteId] ?? this.singlePartyId(); }
+  private rowParty(row: ModeRow): number | null { return this.isMultiParty() ? row.partyId : this.singlePartyId(); }
+  partyNameOf(partyId: number | null): string { return partyId == null ? '' : this.partyNameById().get(partyId) ?? ''; }
 
   constructor() {
     this.route.data.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(data => {
@@ -317,7 +387,7 @@ export class PaymentReceiptVoucherComponent {
     });
 
     // Push the global SOS button up above this page's own sticky footer while it's visible.
-    effect(() => this.footerOffset.set(this.selectedParty() ? 100 : 0));
+    effect(() => this.footerOffset.set(this.hasParty() ? 100 : 0));
     this.destroyRef.onDestroy(() => this.footerOffset.clear());
 
     // Item 21: clear a stale section pick the moment the Service condition
@@ -344,7 +414,12 @@ export class PaymentReceiptVoucherComponent {
   }
   daysBetween(a: string, b: string): number { return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000); }
   fmtDate(d?: string): string { return d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'; }
-  fmt(n: number | undefined): string { return '₹ ' + Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  // Amounts on this screen are whole rupees (231.8942 -> 232).
+  // Previous: fmt(n: number | undefined): string { return '₹ ' + Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  fmt(n: number | undefined): string { return '₹ ' + Math.round(Number(n || 0)).toLocaleString('en-IN'); }
+
+  // Value shown in an amount input box: whole rupees, blank for 0.
+  rupeeInput(n: number): string { return n ? String(Math.round(n)) : ''; }
 
   agingLabel(inv: OutstandingInvoice): { text: string; cls: string } {
     if (!inv.due_date) return { text: 'Not set', cls: 'badge-success' };
@@ -358,11 +433,16 @@ export class PaymentReceiptVoucherComponent {
 
   setMode(mode: VoucherMode): void {
     this.mode.set(mode);
-    this.selectedPartyId.set(null);
+    this.selectedPartyIds.set([]);
+    this.partyLoadSeq++;
+    this.invoiceLoadsPending = 0;
+    this.loadingInvoices.set(false);
     this.outstandingInvoices.set([]);
+    this.invoicePartyIds.set({});
     this.selectedInvoiceIds.set(new Set());
     this.allocAmounts.set({});
     this.availableNotes.set([]);
+    this.notePartyIds.set({});
     this.selectedNoteIds.set(new Set());
     this.noteApplyAmounts.set({});
     this.quickAmount.set(0);
@@ -415,41 +495,117 @@ export class PaymentReceiptVoucherComponent {
       });
   }
 
-  onPartyChange(partyId: number | null): void {
-    this.selectedPartyId.set(partyId);
+  // ng-select hands back a single id (Vendor Payment) or an id array
+  // (Customer Receipt, multi-select).
+  onPartyChange(value: number | number[] | null): void {
+    const next = value == null ? [] : (Array.isArray(value) ? value : [value]);
+    const prev = this.selectedPartyIds();
+    this.selectedPartyIds.set(next);
+    const kept = next.filter(id => prev.includes(id));
+    if (!kept.length) {
+      // A completely different selection: start over, same as before.
+      this.resetPartyData();
+      this.fetchPartyData(next);
+      return;
+    }
+    // Customers added to / removed from the selection: keep what was already
+    // ticked for the customers that stay.
+    const removed = prev.filter(id => !next.includes(id));
+    if (removed.length) this.dropPartyData(removed);
+    this.fetchPartyData(next.filter(id => !prev.includes(id)));
+  }
+
+  private reloadSelectedParties(): void {
+    this.resetPartyData();
+    this.fetchPartyData(this.selectedPartyIds());
+  }
+
+  private resetPartyData(): void {
+    this.partyLoadSeq++;
+    this.invoiceLoadsPending = 0;
+    this.loadingInvoices.set(false);
+    // Drop the previous vendor's invoice numbers from the narration before
+    // its invoice list is cleared.
+    this.setSelectedInvoices(new Set());
     this.outstandingInvoices.set([]);
-    this.selectedInvoiceIds.set(new Set());
+    this.invoicePartyIds.set({});
     this.allocAmounts.set({});
     this.availableNotes.set([]);
+    this.notePartyIds.set({});
     this.selectedNoteIds.set(new Set());
     this.noteApplyAmounts.set({});
     this.quickAmount.set(0);
     this.modeRows.set([]);
     this.vendorFySummary.set(null);
     this.tcsPercentageInput.set('');
-    if (!partyId) return;
-    this.loadingInvoices.set(true);
-    this.paymentsService.getOutstandingInvoices(this.partyType(), partyId)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: res => { this.outstandingInvoices.set(res.data ?? []); this.loadingInvoices.set(false); },
-        error: () => { this.outstandingInvoices.set([]); this.loadingInvoices.set(false); }
-      });
-    this.paymentsService.getAvailableNotes(this.partyType(), partyId)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: res => this.availableNotes.set(res.data ?? []),
-        error: () => this.availableNotes.set([])
-      });
-    // Item 22: vendor-level FY threshold check, Vendor Payment only.
-    if (this.mode() === 'pay') {
-      this.paymentsService.getVendorFyPurchaseSummary(partyId)
+  }
+
+  private dropPartyData(partyIds: number[]): void {
+    const gone = new Set(partyIds);
+    const invoiceParty = this.invoicePartyIds();
+    const goneInvoices = new Set(this.outstandingInvoices().filter(i => gone.has(invoiceParty[i.invoice_id])).map(i => i.invoice_id));
+    this.setSelectedInvoices(new Set([...this.selectedInvoiceIds()].filter(id => !goneInvoices.has(id))));
+    this.outstandingInvoices.update(rows => rows.filter(i => !goneInvoices.has(i.invoice_id)));
+    this.allocAmounts.update(a => Object.fromEntries(Object.entries(a).filter(([id]) => !goneInvoices.has(+id))));
+    this.invoicePartyIds.update(m => Object.fromEntries(Object.entries(m).filter(([, p]) => !gone.has(p))));
+
+    const noteParty = this.notePartyIds();
+    const goneNotes = new Set(this.availableNotes().filter(n => gone.has(noteParty[n.note_id])).map(n => n.note_id));
+    this.selectedNoteIds.update(ids => new Set([...ids].filter(id => !goneNotes.has(id))));
+    this.availableNotes.update(rows => rows.filter(n => !goneNotes.has(n.note_id)));
+    this.noteApplyAmounts.update(a => Object.fromEntries(Object.entries(a).filter(([id]) => !goneNotes.has(+id))));
+    this.notePartyIds.update(m => Object.fromEntries(Object.entries(m).filter(([, p]) => !gone.has(p))));
+
+    this.modeRows.update(rows => rows.filter(r => r.partyId == null || !gone.has(r.partyId)));
+  }
+
+  private fetchPartyData(partyIds: number[]): void {
+    const seq = this.partyLoadSeq;
+    const isCurrent = (partyId: number) => seq === this.partyLoadSeq && this.selectedPartyIds().includes(partyId);
+    const loadDone = () => {
+      if (seq !== this.partyLoadSeq) return;
+      this.invoiceLoadsPending = Math.max(0, this.invoiceLoadsPending - 1);
+      this.loadingInvoices.set(this.invoiceLoadsPending > 0);
+    };
+    for (const partyId of partyIds) {
+      this.invoiceLoadsPending++;
+      this.loadingInvoices.set(true);
+      this.paymentsService.getOutstandingInvoices(this.partyType(), partyId)
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
-          next: res => this.vendorFySummary.set(res.data ?? null),
-          error: () => this.vendorFySummary.set(null)
+          next: res => { if (isCurrent(partyId)) this.appendInvoices(partyId, res.data ?? []); loadDone(); },
+          error: () => loadDone()
         });
+      this.paymentsService.getAvailableNotes(this.partyType(), partyId)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: res => { if (isCurrent(partyId)) this.appendNotes(partyId, res.data ?? []); },
+          error: () => {}
+        });
+      // Item 22: vendor-level FY threshold check, Vendor Payment only.
+      if (this.mode() === 'pay') {
+        this.paymentsService.getVendorFyPurchaseSummary(partyId)
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            next: res => { if (isCurrent(partyId)) this.vendorFySummary.set(res.data ?? null); },
+            error: () => { if (isCurrent(partyId)) this.vendorFySummary.set(null); }
+          });
+      }
     }
+  }
+
+  private appendInvoices(partyId: number, rows: OutstandingInvoice[]): void {
+    const have = new Set(this.outstandingInvoices().map(i => i.invoice_id));
+    const fresh = rows.filter(r => !have.has(r.invoice_id));
+    this.outstandingInvoices.update(list => [...list, ...fresh]);
+    this.invoicePartyIds.update(m => ({ ...m, ...Object.fromEntries(fresh.map(r => [r.invoice_id, partyId])) }));
+  }
+
+  private appendNotes(partyId: number, rows: AvailableNote[]): void {
+    const have = new Set(this.availableNotes().map(n => n.note_id));
+    const fresh = rows.filter(r => !have.has(r.note_id));
+    this.availableNotes.update(list => [...list, ...fresh]);
+    this.notePartyIds.update(m => ({ ...m, ...Object.fromEntries(fresh.map(r => [r.note_id, partyId])) }));
   }
 
   setTcsPercentage(value: string): void { this.tcsPercentageInput.set(value); }
@@ -464,15 +620,59 @@ export class PaymentReceiptVoucherComponent {
       ids.delete(inv.invoice_id);
       alloc[inv.invoice_id] = 0;
     }
-    this.selectedInvoiceIds.set(ids);
+    this.setSelectedInvoices(ids);
     this.allocAmounts.set(alloc);
+  }
+
+  // Vendor Payment: keep the selected Purchase Invoice numbers bound into
+  // the narration — added on check, removed on uncheck — without touching
+  // any text the user typed around them.
+  private setSelectedInvoices(next: Set<number>): void {
+    if (this.mode() === 'pay') {
+      const prev = this.selectedInvoiceIds();
+      const numberOf = new Map(this.outstandingInvoices().map(i => [i.invoice_id, i.invoice_number]));
+      let text = this.narration();
+      for (const id of prev) {
+        const no = numberOf.get(id);
+        if (no && !next.has(id)) text = this.removeNarrationToken(text, no);
+      }
+      let skipped = 0;
+      for (const id of next) {
+        const no = numberOf.get(id);
+        if (!no || prev.has(id) || this.findNarrationToken(text, no)) continue;
+        const candidate = text.trim() ? `${text.trim()}, ${no}` : no;
+        // Accounts tbl_trans_payment_voucher.narration is varchar(250);
+        // stop binding numbers once the narration would overflow it.
+        if (candidate.length > this.narrationMaxLength) { skipped++; continue; }
+        text = candidate;
+      }
+      this.narration.set(text);
+      if (skipped > 0) {
+        this.saveMsg.set(`Narration limit (${this.narrationMaxLength} characters) reached — ${skipped} invoice number(s) not added to narration.`);
+      }
+    }
+    this.selectedInvoiceIds.set(next);
+  }
+
+  private narrationTokenRegex(no: string): RegExp {
+    const esc = no.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|,\\s*)${esc}(?![\\w/-])`);
+  }
+
+  private findNarrationToken(text: string, no: string): boolean { return this.narrationTokenRegex(no).test(text); }
+
+  private removeNarrationToken(text: string, no: string): string {
+    return text.replace(this.narrationTokenRegex(no), '').replace(/^\s*,\s*/, '').trim();
   }
 
   isSelected(inv: OutstandingInvoice): boolean { return this.selectedInvoiceIds().has(inv.invoice_id); }
   allocFor(inv: OutstandingInvoice): number { return this.allocAmounts()[inv.invoice_id] || 0; }
 
   setAlloc(inv: OutstandingInvoice, value: string): void {
-    let v = this.parseAmt(value);
+    // Previous: let v = this.parseAmt(value);
+    let v = this.parseRupees(value);
+    // Capped at the exact outstanding, so an older invoice with paise still
+    // settles in full when its rounded figure is typed.
     if (v > inv.outstanding) v = inv.outstanding;
     this.allocAmounts.update(a => ({ ...a, [inv.invoice_id]: v }));
   }
@@ -482,7 +682,7 @@ export class PaymentReceiptVoucherComponent {
   fullAlloc(inv: OutstandingInvoice): void {
     const ids = new Set(this.selectedInvoiceIds());
     ids.add(inv.invoice_id);
-    this.selectedInvoiceIds.set(ids);
+    this.setSelectedInvoices(ids);
     this.allocAmounts.update(a => ({ ...a, [inv.invoice_id]: inv.outstanding }));
   }
 
@@ -493,7 +693,7 @@ export class PaymentReceiptVoucherComponent {
       if (on) { ids.add(inv.invoice_id); alloc[inv.invoice_id] = inv.outstanding; }
       else alloc[inv.invoice_id] = 0;
     }
-    this.selectedInvoiceIds.set(ids);
+    this.setSelectedInvoices(ids);
     this.allocAmounts.set(alloc);
   }
 
@@ -520,7 +720,8 @@ export class PaymentReceiptVoucherComponent {
   noteApplyFor(note: AvailableNote): number { return this.noteApplyAmounts()[note.note_id] || 0; }
 
   setNoteApply(note: AvailableNote, value: string): void {
-    let v = this.parseAmt(value);
+    // Previous: let v = this.parseAmt(value);
+    let v = this.parseRupees(value);
     if (v > note.outstanding) v = note.outstanding;
     this.noteApplyAmounts.update(a => ({ ...a, [note.note_id]: v }));
   }
@@ -528,7 +729,7 @@ export class PaymentReceiptVoucherComponent {
   noteApplyExceeds(note: AvailableNote): boolean { return this.noteApplyFor(note) > note.outstanding + 0.005; }
 
   clearAllocations(): void {
-    this.selectedInvoiceIds.set(new Set());
+    this.setSelectedInvoices(new Set());
     this.allocAmounts.set({});
     this.selectedNoteIds.set(new Set());
     this.noteApplyAmounts.set({});
@@ -544,6 +745,9 @@ export class PaymentReceiptVoucherComponent {
     return isNaN(n) ? 0 : n;
   }
 
+  // Typed amounts are whole rupees; parseAmt() stays for percentages (TCS %).
+  parseRupees(v: string): number { return Math.round(this.parseAmt(v)); }
+
   autoAllocate(): void {
     let amt = this.quickAmount();
     if (amt <= 0) { this.saveError.set('Enter an amount to auto-allocate.'); return; }
@@ -558,19 +762,31 @@ export class PaymentReceiptVoucherComponent {
       alloc[inv.invoice_id] = take;
       amt -= take;
     }
-    this.selectedInvoiceIds.set(ids);
+    this.setSelectedInvoices(ids);
     this.allocAmounts.set(alloc);
     this.saveError.set('');
     if (amt > 0.005) this.saveMsg.set(`${this.fmt(amt)} left unallocated after auto-allocating.`);
   }
 
   addMode(): void {
-    const remain = Math.max(0, this.referenceTotal() - this.modeTotal());
-    this.modeRows.update(rows => [...rows, { details: defaultPaymentModeValue(), amount: remain }]);
+    if (this.isMultiParty()) {
+      // Default the new row to the first customer still short of receipts.
+      const short = this.partySummaries().find(s => s.diff < -0.005);
+      // Previous: amount: short ? -short.diff : 0
+      this.modeRows.update(rows => [...rows, { details: defaultPaymentModeValue(), amount: short ? Math.round(-short.diff) : 0, partyId: short?.id ?? null }]);
+      return;
+    }
+    // Previous: const remain = Math.max(0, this.referenceTotal() - this.modeTotal());
+    const remain = Math.max(0, Math.round(this.referenceTotal() - this.modeTotal()));
+    this.modeRows.update(rows => [...rows, { details: defaultPaymentModeValue(), amount: remain, partyId: this.singlePartyId() }]);
+  }
+  setModeParty(idx: number, partyId: number | null): void {
+    this.modeRows.update(rows => rows.map((r, i) => i === idx ? { ...r, partyId } : r));
   }
   removeMode(idx: number): void { this.modeRows.update(rows => rows.filter((_, i) => i !== idx)); }
   setModeAmount(idx: number, value: string): void {
-    const v = this.parseAmt(value);
+    // Previous: const v = this.parseAmt(value);
+    const v = this.parseRupees(value);
     this.modeRows.update(rows => rows.map((r, i) => i === idx ? { ...r, amount: v } : r));
   }
   setModeDetails(idx: number, details: PaymentModeSelectorValue): void {
@@ -650,17 +866,26 @@ export class PaymentReceiptVoucherComponent {
     const title = this.mode() === 'pay' ? 'Vendor Payments' : 'Customer Receipts';
     const exportDoc: InventoryExportDocument = {
       title,
-      columns: ['Voucher No', 'Date', this.partyLabel(), 'Allocated', 'TDS', 'TCS', 'Net', 'Status'],
+      columns: ['Voucher No', 'Date', this.partyLabel(), 'Cheque No', 'Allocated', 'TDS', 'TCS', 'Net', 'Narration', 'Status'],
       rows: list.map(v => [
         v.voucher_number || '',
         this.pdfDate(v.voucher_date),
         v.party_name || '',
+        this.chequeDetails(v).numbers || '-',
         this.pdfAmt(v.total_allocated),
         v.tds_amount ? this.pdfAmt(v.tds_amount) : '-',
         v.tcs_amount ? this.pdfAmt(v.tcs_amount) : '-',
         this.pdfAmt(v.net_amount),
+        v.narration || '-',
         v.status ? v.status.charAt(0).toUpperCase() + v.status.slice(1) : ''
       ]),
+      // 10 columns would otherwise auto-switch the export to landscape.
+      orientation: 'portrait',
+      // All 10 widths fixed (sum = 180mm usable A4 portrait) so no-space values
+      // like PAY-SS-26-00005, dates, amounts and 'Cancelled' never break mid-word;
+      // TDS / TCS only hold '-' or a short amount, so they give up the space.
+      pdfColumnWidths: { 0: 27, 1: 18, 2: 28, 3: 14, 4: 19, 5: 10, 6: 10, 7: 19, 8: 20, 9: 15 },
+      pdfHeadFontSize: 8,
       fileName: title
     };
     if (action === 'Excel') this.exportService.excel(exportDoc);
@@ -669,6 +894,10 @@ export class PaymentReceiptVoucherComponent {
 
   printVoucher(v: PaymentVoucher, action: 'Pdf' | 'Print'): void {
     const isPay = v.voucher_type !== 'receipt';
+    // Previous Balance / Remaining Due are stored on the voucher when it is
+    // saved, so a reprint shows the balance as it was then. Vouchers saved
+    // before the snapshot existed print without them.
+    const hasBalance = v.previous_balance != null && v.remaining_due != null;
     const typeLabel: Record<string, string> = {
       purchase_invoice: 'Purchase Invoice', sales_invoice: 'Sales Invoice',
       debit_note: 'Debit Note', credit_note: 'Credit Note'
@@ -680,14 +909,23 @@ export class PaymentReceiptVoucherComponent {
     ]);
     if (!rows.length) rows.push(['1', 'On Account', this.pdfAmt(v.net_amount)]);
     const modes = (v.modes || [])
-      .map(m => `${m.ref_json?.['summary'] || m.mode_key} (${this.pdfAmt(m.amount)})`)
+      .map(m => {
+        const label = m.ref_json?.['summary'] || m.mode_key;
+        // Customer Receipt prints the mode without its amount.
+        return isPay ? `${label} (${this.pdfAmt(m.amount)})` : label;
+      })
       .join(', ');
-    const summary: Array<[string, string]> = [['Total Allocated', this.pdfAmt(v.total_allocated)]];
+    const cheque = this.chequeDetails(v);
+    const summary: Array<[string, string]> = [];
+    if (hasBalance) summary.push(['Previous Balance', this.pdfAmt(v.previous_balance!)]);
+    summary.push(['Total Allocated', this.pdfAmt(v.total_allocated)]);
+    if (hasBalance) summary.push(['Remaining Due', this.pdfAmt(v.remaining_due!)]);
     if (v.tds_amount) summary.push(['TDS', this.pdfAmt(v.tds_amount)]);
     if (v.tcs_amount) summary.push([`TCS${v.tcs_percentage ? ` (${v.tcs_percentage}%)` : ''}`, this.pdfAmt(v.tcs_amount)]);
     summary.push(['Net Amount', this.pdfAmt(v.net_amount)]);
-    const title = isPay ? 'Payment Voucher' : 'Receipt Voucher';
-    this.exportService.pdf({
+    const title = isPay ? 'Payment Voucher' : 'Customer Receipt';
+    // Previous: this.exportService.pdf({
+    const exportDoc: InventoryExportDocument = {
       title,
       fields: [
         ['Voucher No', v.voucher_number || ''],
@@ -695,22 +933,71 @@ export class PaymentReceiptVoucherComponent {
         [isPay ? 'Paid To' : 'Received From', v.party_name || ''],
         ['GSTIN', v.party_gstin || ''],
         ['Mode of Payment', modes],
-        ['Status', v.status ? v.status.charAt(0).toUpperCase() + v.status.slice(1) : '']
+        ['Cheque No', cheque.numbers],
+        ['Cheque Date', cheque.dates],
+        // Customer Receipt prints without the Status line.
+        ...(isPay ? [['Status', v.status ? v.status.charAt(0).toUpperCase() + v.status.slice(1) : ''] as [string, string]] : [])
       ],
       columns: ['S.No.', 'Particulars', 'Amount'],
       rows,
       summary,
-      notes: v.narration || '',
+      amountInWords: this.exportService.amountInWords(v.net_amount),
+      amountInWordsPosition: 'below',
+      // Always print the Narration line, even when none was entered.
+      notes: v.narration || '-',
       notesLabel: 'Narration',
-      signatures: ['(Approved By)', '(Verified By)', '(Posted By)'],
+      // Customer Receipt: Narration printed inside a box.
+      notesBoxed: !isPay,
+      // Payment vouchers and customer receipts both get a receiver's signature
+      // slot. It goes first because the export prints signedBy above the LAST
+      // caption (Posted By).
+      signatures: ["(Receiver's Signature)", '(Approved By)', '(Verified By)', '(Posted By)'],
       signedBy: this.exportService.userName(),
+      // Customer Receipt: signature row at the bottom of the page.
+      ...(isPay ? {} : { signaturesAtBottom: true }),
       orientation: 'portrait',
       fileName: `${title} ${v.voucher_number || ''}`.trim()
-    }, action);
+    // Previous: }, action);
+    };
+
+    // Customer Receipt copy type: the first print of a posted receipt is
+    // "Original for Recipient", every later print "Duplicate for Recipient".
+    // The count is kept on the voucher (migration 276). Vendor Payment, a
+    // non-posted voucher or a failed call prints without a copy type.
+    const output = (copyType?: string) => this.exportService.pdf({ ...exportDoc, copyType }, action);
+    if (isPay || !v.id || v.status !== 'posted') {
+      output();
+      return;
+    }
+    this.paymentsService.markCustomerReceiptPrinted(v.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: res => {
+          const data: any = res?.data;
+          const previous = data?.previousPrintCount ?? data?.previous_print_count;
+          if (previous === null || previous === undefined) {
+            output();
+            return;
+          }
+          output(Number(previous) === 0 ? 'Original for Recipient' : 'Duplicate for Recipient');
+        },
+        error: () => output()
+      });
+  }
+
+  // Cheque no./date straight from the saved ref_json, so they print even when
+  // the mode's summary text is missing (older vouchers).
+  private chequeDetails(v: PaymentVoucher): { numbers: string; dates: string } {
+    const cheques = (v.modes || []).filter(m => m.mode_key === 'cheque' || m.ref_json?.['bankSubType'] === 'CHEQUE');
+    return {
+      numbers: cheques.map(m => m.ref_json?.['chequeNumber'] || '').filter(Boolean).join(', '),
+      dates: cheques.map(m => this.pdfDate(m.ref_json?.['chequeDate'])).filter(Boolean).join(', ')
+    };
   }
 
   private pdfAmt(n: number | undefined): string {
-    return Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // Previous: return Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return Math.round(Number(n || 0)).toLocaleString('en-IN');
   }
 
   private pdfDate(d?: string): string {
@@ -720,27 +1007,13 @@ export class PaymentReceiptVoucherComponent {
   }
 
   save(): void {
-    const party = this.selectedParty();
-    if (!party) { this.saveError.set('Select a ' + this.partyLabel().toLowerCase() + ' first.'); return; }
-    const allocations = this.outstandingInvoices()
-      .filter(inv => this.isSelected(inv) && this.allocFor(inv) > 0)
-      .map(inv => ({
-        invoiceType: this.invoiceTypeKey(),
-        invoiceId: inv.invoice_id,
-        invoiceNumber: inv.invoice_number,
-        allocatedAmount: this.allocFor(inv)
-      }));
-    const noteAllocations = this.availableNotes()
-      .filter(n => this.isNoteSelected(n) && this.noteApplyFor(n) > 0)
-      .map(n => ({
-        invoiceType: n.note_type,
-        invoiceId: n.note_id,
-        invoiceNumber: n.note_number,
-        allocatedAmount: this.noteApplyFor(n)
-      }));
+    const parties = this.selectedParties();
+    if (!parties.length) { this.saveError.set('Select a ' + this.partyLabel().toLowerCase() + ' first.'); return; }
+    const multi = this.isMultiParty();
     const activeModeRows = this.modeRows().filter(r => r.amount > 0);
     if (this.cashLimitExceeded()) {
-      this.saveError.set(this.cashLimitMessage());
+      const over = multi ? this.partySummaries().find(s => s.cashTotal > this.cashLimit() + 0.005) : undefined;
+      this.saveError.set(over ? `${over.name}: ${this.cashLimitMessage()}` : this.cashLimitMessage());
       return;
     }
     const invalidRow = activeModeRows.find(r => !r.details.isValid);
@@ -749,18 +1022,77 @@ export class PaymentReceiptVoucherComponent {
       this.modeSelectors?.forEach(c => c.markAllTouched());
       return;
     }
-    const modes = activeModeRows.map(r => ({ modeKey: r.details.modeKey, amount: r.amount, refJson: this.buildRefJson(r.details) }));
+    if (multi && activeModeRows.some(r => r.partyId == null)) {
+      this.saveError.set(`Select the ${this.partyLabel().toLowerCase()} for each ${this.mode() === 'pay' ? 'payment' : 'receipt'} mode.`);
+      return;
+    }
 
-    if (allocations.length === 0 && noteAllocations.length === 0 && modes.length === 0) { this.saveError.set('Nothing to save — allocate an amount.'); return; }
-    if (modes.length === 0 && this.referenceTotal() > 0.005) { this.saveError.set('Add at least one ' + (this.mode() === 'pay' ? 'payment' : 'receipt') + ' mode.'); return; }
+    // One voucher per selected party, carrying only that party's invoices,
+    // notes and modes. Parties with nothing entered are skipped.
+    const summaries = new Map(this.partySummaries().map(s => [s.id, s]));
+    const drafts = parties.map(party => {
+      const allocations = this.outstandingInvoices()
+        .filter(inv => this.partyOfInvoice(inv.invoice_id) === party.id && this.isSelected(inv) && this.allocFor(inv) > 0)
+        .map(inv => ({
+          invoiceType: this.invoiceTypeKey(),
+          invoiceId: inv.invoice_id,
+          invoiceNumber: inv.invoice_number,
+          allocatedAmount: this.allocFor(inv)
+        }));
+      const noteAllocations = this.availableNotes()
+        .filter(n => this.partyOfNote(n.note_id) === party.id && this.isNoteSelected(n) && this.noteApplyFor(n) > 0)
+        .map(n => ({
+          invoiceType: n.note_type,
+          invoiceId: n.note_id,
+          invoiceNumber: n.note_number,
+          allocatedAmount: this.noteApplyFor(n)
+        }));
+      const rows = activeModeRows.filter(r => this.rowParty(r) === party.id);
+      const modes = rows.map(r => ({ modeKey: r.details.modeKey, amount: r.amount, refJson: this.buildRefJson(r.details) }));
+      return { party, allocations, noteAllocations, modes, reference: summaries.get(party.id)?.reference ?? 0, modeTotal: rows.reduce((s, r) => s + r.amount, 0) };
+    }).filter(d => d.allocations.length || d.noteAllocations.length || d.modes.length);
+
+    if (!drafts.length) { this.saveError.set('Nothing to save — allocate an amount.'); return; }
+    const noMode = drafts.find(d => d.modes.length === 0 && d.reference > 0.005);
+    if (noMode) {
+      this.saveError.set('Add at least one ' + (this.mode() === 'pay' ? 'payment' : 'receipt') + ' mode' + (multi ? ` for ${this.partyName(noMode.party)}.` : '.'));
+      return;
+    }
     if (this.mode() === 'pay' && this.tdsApplicable() && !this.tdsSection()) {
       this.saveError.set('This payment includes a Service invoice — select the applicable TDS section.');
+      return;
+    }
+    if (this.narration().trim().length > this.narrationMaxLength) {
+      this.saveError.set(`Narration cannot exceed ${this.narrationMaxLength} characters — shorten it before saving.`);
       return;
     }
 
     this.isSaving.set(true);
     this.saveMsg.set('');
     this.saveError.set('');
+    this.postDrafts(drafts, 0, []);
+  }
+
+  // Posts the per-party vouchers one after another so voucher numbers come out
+  // in order; stops at the first failure and reports what was already posted.
+  private postDrafts(
+    drafts: { party: VendorItem | CustomerItem; allocations: any[]; noteAllocations: any[]; modes: any[]; modeTotal: number }[],
+    index: number,
+    posted: string[]
+  ): void {
+    const draft = drafts[index];
+    const party = draft.party;
+    const fail = (msg: string) => {
+      this.isSaving.set(false);
+      const detail = posted.length ? `${msg} (${posted.join(', ')} already posted; the rest were not saved.)` : msg;
+      this.saveError.set(detail);
+      this.messageService.add({ severity: 'error', summary: 'Save failed', detail, life: 5000 });
+      if (posted.length) {
+        // Posted invoices are no longer outstanding — reload so they can't be posted twice.
+        this.loadVouchers();
+        this.reloadSelectedParties();
+      }
+    };
     this.paymentsService.savePaymentVoucher({
       voucherType: this.mode() === 'pay' ? 'payment' : 'receipt',
       voucherDate: this.voucherDate(),
@@ -773,42 +1105,37 @@ export class PaymentReceiptVoucherComponent {
       tdsSection: this.mode() === 'pay' ? this.tdsSectionCode() : undefined,
       tcsAmount: this.mode() === 'pay' ? this.tcsAmount() : 0,
       tcsPercentage: this.mode() === 'pay' && this.tcsPercentage() > 0 ? this.tcsPercentage() : null,
-      allocations: [...allocations, ...noteAllocations],
-      modes
+      allocations: [...draft.allocations, ...draft.noteAllocations],
+      modes: draft.modes
     }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: res => {
+        if (!res.success) { fail(res.message || 'Save failed.'); return; }
+        const voucherNo = res.data?.voucher_number || 'Voucher';
+        posted.push(voucherNo);
+        if (index + 1 < drafts.length) { this.postDrafts(drafts, index + 1, posted); return; }
+
         this.isSaving.set(false);
-        if (res.success) {
-          const voucherNo = res.data?.voucher_number || 'Voucher';
-          this.saveMsg.set(`${voucherNo} posted successfully.`);
-          this.messageService.add({
-            severity: 'success',
-            summary: 'Posted',
-            detail: `${voucherNo} for ${this.fmt(this.netAmount())} posted successfully against ${this.partyName(party)}.`,
-            life: 4500
-          });
-          this.clearAllocations();
-          // Re-fetch cheque lists so the leaf just used is no longer offered.
-          this.bankDetailsRequested.clear();
-          this.bankDetailsByBankId.set({});
-          this.modeRows.update(rows => rows.map(r =>
-            r.details.bankSubType === 'CHEQUE' ? { ...r, details: { ...r.details, refNumber: '' } } : r));
-          this.modeRows().forEach(r => this.loadBankDetails(r.details.bankId));
-          this.narration.set('');
-          this.loadVouchers();
-          if (this.selectedPartyId()) this.onPartyChange(this.selectedPartyId());
-        } else {
-          const msg = res.message || 'Save failed.';
-          this.saveError.set(msg);
-          this.messageService.add({ severity: 'error', summary: 'Save failed', detail: msg, life: 5000 });
-        }
+        this.saveMsg.set(`${posted.join(', ')} posted successfully.`);
+        this.messageService.add({
+          severity: 'success',
+          summary: 'Posted',
+          detail: drafts.length === 1
+            ? `${voucherNo} for ${this.fmt(this.netAmount())} posted successfully against ${this.partyName(party)}.`
+            : `${drafts.length} receipts posted successfully: ${drafts.map((d, i) => `${posted[i]} (${this.partyName(d.party)}, ${this.fmt(d.modeTotal)})`).join(', ')}.`,
+          life: 4500
+        });
+        this.clearAllocations();
+        // Re-fetch cheque lists so the leaf just used is no longer offered.
+        this.bankDetailsRequested.clear();
+        this.bankDetailsByBankId.set({});
+        this.modeRows.update(rows => rows.map(r =>
+          r.details.bankSubType === 'CHEQUE' ? { ...r, details: { ...r.details, refNumber: '' } } : r));
+        this.modeRows().forEach(r => this.loadBankDetails(r.details.bankId));
+        this.narration.set('');
+        this.loadVouchers();
+        if (this.hasParty()) this.reloadSelectedParties();
       },
-      error: err => {
-        this.isSaving.set(false);
-        const msg = err?.error?.message || 'Server error. Check connection and try again.';
-        this.saveError.set(msg);
-        this.messageService.add({ severity: 'error', summary: 'Save failed', detail: msg, life: 5000 });
-      }
+      error: err => fail(err?.error?.message || 'Server error. Check connection and try again.')
     });
   }
 }

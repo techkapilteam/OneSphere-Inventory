@@ -87,7 +87,7 @@ export class NavigationService {
                 { id: 'uom-master', name: 'UOM Master', route: '/dashboard/inventory/masters/uom-master', group: 'Product Config' },
                 { id: 'hsn-sac-mapping', name: 'Tax Classification Master', route: '/dashboard/inventory/masters/hsn-sac-mapping', group: 'Product Config' },
                 { id: 'barcode-configuration', name: 'Barcode Configuration', route: '/dashboard/inventory/masters/barcode-configuration', group: 'Product Config' },
-                { id: 'serial-number-policy', name: 'Serial Number Policy', route: '/dashboard/inventory/masters/serial-number-policy', group: 'Product Config' },
+                { id: 'serial-number-policy', name: 'Policy Master', route: '/dashboard/inventory/masters/serial-number-policy', group: 'Product Config' },
                 { id: 'batch-lot-policy', name: 'Batch / Lot Policy', route: '/dashboard/inventory/masters/batch-lot-policy', group: 'Product Config' },
                 { id: 'vendor-master', name: 'Vendor Master', route: '/dashboard/inventory/masters/vendor-master', group: 'Party & Commercial Master' },
                 { id: 'customer-master', name: 'Customer Master', route: '/dashboard/inventory/masters/customer-master', group: 'Party & Commercial Master' },
@@ -132,6 +132,7 @@ export class NavigationService {
                 { id: 'production-planning', name: 'Production Planning', route: '/dashboard/inventory/transactions/production-planning', group: 'Manufacturing' },
                 { id: 'material-issue-production', name: 'Material Issue for Production', route: '/dashboard/inventory/transactions/material-issue-production', group: 'Manufacturing' },
                 { id: 'production-entry', name: 'Production Entry', route: '/dashboard/inventory/transactions/production-entry', group: 'Manufacturing' },
+                { id: 'uin-registration', name: 'Identifier Registration', route: '/dashboard/inventory/transactions/uin-registration', group: 'Manufacturing' },
                 { id: 'production-return', name: 'Production Return', route: '/dashboard/inventory/transactions/production-return', group: 'Manufacturing' },
                 // Consumption
                 { id: 'material-consumption', name: 'Material Consumption', route: '/dashboard/inventory/transactions/material-consumption', group: 'Consumption', disabled: true },

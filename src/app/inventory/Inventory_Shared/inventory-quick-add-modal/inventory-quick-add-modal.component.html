@@ -12,7 +12,7 @@
       <div class="inventory-modal" [class.inventory-modal--wide]="host.activeAddMaster() === 'Variant'">
         <div class="inventory-modal-header">
           <div>
-            <h3>{{ host.activeAddMaster() === 'New Segment' ? 'Add New Segment' : 'Add ' + host.activeAddMaster() }}</h3>
+            <h3>{{ host.activeAddMaster() === 'New Segment' ? 'Add New Segment' : host.activeAddMaster() === 'Serial Number Policy' ? 'Add Policy' : 'Add ' + host.activeAddMaster() }}</h3>
             <p>
               @if (host.activeAddMaster() === 'HSN / SAC') {
                 Search the uploaded HSN/SAC tax master while you type, or enter a new code manually.
@@ -35,8 +35,7 @@
               } @else if (host.activeAddMaster() === 'Manufacturer') {
                 Add only the manufacturer name for brand mapping. More manufacturer details can be added later if required.
               } @else if (host.activeAddMaster() === 'Serial Number Policy') {
-                Add a reusable serial/IMEI rule. Category can provide the default, and Product Master can override it.
-              } @else if (host.activeAddMaster() === 'Batch / Lot Policy') {
+                Add a reusable identifier (Serial No, IMEI, Chassis No, UIN ...). Capture stage and mandatory are set per category in Category Master.              } @else if (host.activeAddMaster() === 'Batch / Lot Policy') {
                 Add a reusable batch/lot rule for product-wise lot, expiry and QC tracking.
               } @else if (host.activeAddMaster() === 'Approval Workflow') {
                 Add a reusable approval workflow with approver role, level, threshold and escalation details.
@@ -659,7 +658,7 @@
           <div class="inventory-form-grid inventory-config-grid">
             <div class="erp-form-group">
               <label class="erp-label">Policy Name <span class="text-danger">*</span></label>
-              <input class="erp-input" type="text" [ngModel]="host.quickAddName()" (ngModelChange)="host.onQuickAddNameChange($event)" placeholder="IMEI Required / Auto Capture" />
+              <input class="erp-input" type="text" [ngModel]="host.quickAddName()" (ngModelChange)="host.onQuickAddNameChange($event)" placeholder="Serial No / IMEI / Chassis No / UIN" />
             </div>
             <div class="erp-form-group">
               <label class="erp-label">Policy Code</label>
@@ -669,10 +668,7 @@
               <label class="erp-label">Format Notes <span class="erp-label-hint">optional</span></label>
               <input class="erp-input" type="text" [ngModel]="host.formValues()['quickSerialFormat']" (ngModelChange)="host.collectFormField('quickSerialFormat', $event)" placeholder="Free-text reference note, e.g. 15-digit IMEI" />
             </div>
-            <div class="erp-form-group">
-              <label class="erp-label">Capture Stage</label>
-              <ng-select class="erp-ng-select inventory-ng-select" appendTo="body" [items]="['Purchase Inward', 'Sales Invoice', 'Both Inward and Sale', 'Warranty Registration']" [searchable]="true" [clearable]="true" [ngModel]="host.formValues()['quickCaptureStage']" (ngModelChange)="host.collectFormField('quickCaptureStage', $event)" placeholder="Select Stage"></ng-select>
-            </div>
+
           </div>
           @if (host.quickAddError()) { <p class="inventory-error-msg">{{ host.quickAddError() }}</p> }
         } @else if (host.activeAddMaster() === 'Batch / Lot Policy') {
