@@ -2042,6 +2042,9 @@ export class InventoryTransactionsService {
       branch_id: r?.branchId ?? r?.branch_id,
       branch_name: r?.branchName || r?.branch_name,
       remarks: r?.remarks, status: r?.status || 'draft', created_at: r?.createdAt || r?.created_at,
+      // Whole-rupee round off (migration 275). Without it a reprint from the
+      // list (Duplicate for Recipient) printed with no round off.
+      round_off: Number(r?.roundOff ?? r?.round_off ?? 0) || 0,
       items: (r?.items || []).map((i: any) => ({
         ...this.normSalesItem(i),
         batch_no: i.batchNo || i.batch_no, serial_no: i.serialNo || i.serial_no,
