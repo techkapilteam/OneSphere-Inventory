@@ -58,6 +58,14 @@ export interface InventoryExportDocument {
   pdfColumnWidths?: Record<number, number>;
   /** PDF only: table header font size (default 10) — smaller lets wide lists fit portrait. */
   pdfHeadFontSize?: number;
+
+  /** Invoice layout (Purchase Invoice): "Total Invoice Amount In Words" (and notes)
+   *  on the left and the totals on the right, in ONE bordered block joined
+   *  directly under the items table (like the old printed invoice). */
+  gstInvoiceLayout?: boolean;
+  /** With gstInvoiceLayout: the old-invoice signature row under the totals:
+   *  empty box | Common Seal | Certified … / For <Company> / Authorised Signatory. */
+  signatureBlock?: boolean;
 }
 
 const HEADER_COLOR = '#0b4093';
@@ -70,9 +78,11 @@ const TERMS_LINE_HEIGHT = 3.6;
 // Previous: 58 — the box really prints ~62mm (two-line "Certified …" and
 // "For <Company>"), so it passed the fit check and then broke onto a new page.
 // Previous: 64 — row padding 1.5 -> 1.2 so the Sales Invoice fits one page.
-const BANK_BOX_HEIGHT = 60;
+//const BANK_BOX_HEIGHT = 60;
 /** Text/spacing scales tried in turn for a fitOnePage document. */
 const ONE_PAGE_SCALES = [1, 0.92, 0.85, 0.78, 0.7, 0.62];
+const BANK_BOX_HEIGHT = 58;
+const SIGNATURE_ROW_HEIGHT = 32;
 const NUMERIC_CELL =/^-?(rs\.?\s*|₹\s*)?-?[\d,]+(\.\d+)?\s*%?$/i;
 
 @Injectable({ providedIn: 'root' })
@@ -608,9 +618,16 @@ export class InventoryExportService {
     const wordsBox = document.amountInWordsPosition === 'box';
     y = (doc as any).lastAutoTable.finalY + (wordsBox ? 0 : 6);
 
-    const summary = document.summary || [];
-    const notes = String(document.notes || '').trim();
-    const amountInWords = String(document.amountInWords || '').trim();
+        // Invoice layout (Purchase Invoice): words + totals joined under the table,
+    // then the signature row. The blocks below are then skipped for this document.
+    const joined = !!document.gstInvoiceLayout;
+    if (joined) {
+      const joinedEnd = this.drawPdfJoinedTotals(doc, document, (doc as any).lastAutoTable.finalY);
+      if (document.signatureBlock) this.drawPdfSignatureRow(doc, joinedEnd);
+    }
+    const summary = joined ? [] : (document.summary || []);
+    const notes = joined ? '' : String(document.notes || '').trim();
+    const amountInWords = joined ? '' : String(document.amountInWords || '').trim();
     const wordsBelow = document.amountInWordsPosition === 'below';
     // Previous: const wordsLeft = wordsBelow ? '' : amountInWords;
     const wordsLeft = wordsBelow || wordsBox ? '' : amountInWords;
@@ -706,7 +723,7 @@ export class InventoryExportService {
       if (document.bankDetails) this.drawPdfBankBox(doc, document.bankDetails, y);
     }
 
-    const signatures = document.signatures || [];
+    const signatures = joined ? [] : (document.signatures || []);
     if (signatures.length) {
       const lastY = summary.length ? (doc as any).lastAutoTable.finalY : y;
       let signY = Math.max(lastY, y) + 25;
@@ -907,6 +924,120 @@ export class InventoryExportService {
     doc.line(L_MARGIN + widths[0], boxTop, L_MARGIN + widths[0], end);
     doc.line(L_MARGIN + widths[0] + widths[1], boxTop, L_MARGIN + widths[0] + widths[1], end);
   }
+
+    // Point 7: one bordered block joined directly under the items table:
+  // left = "Total Invoice Amount In Words" (+ notes), right = the totals.
+  private drawPdfJoinedTotals(doc: jsPDF, document: InventoryExportDocument, startY: number): number {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const width = pageWidth - L_MARGIN - R_MARGIN;
+    const leftWidth = width * 0.55;
+    const labelWidth = width * 0.27;
+    const valueWidth = width - leftWidth - labelWidth;
+    const summary = document.summary || [];
+    const words = String(document.amountInWords || '').trim();
+    const notes = String(document.notes || '').trim();
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    const wordLines = words ? doc.splitTextToSize(words, leftWidth - 4) as string[] : [];
+    const noteLines = notes ? doc.splitTextToSize(notes, leftWidth - 4) as string[] : [];
+    const leftHeight = 4 + (words ? 5 + wordLines.length * 4 : 0) + (notes ? 6 + noteLines.length * 4 : 0) + 2;
+
+    const rows: Array<[string, string]> = summary.length ? summary : [['', '']];
+    const body: any[] = rows.map(([label, value], index) => index === 0
+      ? [{ content: '', rowSpan: rows.length, styles: { minCellHeight: leftHeight } }, label, value]
+      : [label, value]);
+
+    autoTable(doc, {
+      body,
+      theme: 'grid',
+      startY,
+      pageBreak: 'avoid',
+      margin: { left: L_MARGIN, right: R_MARGIN, top: 15, bottom: 15 },
+      tableWidth: width,
+      styles: { fontSize: 9, cellPadding: 1.2, textColor: 0, valign: 'middle' },
+      columnStyles: {
+        0: { cellWidth: leftWidth },
+        1: { cellWidth: labelWidth, fontStyle: 'bold' },
+        2: { cellWidth: valueWidth, halign: 'right' }
+      },
+      didParseCell: data => {
+        // Last line (Grand Total) bold and slightly bigger, as before.
+        if (summary.length && data.row.index === summary.length - 1 && data.column.index > 0) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fontSize = 10;
+        }
+      },
+      didDrawCell: data => {
+        if (data.row.index !== 0 || data.column.index !== 0) return;
+        const x = data.cell.x + 2;
+        let ty = data.cell.y + 4.5;
+        doc.setTextColor(0);
+        doc.setFontSize(9);
+        if (words) {
+          doc.setFont('helvetica', 'bold');
+          doc.text('Total Invoice Amount In Words :', x, ty);
+          doc.setFont('helvetica', 'normal');
+          doc.text(wordLines, x, ty + 5);
+          ty += 5 + wordLines.length * 4 + 2;
+        }
+        if (notes) {
+          doc.setFont('helvetica', 'bold');
+          doc.text(`${document.notesLabel || 'Notes'} :`, x, ty + 1);
+          doc.setFont('helvetica', 'normal');
+          doc.text(noteLines, x, ty + 6);
+        }
+      }
+    });
+    return (doc as any).lastAutoTable.finalY;
+  }
+
+  // Point 6: the old-invoice signature row:
+  // [ empty ] [ Common Seal ] [ Certified … / For <Company> / Authorised Signatory ]
+  private drawPdfSignatureRow(doc: jsPDF, startY: number): void {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const width = pageWidth - L_MARGIN - R_MARGIN;
+    let y = startY;
+    if (y + SIGNATURE_ROW_HEIGHT > pageHeight - 15) {
+      doc.addPage();
+      y = 15;
+    }
+    const w1 = width * 0.25;
+    const w2 = width * 0.25;
+    const w3 = width - w1 - w2;
+    const x2 = L_MARGIN + w1;
+    const x3 = x2 + w2;
+    const bottom = y + SIGNATURE_ROW_HEIGHT;
+    const company = String(this.companyDetails()?.companyName || '').trim();
+
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.2);
+    doc.setTextColor(0);
+    doc.rect(L_MARGIN, y, width, SIGNATURE_ROW_HEIGHT);
+    doc.line(x2, y, x2, bottom);
+    doc.line(x3, y, x3, bottom);
+
+    // Middle box: Common Seal
+    doc.line(x2, bottom - 7, x3, bottom - 7);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('Common Seal', x2 + w2 / 2, bottom - 2.5, { align: 'center' });
+
+    // Right box: Certified … / For <Company> / Authorised Signatory
+    doc.setFontSize(8);
+    doc.text('Certified that the particulars given above are true and correct', x3 + 2, y + 4.5, { maxWidth: w3 - 4 });
+    doc.line(x3, y + 6.5, x3 + w3, y + 6.5);
+    if (company) {
+      doc.setFontSize(9.5);
+      doc.text(`For ${company}`, x3 + 2, y + 11.5, { maxWidth: w3 - 4 });
+      doc.line(x3, y + 13.5, x3 + w3, y + 13.5);
+    }
+    doc.line(x3, bottom - 7, x3 + w3, bottom - 7);
+    doc.setFontSize(10);
+    doc.text('Authorised Signatory', x3 + w3 / 2, bottom - 2.5, { align: 'center' });
+  }
+
 
   private printDoc(doc: jsPDF): void {
     // Earlier print frames are dropped only after a delay: an SI + DC posted
