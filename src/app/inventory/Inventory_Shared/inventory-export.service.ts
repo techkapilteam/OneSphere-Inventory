@@ -53,6 +53,8 @@ export interface InventoryExportDocument {
   /** With gstInvoiceLayout: the old-invoice signature row under the totals:
    *  empty box | Common Seal | Certified … / For <Company> / Authorised Signatory. */
   signatureBlock?: boolean;
+    /** Rows (indexes in `rows`) that are group headers / subtotals: printed bold and shaded. */
+  groupRowIndexes?: number[];
 }
 
 const HEADER_COLOR = '#0b4093';
@@ -479,7 +481,14 @@ export class InventoryExportService {
       styles: { fontSize: 8, cellPadding: 0.8, overflow: 'linebreak', valign: 'middle' } as any,
       columnStyles,
       rowPageBreak: 'avoid',
-      showHead: 'everyPage'
+      showHead: 'everyPage',
+      // Group headers / subtotals (report "Group by"): bold, shaded.
+      didParseCell: (data: any) => {
+        if (data.section === 'body' && (document.groupRowIndexes || []).includes(data.row.index)) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [230, 238, 250];
+        }
+      }
     });
     y = (doc as any).lastAutoTable.finalY + 6;
 
