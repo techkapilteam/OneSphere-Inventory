@@ -611,21 +611,19 @@ export class InventoryExportService {
         ? { fontSize: 7.5 * s, cellPadding: 0.8 * s, overflow: 'linebreak', valign: 'top', lineColor: 0, lineWidth: 0.2, textColor: 0 } as any
         : { fontSize: 8, cellPadding: 0.8, overflow: 'linebreak', valign: 'middle' } as any,
       columnStyles,
-      didParseCell: data => {
+      didParseCell: (data: any) => {
         if (document.totalRow && data.section === 'body' && data.row.index === bodyRows.length - 1) {
           data.cell.styles.fontStyle = 'bold';
           data.cell.styles.fontSize = 8.5 * s;
         }
-      },
-      rowPageBreak: 'avoid',
-      showHead: 'everyPage',
-      // Group headers / subtotals (report "Group by"): bold, shaded.
-      didParseCell: (data: any) => {
+        // Group headers / subtotals (report "Group by"): bold, shaded.
         if (data.section === 'body' && (document.groupRowIndexes || []).includes(data.row.index)) {
           data.cell.styles.fontStyle = 'bold';
           data.cell.styles.fillColor = [230, 238, 250];
         }
-      }
+      },
+      rowPageBreak: 'avoid',
+      showHead: 'everyPage'
     });
     // Previous: y = (doc as any).lastAutoTable.finalY + 6;
     const wordsBox = document.amountInWordsPosition === 'box';
