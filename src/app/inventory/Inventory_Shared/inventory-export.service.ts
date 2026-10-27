@@ -20,6 +20,8 @@ export interface InventoryExportDocument {
   summary?: Array<[string, string]>;
   notes?: string;
   notesLabel?: string;
+  /** PDF only: draw the notes (label + text) inside a bordered box (Customer Receipt narration). */
+  notesBoxed?: boolean;
   /** Amount in words — "Total Invoice Amount In Words" left of the totals
    *  (invoices, default), or an "Amount in Words :" line under them (vouchers). */
   amountInWords?: string;
@@ -51,6 +53,8 @@ export interface InventoryExportDocument {
   signatures?: string[];
   /** Name printed above the last signature caption (the posting user). */
   signedBy?: string;
+  /** PDF only: print the signature row in the lower part of the last page, ~7 cm above the page bottom (Customer Receipt). */
+  signaturesAtBottom?: boolean;
   fileName?: string;
   orientation?: 'portrait' | 'landscape';
   /** PDF only: fixed width (mm) per column index, for values that can't wrap
@@ -656,7 +660,23 @@ export class InventoryExportService {
         leftY = leftY + 8 + wordLines.length * 4 + 2;
         blockEnd = Math.max(blockEnd, leftY);
       }
-      if (notes) {
+      if (notes && document.notesBoxed) {
+        // Customer Receipt: "Narration :" and its text inside a bordered box,
+        // as tall as the totals box beside it (at least), with inner padding.
+        const pad = 2;
+        const boxWidth = pageWidth - L_MARGIN - R_MARGIN - summaryWidth - 10;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text(`${document.notesLabel || 'Notes'} :`, L_MARGIN + pad, leftY + 3 + pad);
+        doc.setFont('helvetica', 'normal');
+        const noteLines = doc.splitTextToSize(notes, boxWidth - pad * 2) as string[];
+        doc.text(noteLines, L_MARGIN + pad, leftY + 8 + pad);
+        const boxHeight = Math.max(10 + pad * 2 + (noteLines.length - 1) * 4, summary.length * 5 + 2);
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(0.2);
+        doc.rect(L_MARGIN, leftY, boxWidth, boxHeight);
+        blockEnd = Math.max(blockEnd, leftY + boxHeight);
+      } else if (notes) {
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(9);
         // Previous: doc.text(`${document.notesLabel || 'Notes'} :`, L_MARGIN, y + 3);
@@ -726,8 +746,18 @@ export class InventoryExportService {
     const signatures = joined ? [] : (document.signatures || []);
     if (signatures.length) {
       const lastY = summary.length ? (doc as any).lastAutoTable.finalY : y;
-      let signY = Math.max(lastY, y) + 25;
-      if (signY > pageHeight - 20) {
+      // Previous: let signY = Math.max(lastY, y) + 25;
+      // signaturesAtBottom: captions in the lower part of the page, ~7 cm above
+      // the page bottom (footer line is at pageHeight - 10); on a new page only
+      // if the content already reaches that area.
+      const bottomSignY = pageHeight - 70;
+      let signY = document.signaturesAtBottom
+        ? (Math.max(lastY, y) + 20 > bottomSignY ? -1 : bottomSignY)
+        : Math.max(lastY, y) + 25;
+      if (signY === -1) {
+        doc.addPage();
+        signY = bottomSignY;
+      } else if (!document.signaturesAtBottom && signY > pageHeight - 20) {
         doc.addPage();
         signY = 40;
       }
