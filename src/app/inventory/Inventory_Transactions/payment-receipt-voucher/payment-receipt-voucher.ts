@@ -924,7 +924,8 @@ export class PaymentReceiptVoucherComponent {
     if (v.tcs_amount) summary.push([`TCS${v.tcs_percentage ? ` (${v.tcs_percentage}%)` : ''}`, this.pdfAmt(v.tcs_amount)]);
     summary.push(['Net Amount', this.pdfAmt(v.net_amount)]);
     const title = isPay ? 'Payment Voucher' : 'Customer Receipt';
-    this.exportService.pdf({
+    // Previous: this.exportService.pdf({
+    const exportDoc: InventoryExportDocument = {
       title,
       fields: [
         ['Voucher No', v.voucher_number || ''],
@@ -945,14 +946,43 @@ export class PaymentReceiptVoucherComponent {
       // Always print the Narration line, even when none was entered.
       notes: v.narration || '-',
       notesLabel: 'Narration',
+      // Customer Receipt: Narration printed inside a box.
+      notesBoxed: !isPay,
       // Payment vouchers and customer receipts both get a receiver's signature
       // slot. It goes first because the export prints signedBy above the LAST
       // caption (Posted By).
       signatures: ["(Receiver's Signature)", '(Approved By)', '(Verified By)', '(Posted By)'],
       signedBy: this.exportService.userName(),
+      // Customer Receipt: signature row at the bottom of the page.
+      ...(isPay ? {} : { signaturesAtBottom: true }),
       orientation: 'portrait',
       fileName: `${title} ${v.voucher_number || ''}`.trim()
-    }, action);
+    // Previous: }, action);
+    };
+
+    // Customer Receipt copy type: the first print of a posted receipt is
+    // "Original for Recipient", every later print "Duplicate for Recipient".
+    // The count is kept on the voucher (migration 276). Vendor Payment, a
+    // non-posted voucher or a failed call prints without a copy type.
+    const output = (copyType?: string) => this.exportService.pdf({ ...exportDoc, copyType }, action);
+    if (isPay || !v.id || v.status !== 'posted') {
+      output();
+      return;
+    }
+    this.paymentsService.markCustomerReceiptPrinted(v.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: res => {
+          const data: any = res?.data;
+          const previous = data?.previousPrintCount ?? data?.previous_print_count;
+          if (previous === null || previous === undefined) {
+            output();
+            return;
+          }
+          output(Number(previous) === 0 ? 'Original for Recipient' : 'Duplicate for Recipient');
+        },
+        error: () => output()
+      });
   }
 
   // Cheque no./date straight from the saved ref_json, so they print even when

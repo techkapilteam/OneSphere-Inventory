@@ -585,6 +585,7 @@ export interface PurchaseInvoice {
   remarks?: string;
   subtotal: number;
   tax_amount: number;
+  transport_charges?: number;
   total_amount: number;
   status: string;
   created_at?: string;
@@ -1440,6 +1441,7 @@ export class InventoryTransactionsService {
       payment_terms: r?.paymentTerms || r?.payment_terms,
       remarks: r?.remarks,
       subtotal: Number(r?.subtotal || 0), tax_amount: Number(r?.taxAmount || r?.tax_amount || 0),
+      transport_charges: Number(r?.transportCharges ?? r?.transport_charges ?? 0) || 0,
       total_amount: Number(r?.totalAmount || r?.total_amount || 0),
       status: r?.status || 'draft', created_at: r?.createdAt || r?.created_at,
       items: (r?.items || []).map((i: any) => ({
@@ -2042,6 +2044,9 @@ export class InventoryTransactionsService {
       branch_id: r?.branchId ?? r?.branch_id,
       branch_name: r?.branchName || r?.branch_name,
       remarks: r?.remarks, status: r?.status || 'draft', created_at: r?.createdAt || r?.created_at,
+      // Whole-rupee round off (migration 275). Without it a reprint from the
+      // list (Duplicate for Recipient) printed with no round off.
+      round_off: Number(r?.roundOff ?? r?.round_off ?? 0) || 0,
       items: (r?.items || []).map((i: any) => ({
         ...this.normSalesItem(i),
         batch_no: i.batchNo || i.batch_no, serial_no: i.serialNo || i.serial_no,
