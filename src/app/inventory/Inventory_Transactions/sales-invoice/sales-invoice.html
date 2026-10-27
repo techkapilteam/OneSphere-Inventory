@@ -532,6 +532,32 @@
                       </td>
                     }
                   </tr>
+                  <tr class="inventory-line-total-row">
+                    <td class="text-center"></td>
+                    <td></td>
+                    @for (column of renderedColumns; track column) {
+                      <td>
+                        @if (column === 'Item / SKU') {
+                          <strong>Previous Balance</strong>
+                        } @else if (column === 'Amount') {
+                          <strong>{{ balanceText(previousBalance()) }}</strong>
+                        }
+                      </td>
+                    }
+                  </tr>
+                  <tr class="inventory-line-total-row">
+                    <td class="text-center"></td>
+                    <td></td>
+                    @for (column of renderedColumns; track column) {
+                      <td>
+                        @if (column === 'Item / SKU') {
+                          <strong>Total Balance</strong>
+                        } @else if (column === 'Amount') {
+                          <strong>{{ balanceText(previousBalance() + roundOffFooter.grandTotalValue) }}</strong>
+                        }
+                      </td>
+                    }
+                  </tr>
                 }
               </tfoot>
             </table>

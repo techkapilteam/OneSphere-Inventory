@@ -70,6 +70,10 @@ interface GridExportPayload {
   notes?: string;
   notesLabel?: string;
   amountInWords?: string;
+  amountInWordsPosition?: 'left' | 'below' | 'box';
+  columnGroups?: Array<[string, number]>;
+  totalRow?: string[];
+  fitOnePage?: boolean;
   copyType?: string;
   terms?: string[];
   bankDetails?: Array<[string, string]>;
@@ -314,7 +318,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private readonly inventoryConfigService = inject(InventoryConfigService);
   protected readonly txService = inject(InventoryTransactionsService);
   private readonly exportService = inject(InventoryExportService);
-  private readonly paymentsService = inject(PaymentsService);
+  protected readonly paymentsService = inject(PaymentsService);
   // Bank block on the Sales Invoice print — loaded once in ngOnInit because
   // the export payload builders are synchronous.
   private readonly invoiceBankDetails = signal<InvoiceBankDetails | null>(null);
@@ -3140,7 +3144,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     ]);
   }
 
-  private findCustomerBySelection(value: any): CustomerItem | null {
+  protected findCustomerBySelection(value: any): CustomerItem | null {
     const raw = String(value ?? '').trim();
     if (!raw) return null;
     const selectedKey = this.normalizeKey(raw);
@@ -7876,6 +7880,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       return;
     }
 
+    // Sales Invoice Excel carries the same Previous Balance row as its PDF.
+    if (tableId === 'records' && this.config?.key === 'salesInvoice' && this.expandedGrnId()) {
+      const record = this.segmentFilteredRecords(this.savedRecordObjects())
+        .find(item => Number(item.id) === Number(this.expandedGrnId()));
+      if (record) {
+        this.withSalesInvoicePreviousBalance(record, payload, withBalance => this.downloadGridExcel(withBalance));
+        return;
+      }
+    }
     this.downloadGridExcel(payload);
   }
 
@@ -8259,31 +8272,60 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   // Previous: private salesInvoiceDocumentRows(record: any): string[][] {
-  private salesInvoiceDocumentRows(record: any, isInterstate = false): string[][] {
-    return (record?.items || []).map((item: any, index: number) => {
+  // GST tax-invoice grid as on the old ACE TECH sale invoice: S.No | Product
+  // Description (batch number under it) | HSN/SAC | Qty | Rate | Amount |
+  // Disc. | Taxable Value | CGST Rate %/Amount | SGST Rate %/Amount (or IGST)
+  // | TOTAL, plus the Total row. UOM / MRP / Selling Price no longer print.
+  // Previous columns: S.No | Product / Service | HSN/SAC Code | Qty | UOM |
+  // Rate (Rs.) | MRP | Selling Price | Disc % | Taxable Value | GST % |
+  // CGST Amt | SGST Amt (or IGST Amt) | Amount (Rs.)
+  private salesInvoiceDocumentRows(record: any, isInterstate = false): { rows: string[][]; totalRow: string[] } {
+    const sum = { gross: 0, discount: 0, taxable: 0, cgst: 0, sgst: 0, total: 0 };
+    const rows = (record?.items || []).map((item: any, index: number) => {
       // Product-wise GST: taxable value and CGST/SGST (or IGST) amount per line.
       // SGST = tax - CGST so the two halves always add up to the line tax.
       const { taxable, tax } = this.salesInvoiceLineTax(item);
-      const cgst = Math.round((tax / 2) * 100) / 100;
-      const lineTaxCells = isInterstate
-        ? [this.moneyValue(tax)]
-        : [this.moneyValue(cgst), this.moneyValue(tax - cgst)];
+      const cgst = isInterstate ? tax : Math.round((tax / 2) * 100) / 100;
+      const sgst = isInterstate ? 0 : tax - cgst;
+      const qty = Number(item?.qty ?? 0) || 0;
+      const gross = qty * (Number(item?.rate ?? 0) || 0);
+      const discount = gross * (Number(item?.discount_pct ?? item?.discountPct ?? 0) || 0) / 100;
+      const lineTotal = Number(item?.amount ?? 0) || taxable + tax;
+      const gstRate = Number(item?.gst_rate ?? item?.gstRate ?? 0) || 0;
+      const halfRate = String(Math.round((gstRate / 2) * 100) / 100);
+      const batchNo = this.grnExpandedValue(item, 'batch_no', 'batchNo');
+      sum.gross += gross;
+      sum.discount += discount;
+      sum.taxable += taxable;
+      sum.cgst += cgst;
+      sum.sgst += sgst;
+      sum.total += lineTotal;
       return [
         String(index + 1),
-        this.purchaseInvoiceItemName(item),
+        [this.purchaseInvoiceItemName(item), batchNo ? `BATCH NUMBER : ${batchNo}` : ''].filter(Boolean).join('\n'),
         this.purchaseInvoiceItemHsn(item),
-        this.moneyValue(item?.qty ?? 0),
-        this.grnExpandedValue(item, 'uom_name', 'uomName'),
+        Number.isInteger(qty) ? String(qty) : this.moneyValue(qty),
         this.moneyValue(item?.rate ?? 0),
-        this.moneyValue(item?.mrp ?? item?.Mrp ?? 0),
-        this.moneyValue(item?.selling_price ?? item?.sellingPrice ?? 0),
-        String(item?.discount_pct ?? item?.discountPct ?? 0),
+        this.moneyValue(gross),
+        this.moneyValue(discount),
         this.moneyValue(taxable),
-        String(item?.gst_rate ?? item?.gstRate ?? 0),
-        ...lineTaxCells,
-        this.moneyValue(item?.amount ?? 0)
+        ...(isInterstate
+          ? [String(gstRate), this.moneyValue(cgst)]
+          : [halfRate, this.moneyValue(cgst), halfRate, this.moneyValue(sgst)]),
+        this.moneyValue(lineTotal)
       ];
     });
+    const totalRow = [
+      'Total', '', '', '', '',
+      this.moneyValue(sum.gross),
+      this.moneyValue(sum.discount),
+      this.moneyValue(sum.taxable),
+      ...(isInterstate
+        ? ['', this.moneyValue(sum.cgst)]
+        : ['', this.moneyValue(sum.cgst), '', this.moneyValue(sum.sgst)]),
+      this.moneyValue(sum.total)
+    ];
+    return { rows, totalRow };
   }
 
   // Same per-line taxable/tax rule as documentFinancials(): saved values first,
@@ -8335,14 +8377,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // Previous: const columns = ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'];
     // Previous: const rows = this.salesInvoiceDocumentRows(record);
     const lineIsInterstate = this.salesInvoiceFinancials(record).isInterstate;
-    const { columns, rows } = this.withoutEmptyPriceColumns(
-      record?.items || [],
-      // Previous: ['#', 'Product / Service', 'HSN', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'GST %', 'Amount (Rs.)'],
-      ['S.No', 'Product / Service', 'HSN/SAC Code', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'Taxable Value', 'GST %',
-        ...(lineIsInterstate ? ['IGST Amt'] : ['CGST Amt', 'SGST Amt']), 'Amount (Rs.)'],
-      // Previous: this.salesInvoiceDocumentRows(record)
-      this.salesInvoiceDocumentRows(record, lineIsInterstate)
-    );
+    // Previous: const { columns, rows } = this.withoutEmptyPriceColumns(
+    //   record?.items || [],
+    //   ['S.No', 'Product / Service', 'HSN/SAC Code', 'Qty', 'UOM', 'Rate (Rs.)', 'MRP', 'Selling Price', 'Disc %', 'Taxable Value', 'GST %',
+    //     ...(lineIsInterstate ? ['IGST Amt'] : ['CGST Amt', 'SGST Amt']), 'Amount (Rs.)'],
+    //   this.salesInvoiceDocumentRows(record, lineIsInterstate)
+    // );
+    const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate);
+    const columns = ['S.No', 'Product Description', 'HSN/SAC Code', 'Qty', 'Rate', 'Amount', 'Disc.', 'Taxable Value',
+      ...(lineIsInterstate ? ['Rate %', 'Amount'] : ['Rate %', 'Amount', 'Rate %', 'Amount']), 'TOTAL'];
+    const columnGroups: Array<[string, number]> = [
+      ['S.No', 1], ['Product Description', 1], ['HSN/SAC Code', 1], ['Qty', 1], ['Rate', 1], ['Amount', 1], ['Disc.', 1], ['Taxable Value', 1],
+      ...(lineIsInterstate ? [['IGST', 2]] : [['CGST', 2], ['SGST', 2]]) as Array<[string, number]>,
+      ['TOTAL', 1]
+    ];
     const exportColumns = rows.length ? columns : fallbackColumns;
     const exportRows = rows.length ? rows : fallbackRows;
     const totals = this.salesInvoiceFinancials(record);
@@ -8381,15 +8429,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Previous: ['Total', this.formatCurrency(totals.total)]
       // Previous: ['Total', this.invoiceGrandTotalText(totals.total)]
     ];
-    const summaryRows = [
+    // Headings as before (user's choice), printed in the ruled box beside the
+    // amount in words; Previous Balance is added under Grand Total at print
+    // time (withSalesInvoicePreviousBalance).
+    // Previous (old-invoice headings): Total Amount Before Tax, CGST / SGST (or
+    // IGST), Total Tax Amount, Total Amount After Tax, Round Off, Total.
+    const summaryRows: Array<[string, string]> = [
       ['Sub total', this.moneyValue(totals.gross)],
       ['Discount', totals.discount ? `-${this.moneyValue(totals.discount)}` : this.moneyValue(0)],
       ['Taxable amount', this.moneyValue(totals.taxable)],
-      ...(totals.isInterstate
-        ? [['IGST', this.moneyValue(totals.igst)]]
-        : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]]),
-      // Only invoices saved with a round off (migration 275) print the row.
-      ...(totals.roundOff ? [['Round off', this.moneyValue(totals.roundOff)]] : [])
+      // User's list: one IGST row carrying the whole tax, no CGST / SGST rows
+      // and no Round off row (Grand Total already includes any round off).
+      // Previous: CGST + SGST rows (IGST only when inter-state), then
+      // 'Round off' when non-zero.
+      ['IGST', this.moneyValue(totals.tax)]
     ];
     return {
       // Previous: title: `Sales Invoice - ${docNo || 'Selected Record'}`,
@@ -8398,14 +8451,19 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       fields,
       columns: exportColumns,
       rows: exportRows,
+      columnGroups: rows.length ? columnGroups : undefined,
+      totalRow: rows.length ? totalRow : undefined,
       // Previous: summary: [...summaryRows, ['Grand Total', this.formatCurrency(totals.total)]] as Array<[string, string]>,
-      summary: [...summaryRows, ['Grand Total', this.invoiceGrandTotalText(totals.total)]] as Array<[string, string]>,
+      // Previous: summary: [...summaryRows, ['Total', this.moneyValue(totals.total)]],
+      summary: [...summaryRows, ['Grand Total', this.invoiceGrandTotalText(totals.total)]],
       notes: String(record.customer_notes || record.customerNotes || ''),
       notesLabel: 'Notes',
       // Test point 16: Grand Total in words (same helper as Purchase Invoice).
       // Previous: amountInWords: rupeesInWords(totals.total),  (all capitals)
-      // Title case instead, e.g. "Rupees Three Hundred And Fifty Four Only".
-      amountInWords: rupeesInWords(totals.total).toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase()),
+      // Previous: amountInWords: rupeesInWords(totals.total).toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase()),
+      // Capitals again, as on the old invoice, in the box beside the totals.
+      amountInWords: rupeesInWords(totals.total),
+      amountInWordsPosition: 'box',
       terms: SALES_INVOICE_TERMS,
       // Previous order: Bank Name, Branch Name, Account No, IFSC CODE.
       // Account Name = login company name from session storage (CompanyDetails),
@@ -8421,6 +8479,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // signatory box fit on the same page as the items (landscape A4 is too
       // short and pushed the box onto a second page).
       orientation: 'portrait',
+      // The whole invoice (grid, totals, terms, bank box) prints on one page;
+      // text and spacing shrink as needed for longer invoices.
+      fitOnePage: true,
       fileName: `Sales_Invoice_${docNo || 'Selected_Record'}`
     };
   }
@@ -8494,6 +8555,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // (migrations 272 / 274) so it holds across users, refreshes and machines.
   // Drafts, or a failed call, print without a copy type and are not counted.
   private printInvoiceWithCopyType(kind: 'salesInvoice' | 'purchaseInvoice', record: any, payload: GridExportPayload, mode: 'Pdf' | 'Print' | 'Open'): void {
+    if (kind === 'salesInvoice' && !this.hasPreviousBalanceRow(payload)) {
+      this.withSalesInvoicePreviousBalance(record, payload, withBalance =>
+        this.printInvoiceWithCopyType(kind, record, withBalance, mode));
+      return;
+    }
     const output = (copyType?: string) => this.exportService.pdf(this.exportDocument({ ...payload, copyType }), mode);
     const id = Number(record?.id);
     const status = this.normalizeKey(record?.status || '');
@@ -8520,6 +8586,36 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       });
   }
 
+  // Previous Balance on the printed Sales Invoice: what the customer still
+  // owes on earlier posted invoices (lower id than this one, so a reprint
+  // never counts later invoices) — the same outstanding list the screen
+  // footer and Customer Receipt read. Read at print time, not stored. If the
+  // list can't be read the invoice prints without the row.
+  private withSalesInvoicePreviousBalance(record: any, payload: GridExportPayload, done: (payload: GridExportPayload) => void): void {
+    const customerId = this.optionalNumber(record?.customer_id ?? record?.customerId) ?? this.customerForRecord(record)?.id;
+    const invoiceId = Number(record?.id) || 0;
+    const withRow = (balance: number): GridExportPayload => ({
+      ...payload,
+      summary: [...(payload.summary || []), ['Previous Balance', this.moneyValue(balance)]]
+    });
+    if (!customerId) {
+      done(withRow(0));
+      return;
+    }
+    this.paymentsService.getOutstandingInvoices('customer', Number(customerId))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: res => done(withRow((res?.data ?? [])
+          .filter(inv => !invoiceId || Number(inv.invoice_id) < invoiceId)
+          .reduce((sum, inv) => sum + (Number(inv.outstanding) || 0), 0))),
+        error: () => done(payload)
+      });
+  }
+
+  private hasPreviousBalanceRow(payload: GridExportPayload): boolean {
+    return (payload.summary || []).some(([label]) => label === 'Previous Balance');
+  }
+
   private exportDocument(payload: GridExportPayload) {
     return {
       title: payload.title,
@@ -8530,6 +8626,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       notes: payload.notes,
       notesLabel: payload.notesLabel,
       amountInWords: payload.amountInWords,
+      amountInWordsPosition: payload.amountInWordsPosition,
+      columnGroups: payload.columnGroups,
+      totalRow: payload.totalRow,
+      fitOnePage: payload.fitOnePage,
       copyType: payload.copyType,
       terms: payload.terms,
       bankDetails: payload.bankDetails,
@@ -11335,7 +11435,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // Sales / Purchase Invoice: the whole-rupee Grand Total under the line grid
   // and the Round Off that gets there. Lines are summed at paise the way the
   // server does (migration 275 stores the same round off on save).
-  invoiceRoundOffFooter(): { roundOff: string; grandTotal: string } | null {
+  invoiceRoundOffFooter(): { roundOff: string; grandTotal: string; grandTotalValue: number } | null {
     const key = this.config?.key;
     if (key !== 'salesInvoice' && key !== 'purchaseInvoice') return null;
     let total = 0;
@@ -11349,7 +11449,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const roundOff = this.roundLineAmount(grandTotal - total);
     return {
       roundOff: `${roundOff < 0 ? '-' : '+'}${Math.abs(roundOff).toFixed(2)}`,
-      grandTotal: `Rs. ${grandTotal.toLocaleString('en-IN')}`
+      grandTotal: `Rs. ${grandTotal.toLocaleString('en-IN')}`,
+      grandTotalValue: grandTotal
     };
   }
 
@@ -24265,7 +24366,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return this.parseCurrency(this.lineValue(row, needles));
   }
 
-  private optionalNumber(value: any): number | null {
+  protected optionalNumber(value: any): number | null {
     const n = Number(value);
     return Number.isFinite(n) && n > 0 ? n : null;
   }
