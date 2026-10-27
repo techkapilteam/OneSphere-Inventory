@@ -585,6 +585,7 @@ export interface PurchaseInvoice {
   remarks?: string;
   subtotal: number;
   tax_amount: number;
+  transport_charges?: number;
   total_amount: number;
   status: string;
   created_at?: string;
@@ -1440,6 +1441,7 @@ export class InventoryTransactionsService {
       payment_terms: r?.paymentTerms || r?.payment_terms,
       remarks: r?.remarks,
       subtotal: Number(r?.subtotal || 0), tax_amount: Number(r?.taxAmount || r?.tax_amount || 0),
+      transport_charges: Number(r?.transportCharges ?? r?.transport_charges ?? 0) || 0,
       total_amount: Number(r?.totalAmount || r?.total_amount || 0),
       status: r?.status || 'draft', created_at: r?.createdAt || r?.created_at,
       items: (r?.items || []).map((i: any) => ({
