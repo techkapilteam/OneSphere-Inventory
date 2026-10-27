@@ -228,7 +228,7 @@
               <!-- Previous: <span>Add, edit or remove rows directly here before saving this document.</span> -->
               <!-- <span>Rows come from the selected PI Reference. Edit Return Qty, or remove items you are not returning.</span> -->
               <!-- Previous: <span>Rows come from the selected PI Reference. Edit Return Qty, or remove items you are not returning.</span> -->
-              <span>The complete invoice is returned: every item with its full quantity and serial numbers.</span>
+              <span>Return any quantity up to the invoice quantity. For serial-tracked items choose the serial numbers being returned.</span>
             </div>
             <!-- Previous (Purchase Return is against a PI only, so no manual rows):
             <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" aria-label="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button> -->
@@ -255,8 +255,8 @@
                       <div class="inventory-row-actions">
                         <!-- Previous (Purchase Return is against a PI only, so no manual rows):
                         <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button> -->
-                        <!-- <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove row" (click)="removeEntryLineRow(rowIndex)"><i class="pi pi-trash"></i></button> -->
-                        <!-- 258: Purchase Return is the whole invoice - rows cannot be removed. -->
+                        <!-- 259: partial return - an item can be left out of the return. -->
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove row" (click)="removeEntryLineRow(rowIndex)"><i class="pi pi-trash"></i></button>
                       </div>
                     </td>
                     @let rowView = rowViews[rowIndex];
@@ -274,11 +274,10 @@
                               {{ serialPickerSummaryForRow(rowIndex, row) }}
                             </button> -->
                             } @else if (lineGridColumnIsSerialPicker(column) && isSerialApplicableRow(row)) {
-                            <!-- 258: whole-invoice return - every serial of the invoice goes back,
-                                 bound automatically, so it is shown read-only (no picker). -->
-                            <span class="inventory-grid-static-value" [title]="purchaseReturnRowSerialsText(rowIndex)">
+                            <!-- 259: partial return - the user chooses which serials go back. -->
+                            <button type="button" class="erp-btn btn-white btn-sm inventory-serial-trigger" [title]="purchaseReturnRowSerialsText(rowIndex)" (click)="openSerialPicker(rowIndex, row)">
                               {{ serialPickerSummaryForRow(rowIndex, row) }}
-                            </span>
+                            </button>
                           } @else if (lineGridColumnIsGstValue(column)) {
                             <div class="inventory-gst-cell" [class.inventory-gst-cell--included]="lineGstIncluded(rowIndex)">
                               <span class="inventory-gst-rate-pill">{{ lineGridGstPercentText(row, column) }}</span>

@@ -342,6 +342,13 @@ export class PaymentsService {
     );
   }
 
+  // Copy type (migration 276): counts one print of a posted Customer Receipt and
+  // returns the print count before it (0 = Original, more = Duplicate; null =
+  // Vendor Payment / cancelled, printed without a copy type).
+  markCustomerReceiptPrinted(id: number): Observable<ApiResponse<{ previousPrintCount: number | null }>> {
+    return this.http.post<ApiResponse<{ previousPrintCount: number | null }>>(this.url(`vouchers/${id}/printed`), {}, { headers: this.headers() });
+  }
+
   getPaymentVouchers(voucherType?: 'payment' | 'receipt', segmentId?: number | null): Observable<ApiResponse<PaymentVoucher[]>> {
     let params = new HttpParams();
     if (voucherType) params = params.set('voucherType', voucherType);

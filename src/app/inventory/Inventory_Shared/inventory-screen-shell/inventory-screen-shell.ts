@@ -10950,6 +10950,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   lineGridCellReadonly(rowIndex: number, row: string[], column: string): boolean {
+<<<<<<< HEAD
+    // 259: Purchase Return may return part of the invoice - Return Qty stays editable
+    // (any quantity up to what is still returnable; the server enforces the limit).
+=======
     // 258: Purchase Return is the whole invoice - once a PI is picked,
     // Return Qty is fixed to the invoice quantity and cannot be edited.
     if (this.config?.key === 'purchaseReturn' && this.formValues()['piId']) {
@@ -10958,6 +10962,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         return true;
       }
     }
+>>>>>>> 0646cff32ffebc37196f2e0468a5ae888a49f192
     if ((this.config?.key === 'salesInvoice' || this.config?.key === 'deliveryChallan') && this.normalizeKey(column) === 'warehouse') {
       return true;
     }
