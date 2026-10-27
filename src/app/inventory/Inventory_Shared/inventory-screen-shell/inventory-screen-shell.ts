@@ -25298,6 +25298,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           r.vendor_name || r.vendorName || '',
           r.warehouse_name || r.warehouseName || r.branch_name || r.branchName || this.branchNameFromRecord(r),
           r.grn_number || r.grnNumber || 'Direct',
+          // Transport Charges (migration 277), already included in Amount.
+          `Rs. ${Number(r.transport_charges ?? r.transportCharges ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
           `Rs. ${Number(r.total_amount ?? r.totalAmount ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
           r.due_date || r.dueDate || '',
           cap(r.status || 'draft')
