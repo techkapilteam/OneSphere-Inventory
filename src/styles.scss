@@ -15026,6 +15026,12 @@ body .ng-dropdown-panel.ap-switch-ng-select .ng-option.ng-option-selected::after
   padding: 0;
   min-width: 0;
 
+  // This wrapper sits inside .inventory-branch-form, so its 12px grid gap
+  // never reaches the section cards nested here -- restore the same gap.
+  > .inventory-fieldset + .inventory-fieldset {
+    margin-top: 12px;
+  }
+
   &:disabled {
     opacity: 0.65;
     pointer-events: none;
