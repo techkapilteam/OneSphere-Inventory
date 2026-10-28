@@ -81,6 +81,7 @@ interface GridExportPayload {
   fileName?: string;
   gstInvoiceLayout?: boolean;
   signatureBlock?: boolean;
+  signatures?: string[];
 }
 
 export interface PriceHintView {
@@ -7851,7 +7852,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   runGridToolbarAction(tableId: string, action: 'print' | 'pdf' | 'excel'): void {
-    const docStyledKeys = ['purchaseInvoice', 'salesInvoice', 'deliveryChallan'];
+    // Previous: const docStyledKeys = ['purchaseInvoice', 'salesInvoice', 'deliveryChallan'];
+    const docStyledKeys = ['purchaseInvoice', 'salesInvoice', 'deliveryChallan', 'salesReturn'];
     if ((action === 'print' || action === 'pdf') && tableId === 'records'
       && docStyledKeys.includes(this.config?.key || '') && !this.expandedGrnId()) {
       this.saveMsg.set(`Expand a ${this.config?.title || 'record'} row first, then use Print or PDF for the document format.`);
@@ -7927,8 +7929,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   private selectedExpandedDocumentExportPayload(): GridExportPayload | null {
     const key = this.config?.key || '';
+    // Previous: if (key !== 'goodsReceipt' && key !== 'purchaseInvoice' && key !== 'debitNote' && key !== 'creditNote'
+    //   && key !== 'salesInvoice' && key !== 'deliveryChallan') return null;
     if (key !== 'goodsReceipt' && key !== 'purchaseInvoice' && key !== 'debitNote' && key !== 'creditNote'
-      && key !== 'salesInvoice' && key !== 'deliveryChallan') return null;
+      && key !== 'salesInvoice' && key !== 'deliveryChallan' && key !== 'salesReturn') return null;
 
     const expandedId = this.expandedGrnId();
     if (!expandedId) return null;
@@ -7980,12 +7984,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         ? String(record.doc_number || record.docNumber || '')
         : key === 'deliveryChallan'
           ? String(record.dc_number || record.dcNumber || '')
-          : String(record.grn_number || record.grnNumber || '');
+          : key === 'salesReturn'
+            ? String(record.return_number || record.returnNumber || '')
+            : String(record.grn_number || record.grnNumber || '');
     const row = this.liveRows().find(candidate => candidate[0] === docNo) || [docNo];
     const columnDefs = this.grnExpandedColumns(row);
     const columns = columnDefs.map(column => column.label);
     const rows = this.grnExpandedItems(row)
       .map((item, index) => columnDefs.map(column => this.grnExpandedCell(item, column, index) || ''));
+
+    if (key === 'salesReturn') {
+      return this.salesReturnDocumentExportPayload(record, docNo, columns, rows);
+    }
 
     if (key === 'purchaseInvoice') {
       return this.purchaseInvoiceDocumentExportPayload(record, docNo, row, columns, rows);
@@ -8237,7 +8247,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['Vendor', vendorName],
       ['GSTIN', vendorGstin],
       ['Vendor Phone', String(vendor?.mobile || vendor?.contact_mobile || '')],
-      ['Vendor Address', String(vendor?.address || '')],
+      // Previous: ['Vendor Address', String(vendor?.address || '')],
+      // Full vendor address (address + City / District - Pincode) and State,
+      // same as the customer address on the Sales Invoice print.
+      // Previous: ['Vendor Address', this.partyFullAddress(vendor)],
+      // Title Case, same as the Bill To / Ship To address on the Sales Invoice print.
+      ['Vendor Address', toInventoryTitleCase(this.partyFullAddress(vendor))],
+      ['Vendor State', String(vendor?.state || this.partyPrimaryState(vendor) || '')],
       ['Branch / Warehouse', locationName],
       ['GRN Reference', String(record.grn_number || record.grnNumber || 'Direct')],
       ['Vendor Invoice No', String(record.vendor_invoice_no || record.vendorInvoiceNo || '')],
@@ -8437,16 +8453,22 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Delivery Address entered on the invoice (customer master address when
       // none was entered); Ship Address falls back to the delivery address.
       // Previous: ['Delivery Address', deliveryAddress || '-'],
-      ['Bill To Address', deliveryAddress || '-'],
+      // Addresses print in Title Case so the address line and City / District
+      // don't mix small and capital letters.
+      // Previous: ['Bill To Address', deliveryAddress || '-'],
+      ['Bill To Address', toInventoryTitleCase(deliveryAddress) || '-'],
       // Previous: ['Ship Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
-      ['Ship To Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
+      // Previous: ['Ship To Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
+      ['Ship To Address', toInventoryTitleCase(String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress) || '-'],
       // Previous position: after GSTIN No.
-      ['Place of Supply', String(record.place_of_supply || record.placeOfSupply || '').trim() || '-'],
+      // Place of Supply not required on the print.
+      // ['Place of Supply', String(record.place_of_supply || record.placeOfSupply || '').trim() || '-'],
       ['State', customerState || '-'],
       ['Warehouse', warehouseName],
       ['Vehicle No', String(record.vehicle_no || record.vehicleNo || '')],
-      ['SO Reference', soReference],
-      ['Payment Terms', String(record.payment_terms || record.paymentTerms || '')]
+      ['SO Reference', soReference]
+      // Payment Terms not required on the print.
+      // ['Payment Terms', String(record.payment_terms || record.paymentTerms || '')]
       // Header 'Status' removed from the Sales Invoice print.
       // Previous: ['Status', toInventoryTitleCase(String(record.status || 'draft'))],
       // Header 'Total' removed - the amount already prints as Grand Total below the grid.
@@ -8466,7 +8488,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // and no Round off row (Grand Total already includes any round off).
       // Previous: CGST + SGST rows (IGST only when inter-state), then
       // 'Round off' when non-zero.
-      ['IGST', this.moneyValue(totals.tax)]
+      // Previous: ['IGST', this.moneyValue(totals.tax)]
+      // Same-state customer (e.g. Telangana) -> CGST + SGST; other state -> IGST,
+      // using the same check as the item grid columns.
+      ...(totals.isInterstate
+        ? [['IGST', this.moneyValue(totals.igst)]]
+        : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]]) as Array<[string, string]>
     ];
     return {
       // Previous: title: `Sales Invoice - ${docNo || 'Selected Record'}`,
@@ -8520,6 +8547,93 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.moneyValue(item?.dispatch_qty ?? item?.dispatchQty ?? 0),
       this.grnExpandedValue(item, 'uom_name', 'uomName')
     ]);
+  }
+
+  // Sales Return prints in the same tax-invoice layout as the Sales Invoice:
+  // same grid, CGST + SGST (or IGST) split, totals and amount in words.
+  // Return lines carry return_qty / return_amount; they are mapped onto the
+  // invoice's qty / amount so the Sales Invoice row and total helpers apply.
+  private salesReturnDocumentExportPayload(
+    record: any,
+    docNo: string,
+    fallbackColumns: string[],
+    fallbackRows: string[][]
+  ): GridExportPayload {
+    const items = (record?.items || []).map((item: any) => ({
+      ...item,
+      qty: item?.return_qty ?? item?.returnQty ?? item?.qty ?? 0,
+      amount: item?.return_amount ?? item?.returnAmount ?? item?.amount ?? 0
+    }));
+    const invoiceShaped = { ...record, items };
+    const customer = this.customerForRecord(record);
+    const customerName = String(record.customer_name || record.customerName || customer?.customer_name || '');
+    const customerGstin = String(this.partyPrimaryGstin(customer) || '').trim();
+    const customerState = String(customer?.state || this.partyPrimaryState(customer) || '').trim();
+    const totals = this.salesInvoiceFinancials(invoiceShaped);
+    const isInterstate = totals.isInterstate;
+    const { rows, totalRow } = this.salesInvoiceDocumentRows(invoiceShaped, isInterstate);
+    const columns = ['S.No', 'Product Description', 'HSN/SAC Code', 'Qty', 'Rate', 'Amount', 'Disc.', 'Taxable Value',
+      ...(isInterstate ? ['Rate %', 'Amount'] : ['Rate %', 'Amount', 'Rate %', 'Amount']), 'TOTAL'];
+    const columnGroups: Array<[string, number]> = [
+      ['S.No', 1], ['Product Description', 1], ['HSN/SAC Code', 1], ['Qty', 1], ['Rate', 1], ['Amount', 1], ['Disc.', 1], ['Taxable Value', 1],
+      ...(isInterstate ? [['IGST', 2]] : [['CGST', 2], ['SGST', 2]]) as Array<[string, number]>,
+      ['TOTAL', 1]
+    ];
+    const billToAddress = toInventoryTitleCase(this.partyFullAddress(customer));
+    // Previous: const bank = this.invoiceBankDetails();
+    // Same order as the Sales Invoice header (two per row, '-' fallbacks keep
+    // the columns fixed): Return No / Date in place of Invoice No / Date, the
+    // original Invoice Reference in place of SO Reference.
+    const fields: Array<[string, string]> = [
+      ['Return No', docNo || '-'],
+      ['Return Date', this.fullYearDateDisplay(record.return_date || record.returnDate) || '-'],
+      ['Invoice Reference', String(record.invoice_number || record.invoiceNumber || '').trim() || 'Direct'],
+      ['Customer', customerName || '-'],
+      ['Customer Phone', String(customer?.mobile || '').trim() || '-'],
+      ['GSTIN No', customerGstin || '-'],
+      ['Bill To Address', billToAddress || '-'],
+      ['Ship To Address', billToAddress || '-'],
+      ['State', customerState || '-'],
+      ['Warehouse', String(record.return_to_warehouse_name || record.returnToWarehouseName || record.branch_name || record.branchName || '')],
+      ['Return Reason', String(record.return_reason || record.returnReason || '')]
+    ];
+    const summaryRows: Array<[string, string]> = [
+      ['Sub total', this.moneyValue(totals.gross)],
+      ['Discount', totals.discount ? `-${this.moneyValue(totals.discount)}` : this.moneyValue(0)],
+      ['Taxable amount', this.moneyValue(totals.taxable)],
+      ...(isInterstate
+        ? [['IGST', this.moneyValue(totals.igst)]]
+        : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]]) as Array<[string, string]>
+    ];
+    return {
+      // Previous: title: 'Sales Return',
+      title: 'Tax Invoice',
+      fields,
+      columns: rows.length ? columns : fallbackColumns,
+      rows: rows.length ? rows : fallbackRows,
+      columnGroups: rows.length ? columnGroups : undefined,
+      totalRow: rows.length ? totalRow : undefined,
+      summary: [...summaryRows, ['Grand Total', this.invoiceGrandTotalText(totals.total)]],
+      notes: String(record.remarks || ''),
+      notesLabel: 'Notes',
+      amountInWords: rupeesInWords(totals.total),
+      amountInWordsPosition: 'box',
+      // A return pays nothing to us, so no bank details, and the invoice
+      // Terms & Conditions ("Goods once sold cannot be taken back", interest
+      // on late payment) don't apply. Only the signature row is kept.
+      // Previous: terms: SALES_INVOICE_TERMS,
+      // Previous: bankDetails: [
+      //   ['Account Name', String(this.exportService.companyDetails()?.companyName || '').trim()],
+      //   ['Bank Name', bank?.bankName || ''],
+      //   ['Account No', bank?.accountNo || ''],
+      //   ['Branch Name', bank?.branchName || ''],
+      //   ['IFSC Code', bank?.ifscCode || '']
+      // ],
+      signatures: ['Customer Signature', 'Authorised Signatory'],
+      orientation: 'portrait',
+      fitOnePage: true,
+      fileName: `Sales_Return_${docNo || 'Selected_Record'}`
+    };
   }
 
   // DC is a price-free stock-movement document (rule: DC posting never moves
@@ -8660,6 +8774,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       orientation: payload.orientation,
       gstInvoiceLayout: payload.gstInvoiceLayout,
       signatureBlock: payload.signatureBlock,
+      signatures: payload.signatures,
       fileName: payload.fileName || payload.title
     };
   }
