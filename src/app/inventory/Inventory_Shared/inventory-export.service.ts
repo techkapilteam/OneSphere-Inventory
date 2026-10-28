@@ -253,6 +253,7 @@ export class InventoryExportService {
     mergeRow(periodRow.number, 1, half);
     mergeRow(periodRow.number, half + 1, numCols);
     periodRow.getCell(half + 1).alignment = { horizontal: 'right' };
+    periodRow.getCell(half + 1).font = { bold: true };
     for (let col = 1; col <= numCols; col++) {
       periodRow.getCell(col).border = { bottom: { style: 'medium' } };
     }
@@ -533,7 +534,9 @@ export class InventoryExportService {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
     if (document.periodText) doc.text(document.periodText, L_MARGIN, y);
+    doc.setFont('helvetica', 'bold');
     doc.text(`Branch : ${company?.branchName || ''}`, pageWidth - R_MARGIN, y, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
     y += 5;
     doc.setDrawColor(0, 0, 0);
     doc.line(L_MARGIN, y, pageWidth - R_MARGIN, y);
