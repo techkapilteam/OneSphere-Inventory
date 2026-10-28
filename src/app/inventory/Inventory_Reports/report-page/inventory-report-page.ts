@@ -698,8 +698,17 @@ export class InventoryReportPageComponent implements OnInit {
           groupRowIndexes.push(rows.length);
           rows.push(columns.map((column, index) => {
             if (index === 0) return `Subtotal: ${group.label}`;
+            const sumOf = (key: string) => group.rows.reduce((acc, row) => acc + this.numberValue(row[key]), 0);
+            // Stock Ledger subtotal: Balance Qty = Inward Qty - Outward Qty (user request).
+            if (this.report().key === 'stockLedger' && column.key === 'balanceQty') {
+              return this.formatCell(sumOf('inwardQty') - sumOf('outwardQty'), column);
+            }
+            // Stock Ledger subtotal: Total = Debit - Credit (user request).
+            if (this.report().key === 'stockLedger' && column.key === 'totalValue') {
+              return this.formatCell(sumOf('debitValue') - sumOf('creditValue'), column);
+            }
             if (!column.total) return '';
-            const sum = group.rows.reduce((acc, row) => acc + this.numberValue(row[column.key]), 0);
+            const sum = sumOf(column.key);
             return this.formatCell(sum, column);
           }));
         }
@@ -870,7 +879,10 @@ export class InventoryReportPageComponent implements OnInit {
   }
 
   private formatCurrency(value: number): string {
-    return `Rs. ${value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+    const amount = value.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+    // Stock Ledger shows plain amounts, no "Rs." prefix (user request).
+    if (this.report().key === 'stockLedger') return amount;
+    return `Rs. ${amount}`;
   }
 
   private formatSummaryValue(value: string | number | undefined, fallback: string): string {

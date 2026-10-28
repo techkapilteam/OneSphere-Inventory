@@ -130,14 +130,17 @@ describe('Inventory report registry — location column reads for both kinds of 
   it('labels the location column "Warehouse / Branch" on the stock reports', () => {
     expect(labelFor('warehouseWiseStock')).toBe('Warehouse / Branch');
     expect(labelFor('lowStockAlert')).toBe('Warehouse / Branch');
-    expect(labelFor('stockLedger')).toBe('Warehouse / Branch');
     expect(labelFor('batchSerialExpiry')).toBe('Warehouse / Branch');
+  });
+
+  it('does not show a location column on the Stock Ledger report', () => {
+    expect(labelFor('stockLedger')).toBeUndefined();
   });
 
   // Label-only change: the row field the column reads must stay 'warehouse',
   // because that is the key every one of these report payloads still returns.
   it('keeps the underlying column key as warehouse', () => {
-    for (const key of ['warehouseWiseStock', 'lowStockAlert', 'stockLedger', 'batchSerialExpiry']) {
+    for (const key of ['warehouseWiseStock', 'lowStockAlert', 'batchSerialExpiry']) {
       const report = INVENTORY_REPORTS.find(r => r.key === key);
       expect(report?.columns.some(c => c.key === 'warehouse')).toBe(true);
     }
