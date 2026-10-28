@@ -8076,9 +8076,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   private purchaseInvoiceFinancials(record: any): {
-    gross: number; discount: number; taxable: number; tax: number; cgst: number; sgst: number; igst: number; isInterstate: boolean; total: number; roundOff: number;
+    gross: number; discount: number; taxable: number; tax: number; cgst: number; sgst: number; igst: number; isInterstate: boolean; total: number; roundOff: number; transport: number;
   } {
     const computed = this.documentFinancials(record?.items || []);
+    // Header-level Transport Charges (migration 277), already in total_amount.
+    const transport = Number(record?.transport_charges ?? record?.transportCharges ?? 0) || 0;
     const storedTaxable = Number(record?.subtotal ?? record?.subTotal ?? 0) || 0;
     const storedTax = Number(record?.tax_amount ?? record?.taxAmount ?? 0) || 0;
     const total = Number(record?.total_amount ?? record?.totalAmount ?? 0) || (computed.taxable + computed.tax);
@@ -8104,7 +8106,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       igst: isInterstate ? tax : 0,
       isInterstate,
       total,
-      roundOff: total - (taxable + tax)
+      transport,
+      // Previous: roundOff: total - (taxable + tax)
+      roundOff: total - (taxable + tax + transport)
     };
   }
 
@@ -8251,6 +8255,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ...(totals.isInterstate
         ? [['IGST', this.moneyValue(totals.igst)]]
         : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]]),
+      // Transport Charges (migration 277), between GST and Round off.
+      ['Transport charges', this.moneyValue(totals.transport)],
       ['Round off', this.moneyValue(totals.roundOff)]
     ];
         // Point 4: amount in words in small letters: "Rupees three hundred and fifty four only".
@@ -11458,6 +11464,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (!preview) return;
       total += this.roundLineAmount(preview.total - preview.taxAmount) + this.roundLineAmount(preview.taxAmount);
     });
+    if (key === 'purchaseInvoice') total += this.purchaseInvoiceTransportCharges();
     total = this.roundLineAmount(total);
     const grandTotal = Math.round(total);
     const roundOff = this.roundLineAmount(grandTotal - total);
@@ -11466,6 +11473,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       grandTotal: `Rs. ${grandTotal.toLocaleString('en-IN')}`,
       grandTotalValue: grandTotal
     };
+  }
+
+  // Purchase Invoice: Transport Charges entered above Grand Total (header
+  // level, no GST). Added to the line total before the whole-rupee round off.
+  purchaseInvoiceTransportCharges(): number {
+    const amount = this.roundLineAmount(Number(this.formValues()['transportCharges'] || 0));
+    return Number.isFinite(amount) && amount > 0 ? amount : 0;
+  }
+
+  setPurchaseInvoiceTransportCharges(value: any): void {
+    const sanitized = this.sanitizeDecimalInput(value);
+    this.formValues.update(v => ({ ...v, transportCharges: sanitized }));
   }
 
   // Grand Total on a printed invoice: whole rupees once the invoice carries a
@@ -21666,7 +21685,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         dueDate: this.datePickerValue(record.due_date || record.dueDate),
         paymentTerms: record.payment_terms || record.paymentTerms || '',
         status: cap(record.status || 'draft'),
-        remarks: record.remarks || ''
+        remarks: record.remarks || '',
+        transportCharges: Number(record.transport_charges || 0) ? String(record.transport_charges) : ''
       });
       this.entryLineRowsKey.set(this.config.key);
       this.entryLineRows.set((record.items || []).map((item: any) => this.purchaseInvoiceItemToLineRow(item))
@@ -22972,6 +22992,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         payment_terms: v['paymentTerms'] || null,
         remarks: v['remarks'] || null,
         status: status(v['status'], 'draft'),
+        transport_charges: this.purchaseInvoiceTransportCharges(),
         items: this.purchasePiItems()
       };
     }
@@ -25277,6 +25298,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           r.vendor_name || r.vendorName || '',
           r.warehouse_name || r.warehouseName || r.branch_name || r.branchName || this.branchNameFromRecord(r),
           r.grn_number || r.grnNumber || 'Direct',
+          // Transport Charges (migration 277), already included in Amount.
+          `Rs. ${Number(r.transport_charges ?? r.transportCharges ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
           `Rs. ${Number(r.total_amount ?? r.totalAmount ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
           r.due_date || r.dueDate || '',
           cap(r.status || 'draft')

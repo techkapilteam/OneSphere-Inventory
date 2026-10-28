@@ -650,7 +650,24 @@ export class InventoryReportPageComponent implements OnInit {
     this.exportService.pdf(this.exportDocument(), 'Print');
   }
 
-  private exportDocument(): InventoryExportDocument {
+  // private exportDocument(): InventoryExportDocument {
+  //   const columns = this.visibleColumns();
+  //   const from = this.filterDateValue('fromDate');
+  //   const to = this.filterDateValue('toDate');
+  //   const pdfDate = (value: Date) => formatDate(value, 'dd-MMM-yyyy', 'en-US');
+  //   const periodText = from && to
+  //     ? `Between: ${pdfDate(from)} And ${pdfDate(to)}`
+  //     : from ? `From: ${pdfDate(from)}` : to ? `As on: ${pdfDate(to)}` : '';
+  //   return {
+  //     title: this.report().title,
+  //     columns: columns.map(column => column.label),
+  //     rows: this.sortedRows().map(row => columns.map(column => this.formatCell(row[column.key], column))),
+  //     periodText,
+  //     fileName: this.report().title
+  //   };
+  // }
+
+    private exportDocument(): InventoryExportDocument {
     const columns = this.visibleColumns();
     const from = this.filterDateValue('fromDate');
     const to = this.filterDateValue('toDate');
@@ -658,10 +675,42 @@ export class InventoryReportPageComponent implements OnInit {
     const periodText = from && to
       ? `Between: ${pdfDate(from)} And ${pdfDate(to)}`
       : from ? `From: ${pdfDate(from)}` : to ? `As on: ${pdfDate(to)}` : '';
+
+    // Previous: rows: this.sortedRows().map(row => columns.map(column => this.formatCell(row[column.key], column))),
+    // The export follows the screen's "Group by": a header line per group, its rows,
+    // then a subtotal line (columns marked total), like the on-screen grouping.
+    const rows: string[][] = [];
+    const groupRowIndexes: number[] = [];
+    const groupKey = this.groupBy();
+    const toCells = (row: InventoryReportRow) => columns.map(column => this.formatCell(row[column.key], column));
+
+    if (!groupKey) {
+      this.sortedRows().forEach(row => rows.push(toCells(row)));
+    } else {
+      const groupColumn = this.report().columns.find(column => column.key === groupKey);
+      this.groupedRows().forEach(group => {
+        groupRowIndexes.push(rows.length);
+        rows.push(columns.map((_, index) => index === 0
+          ? `${groupColumn?.label ? groupColumn.label + ': ' : ''}${group.label} (${group.rows.length} rows)`
+          : ''));
+        group.rows.forEach(row => rows.push(toCells(row)));
+        if (columns.some(column => column.total)) {
+          groupRowIndexes.push(rows.length);
+          rows.push(columns.map((column, index) => {
+            if (index === 0) return `Subtotal: ${group.label}`;
+            if (!column.total) return '';
+            const sum = group.rows.reduce((acc, row) => acc + this.numberValue(row[column.key]), 0);
+            return this.formatCell(sum, column);
+          }));
+        }
+      });
+    }
+
     return {
       title: this.report().title,
       columns: columns.map(column => column.label),
-      rows: this.sortedRows().map(row => columns.map(column => this.formatCell(row[column.key], column))),
+      rows,
+      groupRowIndexes,
       periodText,
       fileName: this.report().title
     };

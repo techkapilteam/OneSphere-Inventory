@@ -1411,7 +1411,8 @@ export const purchaseInvoiceConfig = transaction(
     // Invoice reads it from.
     lineColumns: ['Product', 'Variant', 'Attribute', 'UOM', 'Qty', 'Accepted Qty', 'Rate', 'MRP', 'Selling Price', 'Disc %', 'GST', 'Batch No', 'Serial No', 'Expiry Date', 'Amount'],
     lineRows: [],
-    columns: ['PI No', 'PI Date', 'Vendor', 'Warehouse / Branch', 'GRN Ref', 'Amount', 'Due Date', 'Status'],
+    // Previous: columns: ['PI No', 'PI Date', 'Vendor', 'Warehouse / Branch', 'GRN Ref', 'Amount', 'Due Date', 'Status'],
+    columns: ['PI No', 'PI Date', 'Vendor', 'Warehouse / Branch', 'GRN Ref', 'Transport Charges', 'Amount', 'Due Date', 'Status'],
     rows: []
   }
 );
