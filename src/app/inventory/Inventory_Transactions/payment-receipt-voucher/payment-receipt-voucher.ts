@@ -917,7 +917,14 @@ export class PaymentReceiptVoucherComponent {
       .join(', ');
     const cheque = this.chequeDetails(v);
     const summary: Array<[string, string]> = [];
-    if (hasBalance) summary.push(['Previous Balance', this.pdfAmt(v.previous_balance!)]);
+    // Current Balance = the invoices paid on this voucher (debit/credit notes left out).
+    const invoiceLines = (v.allocations || []).filter(a => a.invoice_type !== 'debit_note' && a.invoice_type !== 'credit_note');
+    const currentBalance = invoiceLines.reduce((s, a) => s + (Number(a.allocated_amount) || 0), 0);
+    // The stored previous_balance already includes this voucher's invoices, so
+    // they are taken out -- a vendor's first payment prints Previous Balance 0.
+    // Previous: if (hasBalance) summary.push(['Previous Balance', this.pdfAmt(v.previous_balance!)]);
+    if (hasBalance) summary.push(['Previous Balance', this.pdfAmt(Math.max(0, v.previous_balance! - currentBalance))]);
+    if (invoiceLines.length) summary.push(['Current Balance', this.pdfAmt(currentBalance)]);
     // Total Allocated = invoices minus applied debit/credit notes; the stored
     // total_allocated adds the notes on top, so it is only used when the
     // voucher has no allocation lines.
@@ -929,7 +936,7 @@ export class PaymentReceiptVoucherComponent {
           return s + (isNote ? -1 : 1) * (Number(a.allocated_amount) || 0);
         }, 0)
       : v.total_allocated;
-    summary.push(['Total Allocated', this.pdfAmt(totalAllocated)]);
+    summary.push(['Total Amount', this.pdfAmt(totalAllocated)]);
     if (hasBalance) summary.push(['Remaining Due', this.pdfAmt(v.remaining_due!)]);
     if (v.tds_amount) summary.push(['TDS', this.pdfAmt(v.tds_amount)]);
     if (v.tcs_amount) summary.push([`TCS${v.tcs_percentage ? ` (${v.tcs_percentage}%)` : ''}`, this.pdfAmt(v.tcs_amount)]);
