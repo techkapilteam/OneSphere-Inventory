@@ -918,7 +918,18 @@ export class PaymentReceiptVoucherComponent {
     const cheque = this.chequeDetails(v);
     const summary: Array<[string, string]> = [];
     if (hasBalance) summary.push(['Previous Balance', this.pdfAmt(v.previous_balance!)]);
-    summary.push(['Total Allocated', this.pdfAmt(v.total_allocated)]);
+    // Total Allocated = invoices minus applied debit/credit notes; the stored
+    // total_allocated adds the notes on top, so it is only used when the
+    // voucher has no allocation lines.
+    // Previous: summary.push(['Total Allocated', this.pdfAmt(v.total_allocated)]);
+    const allocLines = v.allocations || [];
+    const totalAllocated = allocLines.length
+      ? allocLines.reduce((s, a) => {
+          const isNote = a.invoice_type === 'debit_note' || a.invoice_type === 'credit_note';
+          return s + (isNote ? -1 : 1) * (Number(a.allocated_amount) || 0);
+        }, 0)
+      : v.total_allocated;
+    summary.push(['Total Allocated', this.pdfAmt(totalAllocated)]);
     if (hasBalance) summary.push(['Remaining Due', this.pdfAmt(v.remaining_due!)]);
     if (v.tds_amount) summary.push(['TDS', this.pdfAmt(v.tds_amount)]);
     if (v.tcs_amount) summary.push([`TCS${v.tcs_percentage ? ` (${v.tcs_percentage}%)` : ''}`, this.pdfAmt(v.tcs_amount)]);
