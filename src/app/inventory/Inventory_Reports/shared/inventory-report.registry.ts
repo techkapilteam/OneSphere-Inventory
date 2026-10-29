@@ -182,10 +182,8 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['referenceNo', 'Reference No'],
       ['productCode', 'Product Code'],
       ['productName', 'Product Name'],
-      // A stock location is a warehouse OR a branch from Round 1 onward — the
-      // column already carries whichever one the row belongs to, so the header
-      // says so. Label only; the row field stays 'warehouse'.
-      ['warehouse', 'Warehouse / Branch'],
+      // Previous: ['warehouse', 'Warehouse / Branch'],
+      // Warehouse / Branch column removed from Stock Ledger on user request.
       ['inwardQty', 'Inward Qty', 'number', true],
       ['outwardQty', 'Outward Qty', 'number', true],
       ['balanceQty', 'Balance Qty', 'number'],
