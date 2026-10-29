@@ -13,6 +13,7 @@ import { applyInventoryTextCase, inventoryTextCaseForField, inventoryTextCaseFor
 import { InventoryExportService } from '../inventory-export.service';
 import { rupeesInWords } from '../inventory-amount-in-words';
 import { InvoiceBankDetails, PaymentsService } from '../payments.service';
+import { CommonService } from '../../../core/services/Common/common.service';
 import { attachInventorySaveToast } from '../inventory-save-toast/inventory-save-toast.component';
 import {
   INVENTORY_KPIS,
@@ -325,6 +326,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // Bank block on the Sales Invoice print — loaded once in ngOnInit because
   // the export payload builders are synchronous.
   private readonly invoiceBankDetails = signal<InvoiceBankDetails | null>(null);
+  private readonly commonService = inject(CommonService);
+  // GST State Code by state name (normalized), from global.tbl_mst_state via
+  // /Common/getstate — loaded once in ngOnInit for the invoice prints.
+  private readonly gstStateCodes = signal<Record<string, string>>({});
+  // Reverse lookup (code -> state name), for a party with a GSTIN but no State.
+  private readonly gstStateNames = signal<Record<string, string>>({});
   private readonly destroyRef = inject(DestroyRef);
   private readonly elementRef = inject(ElementRef<HTMLElement>);
   // Item 26: optional — dozens of existing specs instantiate InventoryScreenShell
@@ -1691,6 +1698,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.paymentsService.getInvoiceBankDetails()
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe(details => this.invoiceBankDetails.set(details));
+    }
+    if (this.config?.key === 'salesInvoice' || this.config?.key === 'salesReturn') {
+      this.loadGstStateCodes();
     }
     // Item 26: must run before directEntryLineRows() below (and before the
     // rest of ngOnInit touches formValues/entryLineRows) — it restores a
@@ -3953,6 +3963,42 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private gstStateCodeFromGstin(gstin: string | null | undefined): string {
     const clean = String(gstin || '').trim();
     return /^\d{2}/.test(clean) ? clean.slice(0, 2) : '';
+  }
+
+  // India's states with their GST code from global.tbl_mst_state.
+  private loadGstStateCodes(): void {
+    this.commonService.getCountries().pipe(
+      concatMap(countries => {
+        const india = (countries || []).find((c: any) => /india/i.test(String(c?.country_name || '')));
+        return india ? this.commonService.getStates(india.tbl_mst_country_id) : of([]);
+      }),
+      catchError(() => of([])),
+      takeUntilDestroyed(this.destroyRef)
+    ).subscribe(states => {
+      const codes: Record<string, string> = {};
+      const names: Record<string, string> = {};
+      (states || []).forEach((s: any) => {
+        const stateName = String(s?.state_name || '').trim();
+        const code = String(s?.state_code ?? '').trim().padStart(2, '0');
+        if (!stateName || !Number(code)) return;
+        codes[this.normalizeKey(stateName)] = code;
+        names[code] = stateName;
+      });
+      this.gstStateCodes.set(codes);
+      this.gstStateNames.set(names);
+    });
+  }
+
+  // State name from a GSTIN's first two digits (state master lookup).
+  private gstStateNameFromGstin(gstin: string | null | undefined): string {
+    const code = this.gstStateCodeFromGstin(gstin);
+    return code ? (this.gstStateNames()[code] || '') : '';
+  }
+
+  // GST State Code for a party: the GSTIN's first two digits, else the
+  // state name looked up in the state master.
+  private gstStateCode(gstin: string | null | undefined, stateName: string | null | undefined): string {
+    return this.gstStateCodeFromGstin(gstin) || this.gstStateCodes()[this.normalizeKey(stateName || '')] || '';
   }
 
   // true => interstate (IGST); false => intrastate (CGST+SGST); null => not
@@ -8277,7 +8323,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     ];
         // Point 4: amount in words in small letters: "Rupees three hundred and fifty four only".
     const totalInWords = rupeesInWords(totals.total).toLowerCase();
-    const amountInWordsText = totalInWords ? totalInWords.charAt(0).toUpperCase() + totalInWords.slice(1) : '';
+    // Previous: const amountInWordsText = totalInWords ? totalInWords.charAt(0).toUpperCase() + totalInWords.slice(1) : '';
+    // Title Case, same as the Sales Invoice: "Rupees Three Hundred And Fifty Four Only".
+    const amountInWordsText = totalInWords.replace(/\b[a-z]/g, c => c.toUpperCase());
     return {
       title: `Purchase Invoice`,
       fields,
@@ -8408,8 +8456,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const customer = this.customerForRecord(record);
     const customerName = String(record.customer_name || record.customerName || customer?.customer_name || '');
     const customerGstin = String(record.customer_gstin || record.customerGstin || this.partyPrimaryGstin(customer) || '').trim();
+    // Previous: const customerState = String(customer?.state || this.partyPrimaryState(customer)
+    //   || record.place_of_supply || record.placeOfSupply || '').trim();
+    // State from the GSTIN's first two digits too, when the master has none.
     const customerState = String(customer?.state || this.partyPrimaryState(customer)
+      || this.gstStateNameFromGstin(customerGstin)
       || record.place_of_supply || record.placeOfSupply || '').trim();
+    const customerStateCode = this.gstStateCode(customerGstin, customerState);
     const warehouseName = String(record.warehouse_name || record.warehouseName || '');
     const deliveryAddress = String(record.delivery_address || record.deliveryAddress || '').trim()
       || this.partyFullAddress(customer);
@@ -8464,6 +8517,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Place of Supply not required on the print.
       // ['Place of Supply', String(record.place_of_supply || record.placeOfSupply || '').trim() || '-'],
       ['State', customerState || '-'],
+      ['State Code', customerStateCode || '-'],
       ['Warehouse', warehouseName],
       ['Vehicle No', String(record.vehicle_no || record.vehicleNo || '')],
       ['SO Reference', soReference]
@@ -8513,7 +8567,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Previous: amountInWords: rupeesInWords(totals.total),  (all capitals)
       // Previous: amountInWords: rupeesInWords(totals.total).toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase()),
       // Capitals again, as on the old invoice, in the box beside the totals.
-      amountInWords: rupeesInWords(totals.total),
+      // Previous: amountInWords: rupeesInWords(totals.total),
+      // Title Case: "Rupees Three Hundred And Fifty Four Only".
+      amountInWords: rupeesInWords(totals.total).toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase()),
       amountInWordsPosition: 'box',
       terms: SALES_INVOICE_TERMS,
       // Previous order: Bank Name, Branch Name, Account No, IFSC CODE.
@@ -8568,7 +8624,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const customer = this.customerForRecord(record);
     const customerName = String(record.customer_name || record.customerName || customer?.customer_name || '');
     const customerGstin = String(this.partyPrimaryGstin(customer) || '').trim();
-    const customerState = String(customer?.state || this.partyPrimaryState(customer) || '').trim();
+    // Previous: const customerState = String(customer?.state || this.partyPrimaryState(customer) || '').trim();
+    const customerState = String(customer?.state || this.partyPrimaryState(customer)
+      || this.gstStateNameFromGstin(customerGstin) || '').trim();
+    const customerStateCode = this.gstStateCode(customerGstin, customerState);
     const totals = this.salesInvoiceFinancials(invoiceShaped);
     const isInterstate = totals.isInterstate;
     const { rows, totalRow } = this.salesInvoiceDocumentRows(invoiceShaped, isInterstate);
@@ -8594,6 +8653,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['Bill To Address', billToAddress || '-'],
       ['Ship To Address', billToAddress || '-'],
       ['State', customerState || '-'],
+      ['State Code', customerStateCode || '-'],
       ['Warehouse', String(record.return_to_warehouse_name || record.returnToWarehouseName || record.branch_name || record.branchName || '')],
       ['Return Reason', String(record.return_reason || record.returnReason || '')]
     ];
@@ -8616,7 +8676,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       summary: [...summaryRows, ['Grand Total', this.invoiceGrandTotalText(totals.total)]],
       notes: String(record.remarks || ''),
       notesLabel: 'Notes',
-      amountInWords: rupeesInWords(totals.total),
+      // Previous: amountInWords: rupeesInWords(totals.total),
+      // Title Case, same as the Sales Invoice.
+      amountInWords: rupeesInWords(totals.total).toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase()),
       amountInWordsPosition: 'box',
       // A return pays nothing to us, so no bank details, and the invoice
       // Terms & Conditions ("Goods once sold cannot be taken back", interest
@@ -8732,9 +8794,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private withSalesInvoicePreviousBalance(record: any, payload: GridExportPayload, done: (payload: GridExportPayload) => void): void {
     const customerId = this.optionalNumber(record?.customer_id ?? record?.customerId) ?? this.customerForRecord(record)?.id;
     const invoiceId = Number(record?.id) || 0;
+    // Previous: const withRow = (balance: number): GridExportPayload => ({
+    //   ...payload,
+    //   summary: [...(payload.summary || []), ['Previous Balance', this.moneyValue(balance)]]
+    // });
+    // Current Balance = Previous Balance + this invoice's Grand Total, printed
+    // just below Previous Balance.
+    const invoiceTotal = this.salesInvoiceFinancials(record).total;
     const withRow = (balance: number): GridExportPayload => ({
       ...payload,
-      summary: [...(payload.summary || []), ['Previous Balance', this.moneyValue(balance)]]
+      summary: [
+        ...(payload.summary || []),
+        ['Previous Balance', this.moneyValue(balance)],
+        ['Current Balance', this.moneyValue(balance + invoiceTotal)]
+      ]
     });
     if (!customerId) {
       done(withRow(0));

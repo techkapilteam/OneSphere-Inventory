@@ -374,7 +374,8 @@ export class InventoryExportService {
         if (summary.length > 1) {
           const notes = String(document.notes || '').trim();
           const wordsCell = ws.getCell(firstSummaryRow + 1, 1);
-          wordsCell.value = [String(document.amountInWords || '').toUpperCase(), notes ? `${document.notesLabel || 'Notes'} : ${notes}` : '']
+          // Previous: wordsCell.value = [String(document.amountInWords || '').toUpperCase(), notes ? `${document.notesLabel || 'Notes'} : ${notes}` : '']
+          wordsCell.value = [String(document.amountInWords || ''), notes ? `${document.notesLabel || 'Notes'} : ${notes}` : '']
             .filter(Boolean).join('\n\n');
           wordsCell.alignment = { wrapText: true, vertical: 'top' };
           wordsCell.border = thin;
@@ -835,7 +836,9 @@ export class InventoryExportService {
     const labelWidth = 52;
     const valueWidth = 32;
     const s = this.pdfScale;
-    const leftText = [words.toUpperCase(), notes].filter(Boolean).join('\n\n');
+    // Previous: const leftText = [words.toUpperCase(), notes].filter(Boolean).join('\n\n');
+    // Printed as the caller passes it (Title Case for Sales Invoice / Return).
+    const leftText = [words, notes].filter(Boolean).join('\n\n');
     const body: any[][] = summary.map(([label, value], index) => {
       const cells: any[] = [`${label} :`, value];
       if (index === 0) cells.unshift({ content: 'Total Invoice Amount In Words', styles: { fontStyle: 'bold', fontSize: 10 * s } });
