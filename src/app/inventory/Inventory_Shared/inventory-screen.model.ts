@@ -2233,7 +2233,7 @@ export const materialIssueProductionConfig = transaction(
     ],
     lineTitle: 'Issued Materials',
     lineColumns: ['Raw Material', 'Variant', 'Attribute', 'UOM', 'Required Qty', 'Available Qty', 'Issued Qty', 'Batch / Lot No', 'Serial No'],
-    columns: ['Issue No', 'Issue Date', 'Production Ref', 'From WH', 'Items', 'Status']
+    columns: ['Issue No', 'Issue Date', 'Production Ref', 'From WH','Materials Issued', 'Items', 'Status']
   }
 );
 
