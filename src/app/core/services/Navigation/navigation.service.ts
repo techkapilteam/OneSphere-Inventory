@@ -158,6 +158,7 @@ export class NavigationService {
                 { id: 'sales-order-register', name: 'Sales Order Register', route: '/dashboard/inventory/reports/sales-order-register', group: 'Sales Reports' },
                 { id: 'delivery-challan-register', name: 'Delivery Challan Register', route: '/dashboard/inventory/reports/delivery-challan-register', group: 'Sales Reports' },
                 { id: 'sales-invoice-register', name: 'Sale Invoice Register', route: '/dashboard/inventory/reports/sales-invoice-register', group: 'Sales Reports' },
+                { id: 'dues-list', name: 'Dues List Report', route: '/dashboard/inventory/reports/dues-list', group: 'Customer & Supplier Reports' },
                 { id: 'hsn-summary', name: 'HSN/SAC Summary Report', route: '/dashboard/inventory/reports/hsn-summary', group: 'GST & Compliance Reports' },
                 { id: 'batch-serial-expiry', name: 'Batch / Serial / Expiry Report', route: '/dashboard/inventory/reports/batch-serial-expiry', group: 'Batch / Serial / Expiry Reports' },
                 { id: 'product-profitability', name: 'Product Profitability Report', route: '/dashboard/inventory/reports/product-profitability', group: 'Costing & Profitability Reports' },
