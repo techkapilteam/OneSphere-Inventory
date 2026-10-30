@@ -38,6 +38,7 @@ describe('PaymentReceiptVoucherComponent — TDS auto-apply for Services (item 2
     const stub: Partial<PaymentsService> = {
       getPaymentVouchers: () => of({ success: true, data: [] }) as any,
       getOutstandingInvoices: () => of({ success: true, data: [SERVICE_INVOICE, GOODS_INVOICE] }) as any,
+      getPartyLedgerBalance: () => of({ success: true, data: 0 }) as any,
       getTdsCodes: () => of({ success: true, data: tdsCodes }) as any,
       getAvailableNotes: () => of({ success: true, data: [] }) as any,
       // The component loads the Accounts bank/cheque-book masters on construction.

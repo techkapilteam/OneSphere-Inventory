@@ -110,6 +110,8 @@ export class PaymentReceiptVoucherComponent {
   readonly tcsPercentageInput = signal<string>('');
 
   readonly outstandingInvoices = signal<OutstandingInvoice[]>([]);
+  // Accounts ledger closing balance per selected party (party id -> balance).
+  readonly ledgerBalances = signal<Record<number, number>>({});
   readonly loadingInvoices = signal(false);
   readonly selectedInvoiceIds = signal<Set<number>>(new Set());
   readonly allocAmounts = signal<Record<number, number>>({});
@@ -222,8 +224,22 @@ export class PaymentReceiptVoucherComponent {
     return sum;
   });
 
+  // Previous Balance = the party's closing balance in the Accounts ledger,
+  // not just the unpaid invoices listed below (those leave out opening
+  // balance, on-account advances and unapplied notes).
+  readonly previousBalance = computed(() => {
+    const balances = this.ledgerBalances();
+    return this.selectedPartyIds().reduce((s, id) => s + (balances[id] || 0), 0);
+  });
+
   // Balance that will still be outstanding for this party once this voucher is posted.
-  readonly remainingOutstanding = computed(() => Math.max(0, this.totalOutstanding() - this.totalAllocated()));
+  // Only the amount paid (+ TDS on a payment) reaches the party's ledger; an
+  // applied Debit/Credit Note was already posted by its return, so taking the
+  // invoice allocation off would count the note twice.
+  // Previous: Math.max(0, this.totalOutstanding() - this.totalAllocated())
+  // Previous: Math.max(0, this.previousBalance() - this.totalAllocated())
+  readonly remainingOutstanding = computed(() => Math.max(0,
+    this.previousBalance() - this.modeTotal() - (this.mode() === 'pay' ? this.tdsAmount() : 0)));
 
   // GST embedded in the amount currently allocated to selected invoices,
   // split proportionally per invoice (an invoice's own tax_amount / total_amount ratio).
@@ -358,10 +374,14 @@ export class PaymentReceiptVoucherComponent {
       const rows = this.modeRows().filter(r => this.rowParty(r) === p.id);
       const modeTotal = rows.reduce((s, r) => s + (r.amount || 0), 0);
       const cashTotal = rows.filter(r => r.details.modeKey === 'cash').reduce((s, r) => s + (r.amount || 0), 0);
-      const previousBalance = this.outstandingInvoices()
-        .filter(inv => this.partyOfInvoice(inv.invoice_id) === p.id)
-        .reduce((s, inv) => s + inv.outstanding, 0);
-      const remainingDue = Math.max(0, previousBalance - allocated);
+      // Previous: sum of this customer's outstanding invoices
+      // const previousBalance = this.outstandingInvoices()
+      //   .filter(inv => this.partyOfInvoice(inv.invoice_id) === p.id)
+      //   .reduce((s, inv) => s + inv.outstanding, 0);
+      const previousBalance = this.ledgerBalances()[p.id] || 0;
+      // Previous: Math.max(0, previousBalance - allocated)
+      const tds = !multi && this.mode() === 'pay' ? this.tdsAmount() : 0;
+      const remainingDue = Math.max(0, previousBalance - modeTotal - tds);
       const reference = multi ? Math.max(0, allocated - notes) : this.referenceTotal();
       return { id: p.id, name: this.partyName(p), previousBalance, allocated, remainingDue, notes, reference, modeTotal, cashTotal, diff: modeTotal - reference };
     });
@@ -438,6 +458,7 @@ export class PaymentReceiptVoucherComponent {
     this.invoiceLoadsPending = 0;
     this.loadingInvoices.set(false);
     this.outstandingInvoices.set([]);
+    this.ledgerBalances.set({});
     this.invoicePartyIds.set({});
     this.selectedInvoiceIds.set(new Set());
     this.allocAmounts.set({});
@@ -528,6 +549,7 @@ export class PaymentReceiptVoucherComponent {
     // its invoice list is cleared.
     this.setSelectedInvoices(new Set());
     this.outstandingInvoices.set([]);
+    this.ledgerBalances.set({});
     this.invoicePartyIds.set({});
     this.allocAmounts.set({});
     this.availableNotes.set([]);
@@ -548,6 +570,7 @@ export class PaymentReceiptVoucherComponent {
     this.outstandingInvoices.update(rows => rows.filter(i => !goneInvoices.has(i.invoice_id)));
     this.allocAmounts.update(a => Object.fromEntries(Object.entries(a).filter(([id]) => !goneInvoices.has(+id))));
     this.invoicePartyIds.update(m => Object.fromEntries(Object.entries(m).filter(([, p]) => !gone.has(p))));
+    this.ledgerBalances.update(b => Object.fromEntries(Object.entries(b).filter(([id]) => !gone.has(+id))));
 
     const noteParty = this.notePartyIds();
     const goneNotes = new Set(this.availableNotes().filter(n => gone.has(noteParty[n.note_id])).map(n => n.note_id));
@@ -575,6 +598,12 @@ export class PaymentReceiptVoucherComponent {
         .subscribe({
           next: res => { if (isCurrent(partyId)) this.appendInvoices(partyId, res.data ?? []); loadDone(); },
           error: () => loadDone()
+        });
+      this.paymentsService.getPartyLedgerBalance(this.partyType(), partyId)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: res => { if (isCurrent(partyId)) this.ledgerBalances.update(b => ({ ...b, [partyId]: res.data ?? 0 })); },
+          error: () => {}
         });
       this.paymentsService.getAvailableNotes(this.partyType(), partyId)
         .pipe(takeUntilDestroyed(this.destroyRef))
@@ -922,9 +951,37 @@ export class PaymentReceiptVoucherComponent {
     const currentBalance = invoiceLines.reduce((s, a) => s + (Number(a.allocated_amount) || 0), 0);
     // The stored previous_balance already includes this voucher's invoices, so
     // they are taken out -- a vendor's first payment prints Previous Balance 0.
+    // An invoice already paid on an earlier posted voucher was part of the
+    // stored previous_balance before this one, so only first-time invoices
+    // are taken out of Previous Balance; repeat ones are taken off the Total.
+    const paidBefore = new Set(this.vouchers()
+      .filter(o => o.id < v.id && o.status === 'posted')
+      .flatMap(o => (o.allocations || []).map(a => `${a.invoice_type}:${a.invoice_id}`)));
+    const repeatAmount = invoiceLines
+      .filter(a => paidBefore.has(`${a.invoice_type}:${a.invoice_id}`))
+      .reduce((s, a) => s + (Number(a.allocated_amount) || 0), 0);
+    // Previous: const newAmount = currentBalance - repeatAmount;
+    // A first-time invoice counts at its full amount (falls back to the
+    // allocated amount when the list API did not return one), so Previous
+    // Balance is what was owed before that invoice -- e.g. R24 prints 0.
+    const newAmount = invoiceLines
+      .filter(a => !paidBefore.has(`${a.invoice_type}:${a.invoice_id}`))
+      .reduce((s, a) => s + (Number(a.invoice_amount) || Number(a.allocated_amount) || 0), 0);
     // Previous: if (hasBalance) summary.push(['Previous Balance', this.pdfAmt(v.previous_balance!)]);
-    if (hasBalance) summary.push(['Previous Balance', this.pdfAmt(Math.max(0, v.previous_balance! - currentBalance))]);
-    if (invoiceLines.length) summary.push(['Current Balance', this.pdfAmt(currentBalance)]);
+    // Previous: const previousShown = hasBalance ? Math.max(0, v.previous_balance! - currentBalance) : 0;
+    // Previous: const previousShown = hasBalance ? Math.max(0, v.previous_balance! - newAmount) : 0;
+    // Previous: const previousShown = hasBalance ? v.previous_balance! - newAmount : 0;
+    // Previous: if (hasBalance) summary.push(['Previous Balance', this.pdfAmt(previousShown)]);
+    // Ledger balance before this voucher's new invoices. A party that owed
+    // nothing but has a return/advance credit (MV996: PRT00008 -3,540) prints
+    // Previous Balance 0 and the credit on its own "Less" line, so the Total
+    // still matches the ledger.
+    const previousShown = hasBalance ? v.previous_balance! - newAmount : 0;
+    const priorCredit = Math.max(0, -previousShown);
+    if (hasBalance) summary.push(['Previous Balance', this.pdfAmt(Math.max(0, previousShown))]);
+    // Previous: if (invoiceLines.length) summary.push(['Current Balance', this.pdfAmt(currentBalance)]);
+    if (invoiceLines.length) summary.push(['Current Balance', this.pdfAmt(hasBalance ? newAmount + repeatAmount : currentBalance)]);
+    if (priorCredit) summary.push([`Less: ${isPay ? 'Purchase' : 'Sales'} Return / Advance`, this.pdfAmt(priorCredit)]);
     // Total Allocated = invoices minus applied debit/credit notes; the stored
     // total_allocated adds the notes on top, so it is only used when the
     // voucher has no allocation lines.
@@ -936,11 +993,29 @@ export class PaymentReceiptVoucherComponent {
           return s + (isNote ? -1 : 1) * (Number(a.allocated_amount) || 0);
         }, 0)
       : v.total_allocated;
-    summary.push(['Total Amount', this.pdfAmt(totalAllocated)]);
+    // Total Amount = Previous Balance + Current Balance for a first-time
+    // invoice, Previous Balance - Current Balance for one paid before
+    // (vouchers without a stored balance keep the allocated total).
+    // Previous: summary.push(['Total Amount', this.pdfAmt(totalAllocated)]);
+    // Previous: summary.push(['Total Amount', this.pdfAmt(hasBalance ? previousShown + currentBalance : totalAllocated)]);
+    // Previous: summary.push(['Total Amount', this.pdfAmt(hasBalance ? Math.max(0, previousShown + newAmount - repeatAmount) : totalAllocated)]);
+    summary.push(['Total Amount', this.pdfAmt(hasBalance ? previousShown + newAmount - repeatAmount : totalAllocated)]);
     if (hasBalance) summary.push(['Remaining Due', this.pdfAmt(v.remaining_due!)]);
     if (v.tds_amount) summary.push(['TDS', this.pdfAmt(v.tds_amount)]);
     if (v.tcs_amount) summary.push([`TCS${v.tcs_percentage ? ` (${v.tcs_percentage}%)` : ''}`, this.pdfAmt(v.tcs_amount)]);
     summary.push(['Net Amount', this.pdfAmt(v.net_amount)]);
+    // Vendor Payment prints only these four. Previous Balance = what was owed
+    // before this voucher's first-time invoices (floored at 0, MV996 -> 0);
+    // a repeat payment on the same invoice shows the full saved balance.
+    // Customer Receipt keeps the layout above.
+    if (isPay) {
+      summary.length = 0;
+      // Previous: if (hasBalance) summary.push(['Previous Balance', this.pdfAmt(v.previous_balance!)]);
+      if (hasBalance) summary.push(['Previous Balance', this.pdfAmt(Math.max(0, previousShown))]);
+      summary.push(['Total Allocated', this.pdfAmt(totalAllocated)]);
+      if (hasBalance) summary.push(['Remaining Due', this.pdfAmt(v.remaining_due!)]);
+      summary.push(['Net Amount', this.pdfAmt(v.net_amount)]);
+    }
     const title = isPay ? 'Payment Voucher' : 'Customer Receipt';
     // Previous: this.exportService.pdf({
     const exportDoc: InventoryExportDocument = {

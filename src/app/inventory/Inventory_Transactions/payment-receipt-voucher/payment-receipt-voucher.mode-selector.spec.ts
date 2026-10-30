@@ -33,6 +33,7 @@ describe('PaymentReceiptVoucherComponent — mode-of-payment integration (item 1
     const paymentsServiceStub: Partial<PaymentsService> = {
       getPaymentVouchers: () => of({ success: true, data: [] }) as any,
       getOutstandingInvoices: () => of({ success: true, data: [] }) as any,
+      getPartyLedgerBalance: () => of({ success: true, data: 0 }) as any,
       getTdsCodes: () => of({ success: true, data: [] }) as any,
       getVendorFyPurchaseSummary: () => of({ success: true, data: null }) as any,
       getAvailableNotes: () => of({ success: true, data: [] }) as any,

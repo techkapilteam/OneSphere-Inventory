@@ -191,7 +191,9 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['debitValue', 'Debit', 'currency', true],
       ['creditValue', 'Credit', 'currency', true],
       ['totalValue', 'Total', 'currency'],
-      ['remarks', 'Remarks']
+      // Previous: ['remarks', 'Remarks'],
+      // Renamed on user request; SP 279 now fills it with the vendor/customer name.
+      ['remarks', 'Purchase / Sale Details']
     ]),
     defaultGroupBy: 'productName',
     drillDown: true,

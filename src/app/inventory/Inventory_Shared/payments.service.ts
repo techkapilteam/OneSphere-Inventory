@@ -49,6 +49,8 @@ export interface PaymentVoucherAllocation {
   invoice_id: number;
   invoice_number?: string;
   allocated_amount: number;
+  // Full invoice amount in the party ledger (list API only).
+  invoice_amount?: number | null;
 }
 
 export interface AvailableNote {
@@ -296,7 +298,8 @@ export class PaymentsService {
         invoice_type: a?.invoiceType ?? a?.invoice_type,
         invoice_id: a?.invoiceId ?? a?.invoice_id,
         invoice_number: a?.invoiceNumber ?? a?.invoice_number,
-        allocated_amount: a?.allocatedAmount ?? a?.allocated_amount ?? 0
+        allocated_amount: a?.allocatedAmount ?? a?.allocated_amount ?? 0,
+        invoice_amount: a?.invoiceAmount ?? a?.invoice_amount ?? null
       })),
       modes: (r?.modes || []).map((m: any) => ({
         mode_key: m?.modeKey ?? m?.mode_key,
@@ -310,6 +313,14 @@ export class PaymentsService {
     const params = new HttpParams().set('partyType', partyType).set('partyId', String(partyId));
     return this.http.get<ApiResponse<any[]>>(this.url('outstanding-invoices'), { headers: this.headers(), params }).pipe(
       map(res => ({ ...res, data: (res.data ?? []).map(r => this.normOutstanding(r)) }))
+    );
+  }
+
+  // Party's closing balance in the Accounts ledger (vendor: what we owe, customer: what they owe).
+  getPartyLedgerBalance(partyType: 'vendor' | 'customer', partyId: number): Observable<ApiResponse<number>> {
+    const params = new HttpParams().set('partyType', partyType).set('partyId', String(partyId));
+    return this.http.get<ApiResponse<any>>(this.url('party-ledger-balance'), { headers: this.headers(), params }).pipe(
+      map(res => ({ ...res, data: Number(res.data) || 0 }))
     );
   }
 

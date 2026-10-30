@@ -25,6 +25,7 @@ describe('PaymentReceiptVoucherComponent — multiple customers on Customer Rece
     const stub: Partial<PaymentsService> = {
       getPaymentVouchers: () => of({ success: true, data: [] }) as any,
       getOutstandingInvoices: (_type: any, partyId: number) => of({ success: true, data: invoicesByCustomer[partyId] ?? [] }) as any,
+      getPartyLedgerBalance: () => of({ success: true, data: 0 }) as any,
       getTdsCodes: () => of({ success: true, data: [] }) as any,
       getVendorFyPurchaseSummary: () => of({ success: true, data: null }) as any,
       getAvailableNotes: () => of({ success: true, data: [] }) as any,
