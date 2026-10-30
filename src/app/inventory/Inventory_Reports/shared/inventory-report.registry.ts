@@ -437,6 +437,39 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       { invoiceDate: '2026-05-11', invoiceNo: 'INV-4479', customer: 'Aero Labs', variant: 'Motor Kit', attribute: 'Power: 2KW', taxableAmount: 960000, cgst: 86400, sgst: 86400, igst: 0, netAmount: 1132800, status: 'Draft' }
     ]
   }),
+  // Dues List: posted Sales Invoices still unpaid or part-paid as on the
+  // "Date To" (shown as "As on" in the PDF header). Fully paid invoices
+  // (Due = 0) are left out. Grouped customer-wise for now; once Sales Invoice
+  // saves the group-company branch, add region/customerBranch columns and
+  // switch defaultGroupBy to 'region'.
+  phaseOneReport({
+    key: 'duesList',
+    slug: 'dues-list',
+    title: 'Dues List Report',
+    groupId: 'customerSupplier',
+    endpoint: 'dues-list',
+    icon: 'pi pi-wallet',
+    purpose: 'Customer-wise list of unpaid and part-paid sales invoices with total, received and due amount as on a date.',
+    audience: ['Accountant', 'Sales', 'Business Owner'],
+    filters: ['branchId', 'toDate', 'customerId'],
+    columns: cols([
+      // Segment is auto-added to every report; hidden here to match the Dues List layout.
+      ['segment', 'Segment', 'text', false, false],
+      ['invoiceDate', 'Invoice Date', 'date'],
+      ['invoiceNo', 'Invoice No'],
+      ['customer', 'Customer'],
+      ['totalAmount', 'Total Amount', 'currency', true],
+      ['receivedAmount', 'Received', 'currency', true],
+      ['dueAmount', 'Due Amount', 'currency', true],
+      ['ageDays', 'Age (Days)', 'number']
+    ]),
+    defaultGroupBy: 'customer',
+    sampleRows: [
+      { invoiceDate: '2026-09-05', invoiceNo: 'CPINV1358/26', customer: 'Dakshin Infrastructures Private Limited', totalAmount: 40717, receivedAmount: 40027, dueAmount: 690, ageDays: 48 },
+      { invoiceDate: '2026-09-22', invoiceNo: 'CPINV1481/26', customer: 'Dakshin Infrastructures Private Limited', totalAmount: 24321, receivedAmount: 0, dueAmount: 24321, ageDays: 31 },
+      { invoiceDate: '2026-10-13', invoiceNo: 'CPINV1621/26', customer: 'Kapil Chits (Kakatiya) Private Limited', totalAmount: 11772, receivedAmount: 0, dueAmount: 11772, ageDays: 10 }
+    ]
+  }),
   phaseOneReport({
     key: 'pendingDocument',
     slug: 'pending-document',
