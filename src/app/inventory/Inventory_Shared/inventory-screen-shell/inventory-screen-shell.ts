@@ -25591,12 +25591,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           String(r.planned_qty ?? r.plannedQty ?? 0),
           cap(r.status || 'draft')
         ]);
-      case 'materialIssueProduction':
+        case 'materialIssueProduction':
         return records.map(r => [
           r.issue_number || r.issueNumber || '',
           r.issue_date || r.issueDate || '',
           r.production_plan_number || r.productionPlanNumber || '',
           r.from_warehouse_name || r.fromWarehouseName || r.from_branch_name || r.fromBranchName || '',
+          // New: the materials this issue gave out, e.g. "Brushless Motor × 2 Numbers, …"
+          this.materialIssueItemsSummary(r.items || []),
           String((r.items || []).length || 0),
           cap(r.status || 'draft')
         ]);
@@ -25623,4 +25625,21 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         return [];
     }
   }
+    // "Brushless Motor × 2 Numbers, Electronic Speed Controller × 2 Numbers"
+  // Quantity = what THIS issue gave out (issued qty), not the plan's requirement.
+  private materialIssueItemsSummary(items: any[]): string {
+    return (items || [])
+      .map(item => {
+        const name = String(item?.product_name ?? item?.productName ?? '').trim();
+        if (!name) return '';
+        const variant = String(item?.variant_name ?? item?.variantName ?? '').trim();
+        const qty = Number(item?.issued_qty ?? item?.issuedQty ?? 0);
+        const qtyText = Number.isFinite(qty) ? qty.toLocaleString('en-IN', { maximumFractionDigits: 3 }) : '0';
+        const uom = String(item?.uom_name ?? item?.uomName ?? '').trim();
+        return `${name}${variant ? ` (${variant})` : ''} × ${qtyText}${uom ? ` ${uom}` : ''}`;
+      })
+      .filter(Boolean)
+      .join(', ');
+  }
+
 }
