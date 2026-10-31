@@ -24,6 +24,7 @@
             <div class="erp-form-group">
               <label class="erp-label">{{ numField.label }}</label>
               <input class="erp-input" type="text"
+                readonly
                 [ngModel]="transactionNumberValue(numField)"
                 (ngModelChange)="collectFormField(numField.key, $event)"
                 [placeholder]="transactionNumberPlaceholder(numField)" />
@@ -38,6 +39,7 @@
                   (ngModelChange)="collectFormField(dateField.key, $event)"
                   [ngModelOptions]="{ standalone: true }"
                   [maxDate]="maxTransactionDate"
+                  [minDate]="minTransactionDate()"
                   dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY"
                   [readonlyInput]="true" [showIcon]="false" appendTo="body"
                   styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100">
@@ -84,7 +86,8 @@
               } @else if (field.key === 'warehouse') {
                 <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
                   [items]="grnReceivingLocationGroups()" bindLabel="label" bindValue="label" groupBy="group"
-                  [searchable]="true" [clearable]="true"
+                  [searchable]="!isLoginBranchLockedField(field)" [clearable]="!isLoginBranchLockedField(field)"
+                  [readonly]="isLoginBranchLockedField(field)"
                   [ngModel]="formFieldValue(field)"
                   (ngModelChange)="collectFormField(field.key, $event)"
                   placeholder="Select Warehouse or Branch">
@@ -207,6 +210,20 @@
                   </tr>
                 }
               </tbody>
+              <tfoot>
+                <tr class="inventory-line-total-row">
+                  <td class="text-center"></td>
+                  @for (column of config.lineColumns || []; track column; let first = $first) {
+                    <td>
+                      @if (first) {
+                        <strong>Total</strong>
+                      } @else {
+                        <strong>{{ lineFooterCellText(column) }}</strong>
+                      }
+                    </td>
+                  }
+                </tr>
+              </tfoot>
             </table>
           </div>
         </div>
@@ -300,7 +317,6 @@
             <button type="button" class="erp-btn btn-white btn-sm" title="Print"><i class="pi pi-print"></i></button>
             <button type="button" class="erp-btn btn-white btn-sm" title="Export PDF"><i class="pi pi-file-pdf"></i></button>
             <button type="button" class="erp-btn btn-white btn-sm" title="Export Excel"><i class="pi pi-file-excel"></i></button>
-            <button type="button" class="erp-btn btn-white btn-sm" title="Mail"><i class="pi pi-envelope"></i></button>
           }
           <span class="inventory-grid-divider"></span>
           <div class="inventory-grid-pager">
@@ -336,8 +352,8 @@
                 <td class="text-center">
                   <div class="inventory-row-actions">
                     @if (isAdmin()) {
-                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
-                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete"><i class="pi pi-trash"></i></button>
+                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" [disabled]="!canEditOrDeleteRow(row)" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
+                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" [disabled]="!canEditOrDeleteRow(row)"><i class="pi pi-trash"></i></button>
                     }
                   </div>
                 </td>

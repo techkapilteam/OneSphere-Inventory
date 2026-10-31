@@ -53,6 +53,7 @@
             <div class="erp-form-group">
               <label class="erp-label">{{ numField.label }}</label>
               <input class="erp-input" type="text"
+                readonly
                 [ngModel]="transactionNumberValue(numField)"
                 (ngModelChange)="collectFormField(numField.key, $event)"
                 [placeholder]="transactionNumberPlaceholder(numField)" />
@@ -67,6 +68,7 @@
                   (ngModelChange)="collectFormField(dateField.key, $event)"
                   [ngModelOptions]="{ standalone: true }"
                   [maxDate]="maxTransactionDate"
+                  [minDate]="minTransactionDate()"
                   dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY"
                   [readonlyInput]="true" [showIcon]="false" appendTo="body"
                   styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100">
@@ -126,6 +128,27 @@
                     <i class="pi pi-plus"></i>
                   </button>
                 }
+              </div>
+            </div>
+          }
+          <!-- Lead By: Global Contacts holding the "Lead By" role (Contacts
+               screen tab after Freelancer). "+" opens the contact form and
+               marks the new contact Lead By. -->
+          @if (referralBusinessEnabled() && bodyFieldByKey('leadBy'); as field) {
+            <div class="erp-form-group inventory-header-col-6">
+              <label class="erp-label">{{ field.label }}</label>
+              <div class="inventory-field-with-add">
+                <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+                  [items]="field.options || []" [searchable]="true" [clearable]="true"
+                  [ngModel]="formFieldValue(field)"
+                  (ngModelChange)="collectFormField(field.key, $event)"
+                  placeholder="Select Lead By">
+                </ng-select>
+                <button type="button" class="erp-btn btn-white btn-icon"
+                  title="Add Lead By Contact"
+                  (click)="openFieldAddMaster(field)">
+                  <i class="pi pi-plus"></i>
+                </button>
               </div>
             </div>
           }
@@ -190,9 +213,10 @@
           @if (bodyFieldByKey('warehouse'); as field) {
             <div class="erp-form-group">
               <label class="erp-label">{{ field.label }}</label>
+              <!-- Previous: [searchable]="true" [clearable]="true"  (Warehouse / Branch is now locked to the login branch) -->
               <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
                 [items]="grnReceivingLocationGroups()" bindLabel="label" bindValue="label" groupBy="group"
-                [searchable]="true" [clearable]="true"
+                [searchable]="true" [clearable]="false" [readonly]="true"
                 [ngModel]="formFieldValue(field)"
                 (ngModelChange)="collectFormField(field.key, $event)"
                 placeholder="Select Warehouse or Branch">
@@ -210,12 +234,12 @@
           <!-- Admin only: turning this on posts stock transfers between branches
                before the invoice saves, so it is not offered to ordinary branch
                users. interbranchSaleEnabled() enforces the same rule in code. -->
-          @if (isAdmin() && bodyFieldByKey('interbranchSale'); as swField) {
+          <!-- Interbranch Sale: shown to everyone, fixed at "No" (switch disabled). -->
+          @if (bodyFieldByKey('interbranchSale'); as swField) {
             <div class="erp-form-group">
               <label class="erp-label">{{ swField.label }}</label>
               <label class="inventory-labeled-switch yes-no">
-                <input type="checkbox" [checked]="fieldSwitchChecked(swField)"
-                  (change)="setFieldSwitchChecked(swField, $any($event.target).checked)" />
+                <input type="checkbox" [checked]="false" disabled />
                 <span class="inventory-switch-track">
                   <span class="switch-text switch-on">{{ fieldSwitchOnLabel(swField) }}</span>
                   <span class="switch-text switch-off">{{ fieldSwitchOffLabel(swField) }}</span>
@@ -236,7 +260,7 @@
           }
         </div>
 
-        <app-inventory-delivery-address [host]="this"></app-inventory-delivery-address>
+        <app-inventory-delivery-address [host]="this" [showShipAddress]="true"></app-inventory-delivery-address>
 
         <app-inventory-transport-details [host]="this"></app-inventory-transport-details>
 
@@ -344,6 +368,7 @@
               <thead>
                 <tr>
                   <th class="text-center">Actions</th>
+                  <th class="text-center">S.No</th>
                   @for (column of renderedColumns; track column) {
                     <th [class]="lineGridColumnCssClass(column)" [style.width]="lineGridColumnWidthPx(column)">
                       {{ lineGridColumnHeader(column) }}
@@ -361,6 +386,7 @@
                         <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove row" (click)="removeEntryLineRow(rowIndex)"><i class="pi pi-trash"></i></button>
                       </div>
                     </td>
+                    <td class="text-center">{{ rowIndex + 1 }}</td>
                     @let rowView = rowViews[rowIndex];
                     @for (column of renderedColumns; track column) {
                       @let columnIndex = lineGridSourceColumnIndex(column);
@@ -368,9 +394,9 @@
                       @let cellApplies = lineGridColumnAppliesToRow(row, rowIndex, column, rowView);
                       <td [class]="lineGridColumnCssClass(column)" [class.inventory-hint-anchor]="cellView?.stockHint || cellView?.priceHint">
                         @if (!cellApplies) {
-                          <span class="inventory-grid-na">ï¿½ N/A ï¿½</span>
+                          <span class="inventory-grid-na"> N/A </span>
                         } @else if (lineGridCellReadonly(rowIndex, row, column)) {
-                          <span class="inventory-grid-static-value">{{ lineGridReadonlyCellText(rowIndex, row, column, cellView, rowView) || 'ï¿½' }}</span>
+                          <span class="inventory-grid-static-value">{{ lineGridReadonlyCellText(rowIndex, row, column, cellView, rowView) || '' }}</span>
                         } @else if (lineGridColumnIsProduct(column)) {
                           <app-inventory-line-product-picker
                             [host]="this" [rowIndex]="rowIndex" [column]="column"
@@ -381,7 +407,7 @@
                         } @else if (lineGridColumnIsAttributeValue(column)) {
                           @if (lineGridAttributeSelection(rowView, column); as attr) {
                             @if (attr.isAuto) {
-                              <span class="inventory-grid-static-value">{{ attr.value || 'ï¿½' }}</span>
+                              <span class="inventory-grid-static-value">{{ attr.value || '' }}</span>
                             } @else {
                               <ng-select class="erp-ng-select inventory-ng-select inventory-grid-select inventory-attr-select" appendTo="body"
                                 [items]="attr.options" [searchable]="false" [clearable]="false"
@@ -390,7 +416,7 @@
                               </ng-select>
                             }
                           } @else {
-                            <span class="inventory-grid-empty-hint">ï¿½</span>
+                            <span class="inventory-grid-empty-hint"></span>
                           }
                         } @else if (lineGridColumnIsSerialPicker(column) && isSerialApplicableRow(row)) {
                           @if (isCurrentRecordPosted()) {
@@ -431,6 +457,11 @@
                             (ngModelChange)="setEntryLineCell(rowIndex, columnIndex, $event)"
                             [placeholder]="cellView?.placeholder || ''" />
                         }
+                        @if (cellApplies && salesInvoiceWarrantyHint(rowIndex, row, column); as warrantyHint) {
+                          <small class="inventory-stock-hint inventory-hint-info">
+                            <i class="pi pi-shield" style="font-size:9px"></i> {{ warrantyHint }}
+                          </small>
+                        }
                         @if (cellApplies && cellView?.stockHint; as stockHint) {
                           <small [class]="cellView?.stockHintClass">
                             <i class="pi pi-info-circle" style="font-size:9px"></i> {{ stockHint }}
@@ -453,18 +484,81 @@
                 }
               </tbody>
               <tfoot>
+                @let footerTotals = lineFooterTotals();
                 <tr class="inventory-line-total-row">
                   <td class="text-center"></td>
+                  <td></td>
                   @for (column of renderedColumns; track column) {
                     <td>
                       @if (column === 'Item / SKU') {
                         <strong>Total</strong>
+                      } @else if (column === 'Rate') {
+                        <strong [title]="'Total Value (Qty x Rate)'">{{ footerTotals.value }}</strong>
+                      } @else if (column === 'Disc %') {
+                        <strong [title]="'Total Discount'">{{ footerTotals.discount }}</strong>
+                      } @else if (column === 'GST') {
+                        <strong [title]="'GST Total'">{{ footerTotals.gst }}</strong>
                       } @else if (column === 'Amount') {
                         <strong>{{ lineColumnTotalByColumn(column) }}</strong>
                       }
                     </td>
                   }
                 </tr>
+                @let roundOffFooter = invoiceRoundOffFooter();
+                @if (roundOffFooter) {
+                  <tr class="inventory-line-total-row">
+                    <td class="text-center"></td>
+                    <td></td>
+                    @for (column of renderedColumns; track column) {
+                      <td>
+                        @if (column === 'Item / SKU') {
+                          <strong>Round Off</strong>
+                        } @else if (column === 'Amount') {
+                          <strong>{{ roundOffFooter.roundOff }}</strong>
+                        }
+                      </td>
+                    }
+                  </tr>
+                  <tr class="inventory-line-total-row">
+                    <td class="text-center"></td>
+                    <td></td>
+                    @for (column of renderedColumns; track column) {
+                      <td>
+                        @if (column === 'Item / SKU') {
+                          <strong>Grand Total</strong>
+                        } @else if (column === 'Amount') {
+                          <strong>{{ roundOffFooter.grandTotal }}</strong>
+                        }
+                      </td>
+                    }
+                  </tr>
+                  <tr class="inventory-line-total-row">
+                    <td class="text-center"></td>
+                    <td></td>
+                    @for (column of renderedColumns; track column) {
+                      <td>
+                        @if (column === 'Item / SKU') {
+                          <strong>Previous Balance</strong>
+                        } @else if (column === 'Amount') {
+                          <strong>{{ balanceText(previousBalance()) }}</strong>
+                        }
+                      </td>
+                    }
+                  </tr>
+                  <tr class="inventory-line-total-row">
+                    <td class="text-center"></td>
+                    <td></td>
+                    @for (column of renderedColumns; track column) {
+                      <td>
+                        @if (column === 'Item / SKU') {
+                          <strong>Total Balance</strong>
+                        } @else if (column === 'Amount') {
+                          <strong>{{ balanceText(previousBalance() + roundOffFooter.grandTotalValue) }}</strong>
+                        }
+                      </td>
+                    }
+                  </tr>
+                }
               </tfoot>
             </table>
           </div>
@@ -683,10 +777,9 @@
               [ngModel]="gridSearchText()" (ngModelChange)="setGridSearchText($event)" />
           }
           @if (showGridToolbarExportIcons()) {
-            <button type="button" class="erp-btn btn-white btn-sm" title="Print" (click)="runGridToolbarAction('records', 'print')"><i class="pi pi-print"></i></button>
-            <button type="button" class="erp-btn btn-white btn-sm" title="Export PDF" (click)="runGridToolbarAction('records', 'pdf')"><i class="pi pi-file-pdf"></i></button>
-            <button type="button" class="erp-btn btn-white btn-sm" title="Export Excel" (click)="runGridToolbarAction('records', 'excel')"><i class="pi pi-file-excel"></i></button>
-            <button type="button" class="erp-btn btn-white btn-sm" title="Mail" (click)="runGridToolbarAction('records', 'mail')"><i class="pi pi-envelope"></i></button>
+            <button type="button" class="erp-btn btn-white btn-sm" title="Print"><i class="pi pi-print"></i></button>
+            <button type="button" class="erp-btn btn-white btn-sm" title="Export PDF"><i class="pi pi-file-pdf"></i></button>
+            <button type="button" class="erp-btn btn-white btn-sm" title="Export Excel"><i class="pi pi-file-excel"></i></button>
           }
           <span class="inventory-grid-divider"></span>
           <div class="inventory-grid-pager">
@@ -729,10 +822,9 @@
                         <i class="pi pi-box"></i>
                       </button>
                     }
-                    @if (canEditOrDeleteRow(row)) {
-                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
-                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" (click)="cancelRecordByRow(row)"><i class="pi pi-trash"></i></button>
-                    }
+                    <!-- Saved Sales Invoices cannot be edited or deleted from the grid. -->
+                    <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" [disabled]="!canEditOrDeleteRow(row)" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
+                    <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" [disabled]="!canEditOrDeleteRow(row)" (click)="cancelRecordByRow(row)"><i class="pi pi-trash"></i></button>
                   </div>
                 </td>
                 @for (col of visibleRecordColumns(); track col.index) {
@@ -764,12 +856,12 @@
                                 @for (column of siColumns; track column.key) {
                                   <td>
                                     @if (column.key === 'product') {
-                                      <strong>{{ grnExpandedCell(item, column, i) || 'ï¿½' }}</strong>
+                                      <strong>{{ grnExpandedCell(item, column, i) || '' }}</strong>
                                       @if (grnExpandedProductSubtitle(item); as subtitle) {
                                         <br><small class="inventory-grid-subtitle">{{ subtitle }}</small>
                                       }
                                     } @else {
-                                      {{ grnExpandedCell(item, column, i) || 'ï¿½' }}
+                                      {{ grnExpandedCell(item, column, i) || '' }}
                                     }
                                   </td>
                                 }
@@ -819,7 +911,7 @@
                 <i class="pi pi-file-plus"></i> {{ directReferenceActionLabel() }}
               </button>
             }
-            <button type="button" class="erp-btn btn-white btn-icon btn-sm" (click)="closePurchaseReferencePicker()">
+            <button title="Close" type="button" class="erp-btn btn-white btn-icon btn-sm" (click)="closePurchaseReferencePicker()">
               <i class="pi pi-times"></i>
             </button>
           </span>
@@ -851,7 +943,7 @@
                           <i class="pi" [class.pi-chevron-down]="isRefPickerExpanded(referenceDocTrackKey(doc))" [class.pi-chevron-right]="!isRefPickerExpanded(referenceDocTrackKey(doc))"></i>
                         </button>
                       </td>
-                      @if (refPickerDocsHaveType()) { <td>{{ doc.doc_type || 'ï¿½' }}</td> }
+                      @if (refPickerDocsHaveType()) { <td>{{ doc.doc_type || '' }}</td> }
                       <td>{{ doc.doc_number }}</td>
                       <td>{{ gridDateDisplay(doc.doc_date) }}</td>
                       <td>{{ doc.party_name }}</td>

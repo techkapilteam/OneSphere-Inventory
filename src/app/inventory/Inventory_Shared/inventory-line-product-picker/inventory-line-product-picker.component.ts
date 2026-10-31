@@ -475,7 +475,9 @@ export class InventoryLineProductPickerComponent implements OnDestroy {
     const attrPairs = this.attrSelections()
       .filter(attr => String(attr.value || '').trim())
       .map(attr => ({ name: attr.name, value: attr.value }));
-    return this.host.productSubtitleFromParts(this.variantValue(), attrPairs);
+    // Previous: return this.host.productSubtitleFromParts(this.variantValue(), attrPairs);
+    const brand = this.host.productBrandForSummary?.(this.resolvedProduct()) || '';
+    return this.host.productSubtitleFromParts(this.variantValue(), attrPairs, brand);
   });
 
   // The method exists on every screen (it's on the shared shell), so its mere

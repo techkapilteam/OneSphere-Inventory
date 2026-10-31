@@ -1,16 +1,18 @@
-@if (host.activeAddMaster() === 'Contact Person' && host.addMasterSourceFieldKey() === 'partyIdentity' && !host.remoteContactFormFailed()) {
+<!-- Previous: @if (host.activeAddMaster() === 'Contact Person' && host.addMasterSourceFieldKey() === 'partyIdentity' && !host.remoteContactFormFailed()) { -->
+@if (host.usesRemoteContactForm()) {
   <app-remote-contact-add-host
     (saved)="host.onRemoteContactSaved($event)"
     (cancelled)="host.restoreParentModal()"
     (loadFailed)="host.remoteContactFormFailed.set(true)">
   </app-remote-contact-add-host>
 }
-@if (host.activeAddMaster() && !(host.activeAddMaster() === 'Contact Person' && host.addMasterSourceFieldKey() === 'partyIdentity' && !host.remoteContactFormFailed())) {
+<!-- Previous: @if (host.activeAddMaster() && !(host.activeAddMaster() === 'Contact Person' && host.addMasterSourceFieldKey() === 'partyIdentity' && !host.remoteContactFormFailed())) { -->
+@if (host.activeAddMaster() && !host.usesRemoteContactForm()) {
     <div class="inventory-modal-backdrop">
       <div class="inventory-modal" [class.inventory-modal--wide]="host.activeAddMaster() === 'Variant'">
         <div class="inventory-modal-header">
           <div>
-            <h3>{{ host.activeAddMaster() === 'New Segment' ? 'Add New Segment' : 'Add ' + host.activeAddMaster() }}</h3>
+            <h3>{{ host.activeAddMaster() === 'New Segment' ? 'Add New Segment' : host.activeAddMaster() === 'Serial Number Policy' ? 'Add Policy' : 'Add ' + host.activeAddMaster() }}</h3>
             <p>
               @if (host.activeAddMaster() === 'HSN / SAC') {
                 Search the uploaded HSN/SAC tax master while you type, or enter a new code manually.
@@ -33,8 +35,7 @@
               } @else if (host.activeAddMaster() === 'Manufacturer') {
                 Add only the manufacturer name for brand mapping. More manufacturer details can be added later if required.
               } @else if (host.activeAddMaster() === 'Serial Number Policy') {
-                Add a reusable serial/IMEI rule. Category can provide the default, and Product Master can override it.
-              } @else if (host.activeAddMaster() === 'Batch / Lot Policy') {
+                Add a reusable identifier (Serial No, IMEI, Chassis No, UIN ...). Capture stage and mandatory are set per category in Category Master.              } @else if (host.activeAddMaster() === 'Batch / Lot Policy') {
                 Add a reusable batch/lot rule for product-wise lot, expiry and QC tracking.
               } @else if (host.activeAddMaster() === 'Approval Workflow') {
                 Add a reusable approval workflow with approver role, level, threshold and escalation details.
@@ -43,7 +44,7 @@
               }
             </p>
           </div>
-          <button type="button" class="erp-btn btn-white btn-icon" (click)="host.closeAddMaster()"><i class="pi pi-times"></i></button>
+          <button title="Close" type="button" class="erp-btn btn-white btn-icon" (click)="host.closeAddMaster()"><i class="pi pi-times"></i></button>
         </div>
 
         <!-- Duplicate / suggestions — shown when typing a name in any quick-add that uses quickAddName -->
@@ -309,6 +310,9 @@
                 [ngModel]="host.formValues()['quickContactPan']"
                 (ngModelChange)="host.collectFormField('quickContactPan', $event)"
                 placeholder="AAAAA0000A" />
+              @if (host.panValidationMessage(host.formValues()['quickContactPan']); as panError) {
+              <div class="erp-field-error"><i class="pi pi-exclamation-circle"></i> {{ panError }}</div>
+              }
             </div>
             <div class="erp-form-group span-2"><label class="erp-label">Address <span class="erp-label-hint">optional</span></label>
               <textarea class="erp-input" rows="2"
@@ -523,7 +527,7 @@
               <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
                 [items]="['Text', 'Number', 'Date', 'Dropdown', 'Multi Select', 'Yes/No']"
                 [searchable]="true" [clearable]="false"
-                [ngModel]="host.formValues()['quickAttributeType'] || 'Text'"
+                [ngModel]="host.formValues()['quickAttributeType'] || 'Dropdown'"
                 (ngModelChange)="host.collectFormField('quickAttributeType', $event)"
                 placeholder="Select Attribute Type">
               </ng-select>
@@ -543,7 +547,7 @@
               <label class="erp-label">Mandatory Flag</label>
               <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
                 [items]="['Yes', 'No']" [searchable]="false" [clearable]="false"
-                [ngModel]="host.formValues()['quickAttributeMandatory'] || 'No'"
+                [ngModel]="host.formValues()['quickAttributeMandatory'] || 'Yes'"
                 (ngModelChange)="host.collectFormField('quickAttributeMandatory', $event)"
                 placeholder="Select Mandatory Flag">
               </ng-select>
@@ -654,7 +658,7 @@
           <div class="inventory-form-grid inventory-config-grid">
             <div class="erp-form-group">
               <label class="erp-label">Policy Name <span class="text-danger">*</span></label>
-              <input class="erp-input" type="text" [ngModel]="host.quickAddName()" (ngModelChange)="host.onQuickAddNameChange($event)" placeholder="IMEI Required / Auto Capture" />
+              <input class="erp-input" type="text" [ngModel]="host.quickAddName()" (ngModelChange)="host.onQuickAddNameChange($event)" placeholder="Serial No / IMEI / Chassis No / UIN" />
             </div>
             <div class="erp-form-group">
               <label class="erp-label">Policy Code</label>
@@ -664,10 +668,7 @@
               <label class="erp-label">Format Notes <span class="erp-label-hint">optional</span></label>
               <input class="erp-input" type="text" [ngModel]="host.formValues()['quickSerialFormat']" (ngModelChange)="host.collectFormField('quickSerialFormat', $event)" placeholder="Free-text reference note, e.g. 15-digit IMEI" />
             </div>
-            <div class="erp-form-group">
-              <label class="erp-label">Capture Stage</label>
-              <ng-select class="erp-ng-select inventory-ng-select" appendTo="body" [items]="['Purchase Inward', 'Sales Invoice', 'Both Inward and Sale', 'Warranty Registration']" [searchable]="true" [clearable]="true" [ngModel]="host.formValues()['quickCaptureStage']" (ngModelChange)="host.collectFormField('quickCaptureStage', $event)" placeholder="Select Stage"></ng-select>
-            </div>
+
           </div>
           @if (host.quickAddError()) { <p class="inventory-error-msg">{{ host.quickAddError() }}</p> }
         } @else if (host.activeAddMaster() === 'Batch / Lot Policy') {
@@ -738,7 +739,8 @@
             <div class="erp-form-group"><label class="erp-label">Mobile</label><input class="erp-input" type="tel" [ngModel]="host.formValues()['quickChannelPartnerMobile']" (ngModelChange)="host.collectFormField('quickChannelPartnerMobile', $event)" placeholder="Primary contact number" /></div>
             <div class="erp-form-group"><label class="erp-label">Email</label><input class="erp-input" type="email" [ngModel]="host.formValues()['quickChannelPartnerEmail']" (ngModelChange)="host.collectFormField('quickChannelPartnerEmail', $event)" placeholder="Channel partner email" /></div>
             <div class="erp-form-group"><label class="erp-label">GSTIN</label><input class="erp-input" type="text" [ngModel]="host.formValues()['quickChannelPartnerGstin']" (ngModelChange)="host.collectFormField('quickChannelPartnerGstin', $event)" placeholder="22AAAAA0000A1Z5 (if registered)" /></div>
-            <div class="erp-form-group"><label class="erp-label">PAN</label><input class="erp-input" type="text" [ngModel]="host.formValues()['quickChannelPartnerPan']" (ngModelChange)="host.collectFormField('quickChannelPartnerPan', $event)" placeholder="AAAAA0000A" /></div>
+            <!-- Previous: <div class="erp-form-group"><label class="erp-label">PAN</label><input class="erp-input" type="text" [ngModel]="host.formValues()['quickChannelPartnerPan']" (ngModelChange)="host.collectFormField('quickChannelPartnerPan', $event)" placeholder="AAAAA0000A" /></div> -->
+            <div class="erp-form-group"><label class="erp-label">PAN</label><input class="erp-input" type="text" [ngModel]="host.formValues()['quickChannelPartnerPan']" (ngModelChange)="host.collectFormField('quickChannelPartnerPan', $event)" [placeholder]="host.panPlaceholder()" /></div>
             <div class="erp-form-group"><label class="erp-label">Credit Limit</label><input class="erp-input" type="number" [ngModel]="host.formValues()['quickChannelPartnerCreditLimit']" (ngModelChange)="host.collectFormField('quickChannelPartnerCreditLimit', $event)" placeholder="0" /></div>
             <div class="erp-form-group span-2"><label class="erp-label">Address</label><textarea class="erp-input" rows="2" [ngModel]="host.formValues()['quickChannelPartnerAddress']" (ngModelChange)="host.collectFormField('quickChannelPartnerAddress', $event)" placeholder="Registered business address"></textarea></div>
             <div class="erp-form-group">
