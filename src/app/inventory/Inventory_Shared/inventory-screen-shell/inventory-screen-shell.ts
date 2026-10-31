@@ -13125,6 +13125,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return '';
   }
 
+  // Sales Invoice had no line-level check at all, so an invoice with an
+  // empty grid (or only blank rows, which salesLineItems() drops) saved.
+  private validateSalesInvoiceLineItems(items: any[]): string {
+    if (!Array.isArray(items) || !items.length) {
+      return 'Add at least one product line to the Sales Invoice before saving.';
+    }
+    for (const item of items) {
+      const productName = String(item?.product_name || '').trim();
+      if (!productName) return 'Every Sales Invoice line needs a Product selected.';
+      if ((Number(item?.qty) || 0) <= 0) return `"${productName}": Qty must be greater than zero.`;
+    }
+    return '';
+  }
+
   private isInwardStockControlQtyColumn(column: string): boolean {
     const key = this.normalizeKey(column);
     if (this.config?.key === 'goodsReceipt') {
@@ -25131,6 +25145,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         return 'Invoice No. is required for Sales Invoice.';
       }
       if (!hasValue(payload['doc_date'])) return 'Invoice Date is required for Sales Invoice.';
+      const invoiceItemsError = this.validateSalesInvoiceLineItems(payload['items']);
+      if (invoiceItemsError) return invoiceItemsError;
     }
 
     // The MRP-ceiling check that used to live here (validateSalesRateBounds)
