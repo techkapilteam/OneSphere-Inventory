@@ -228,7 +228,7 @@ export class InventoryExportService {
     };
 
     // Letterhead
-    bannerRow(company?.companyName || '', { bold: true, size: 15 }, 24);
+    bannerRow(company?.companyName || '', { bold: true, size: 12 }, 24);
     if (company?.registrationAddress) bannerRow(String(company.registrationAddress), { size: 9 }, 30);
     const cinGst = this.cinGstLine(company);
     if (cinGst) bannerRow(cinGst, { size: 9 });
@@ -240,7 +240,7 @@ export class InventoryExportService {
           base64: logo.includes(',') ? logo.split(',')[1] : logo,
           extension: format === 'PNG' ? 'png' : 'jpeg'
         });
-        ws.addImage(imageId, { tl: { col: 0, row: 0 }, ext: { width: 60, height: 60 } });
+        ws.addImage(imageId, { tl: { col: 0, row: 0 }, ext: this.logoSize(logo, 135, 60) });
       } catch {
         // An unreadable logo must not block the export.
       }
@@ -490,18 +490,11 @@ export class InventoryExportService {
     const centerX = pageWidth / 2;
     const company = this.companyDetails();
 
-    // Letterhead — first page only, same positions/fonts as Accounts.
-    const logo = company?.companyLogo || '';
-    if (logo) {
-      try {
-        doc.addImage(logo, this.imageFormat(logo), 10, 5, 20, 20);
-      } catch {
-        // An unreadable logo must not block the export.
-      }
-    }
+    // Letterhead — first page only. Company name is 12pt: smaller than the
+    // title, still larger than the 9pt address.
     doc.setTextColor('black');
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(15);
+    doc.setFontSize(12);
     doc.text(company?.companyName || '', centerX, 14, { align: 'center' });
 
     let y = 20;
@@ -520,6 +513,20 @@ export class InventoryExportService {
     }
     const cinGst = this.cinGstLine(company);
     if (cinGst) doc.text(cinGst, centerX, y, { align: 'center' });
+
+    // Logo sits vertically centred on the name/address/GST block (name cap
+    // top ~11mm to the GST baseline), never running into the title below.
+    const logo = company?.companyLogo || '';
+    if (logo) {
+      try {
+        const size = this.logoSize(logo, 45, 20);
+        const centred = (11 + y) / 2 - size.height / 2;
+        const logoY = Math.max(5, Math.min(centred, y + 2.5 - size.height));
+        doc.addImage(logo, this.imageFormat(logo), 10, logoY, size.width, size.height);
+      } catch {
+        // An unreadable logo must not block the export.
+      }
+    }
     y += 7;
 
     doc.setFont('helvetica', 'bold');
@@ -1181,6 +1188,22 @@ export class InventoryExportService {
     if (!match) return 'JPEG';
     const type = match[1].toUpperCase();
     return type === 'JPG' ? 'JPEG' : type;
+  }
+
+  // Fits the logo inside maxWidth x maxHeight keeping its proportions, so a
+  // square logo still prints 20x20 and a wide one (emblem + company name,
+  // e.g. ACE TECH) prints wide instead of being squashed into a square.
+  private logoSize(logo: string, maxWidth: number, maxHeight: number): { width: number; height: number } {
+    try {
+      const { width, height } = new jsPDF().getImageProperties(logo);
+      if (width > 0 && height > 0) {
+        const scale = Math.min(maxWidth / width, maxHeight / height);
+        return { width: width * scale, height: height * scale };
+      }
+    } catch {
+      // Unknown size: fall back to the old square box.
+    }
+    return { width: maxHeight, height: maxHeight };
   }
 
   private fileSafeName(value: string): string {
