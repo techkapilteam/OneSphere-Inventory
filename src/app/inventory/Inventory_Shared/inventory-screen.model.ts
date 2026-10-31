@@ -1308,7 +1308,7 @@ export const purchaseOrderConfig = transaction(
       { key: 'poDate', label: 'PO Date', type: 'date' },
       { key: 'expectedDelivery', label: 'Expected Delivery', type: 'date' },
       { key: 'linkedPr', label: 'RFQ Reference' },
-      { key: 'supplier', label: 'Party / Vendor', type: 'select', options: INVENTORY_OPTIONS.suppliers, addMaster: 'Vendor' },
+      { key: 'supplier', label: 'Party / Vendor', type: 'select', options: [], addMaster: 'Vendor' },
       { key: 'receivingWarehouse', label: 'Receiving WH', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
       { key: 'currency', label: 'Currency', type: 'select', options: INVENTORY_OPTIONS.currencies },
       { key: 'paymentTerms', label: 'Payment Terms', type: 'select', options: INVENTORY_OPTIONS.paymentTerms },
@@ -1348,7 +1348,7 @@ export const goodsReceiptConfig = transaction(
       { key: 'segment', label: 'Business Segment', type: 'select', options: INVENTORY_OPTIONS.segments, addMaster: 'Business Segment' },
       { key: 'grnNo', label: 'GRN Number' },
       { key: 'grnDate', label: 'GRN Date', type: 'date' },
-      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: INVENTORY_OPTIONS.suppliers, addMaster: 'Vendor' },
+      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: [], addMaster: 'Vendor' },
       { key: 'poReference', label: 'PO Reference / Direct' },
       { key: 'vendorInvoiceNo', label: 'Vendor Invoice No' },
       { key: 'vendorInvoiceDate', label: 'Vendor Invoice Date', type: 'date' },
@@ -1389,7 +1389,7 @@ export const purchaseInvoiceConfig = transaction(
       { key: 'segment', label: 'Business Segment', type: 'select', options: INVENTORY_OPTIONS.segments, addMaster: 'Business Segment' },
       { key: 'piNo', label: 'PI Number' },
       { key: 'piDate', label: 'PI Date', type: 'date' },
-      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: INVENTORY_OPTIONS.suppliers, addMaster: 'Vendor' },
+      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: [], addMaster: 'Vendor' },
       { key: 'grnReference', label: 'GRN Reference / Direct' },
       { key: 'vendorInvoiceNo', label: 'Vendor Invoice No' },
       { key: 'vendorInvoiceDate', label: 'Vendor Invoice Date', type: 'date' },
@@ -1439,7 +1439,7 @@ export const salesInvoiceConfig = transaction(
       { key: 'dueDate', label: 'Due Date', type: 'date' },
       { key: 'soReference', label: 'Reference', type: 'select', options: [] },
       { key: 'referenceNo', label: 'Reference' },
-      { key: 'customer', label: 'Party / Customer', type: 'select', options: INVENTORY_OPTIONS.customers, addMaster: 'Customer' },
+      { key: 'customer', label: 'Party / Customer', type: 'select', options: [], addMaster: 'Customer' },
       { key: 'channelPartner', label: 'Channel Partner', type: 'select', options: [], addMaster: 'Channel Partner' },
       // Global Contacts holding the "Lead By" role (Contacts screen tab after
       // Freelancer). "+" opens Add Global Contact and marks the new contact
@@ -1654,7 +1654,7 @@ export const vendorPaymentConfig = transaction(
   {
     screenMode: 'Payment settlement',
     fields: [
-      { key: 'vendor', label: 'Vendor', type: 'select', options: INVENTORY_OPTIONS.suppliers, addMaster: 'Vendor' },
+      { key: 'vendor', label: 'Vendor', type: 'select', options: [], addMaster: 'Vendor' },
       { key: 'voucherDate', label: 'Voucher Date', type: 'date' },
       { key: 'amountToPay', label: 'Amount To Pay', type: 'number' },
       { key: 'purchaseInvoice', label: 'Purchase Invoice Allocation', type: 'multiselect' },
@@ -1681,7 +1681,7 @@ export const customerReceiptConfig = transaction(
   {
     screenMode: 'Receipt settlement',
     fields: [
-      { key: 'customer', label: 'Customer', type: 'select', options: INVENTORY_OPTIONS.customers, addMaster: 'Customer' },
+      { key: 'customer', label: 'Customer', type: 'select', options: [], addMaster: 'Customer' },
       { key: 'voucherDate', label: 'Voucher Date', type: 'date' },
       { key: 'amountReceived', label: 'Amount Received', type: 'number' },
       { key: 'salesInvoice', label: 'Sales Invoice Allocation', type: 'multiselect' },
@@ -1747,7 +1747,7 @@ export const requestForQuotationConfig = transaction(
       { key: 'rfqNo', label: 'RFQ Number' },
       { key: 'rfqDate', label: 'RFQ Date', type: 'date' },
       { key: 'validTill', label: 'Valid Till', type: 'date' },
-      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: INVENTORY_OPTIONS.suppliers, addMaster: 'Vendor' },
+      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: [], addMaster: 'Vendor' },
       { key: 'prReference', label: 'PR Reference' },
       { key: 'currency', label: 'Currency', type: 'select', options: INVENTORY_OPTIONS.currencies },
       { key: 'deliveryLocation', label: 'Delivery Location', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
@@ -1787,7 +1787,7 @@ export const purchaseReturnConfig = transaction(
     fields: [
       { key: 'returnNo', label: 'Return Number' },
       { key: 'returnDate', label: 'Return Date', type: 'date' },
-      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: INVENTORY_OPTIONS.suppliers, addMaster: 'Vendor' },
+      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: [], addMaster: 'Vendor' },
       { key: 'piReference', label: 'PI Reference', type: 'select', options: [] },
       // Full Warehouse/Branch Independence: now the same merged Warehouse/
       // Branch picker GRN/PI/DC use (runtimeOptions() returns the merged
@@ -1833,7 +1833,7 @@ export const salesEnquiryConfig = transaction(
       { key: 'enquiryNo', label: 'Enquiry Number' },
       { key: 'enquiryDate', label: 'Enquiry Date', type: 'date' },
       { key: 'referenceNo', label: 'Reference' },
-      { key: 'customer', label: 'Party / Customer', type: 'select', options: INVENTORY_OPTIONS.customers, addMaster: 'Customer' },
+      { key: 'customer', label: 'Party / Customer', type: 'select', options: [], addMaster: 'Customer' },
       { key: 'contactPerson', label: 'Contact Person', type: 'select', options: INVENTORY_OPTIONS.contactPersons, addMaster: 'Contact Person' },
       { key: 'expectedDelivery', label: 'Expected Delivery', type: 'date' },
       { key: 'branch', label: 'Branch', type: 'select', options: INVENTORY_OPTIONS.branches },
@@ -1873,7 +1873,7 @@ export const salesQuotationConfig = transaction(
       { key: 'quotationNo', label: 'Quotation Number' },
       { key: 'quotationDate', label: 'Quotation Date', type: 'date' },
       { key: 'validTill', label: 'Valid Till', type: 'date' },
-      { key: 'customer', label: 'Party / Customer', type: 'select', options: INVENTORY_OPTIONS.customers, addMaster: 'Customer' },
+      { key: 'customer', label: 'Party / Customer', type: 'select', options: [], addMaster: 'Customer' },
       { key: 'priceList', label: 'Price List', type: 'select', options: ['Retail Price List', 'Dealer Price List', 'Corporate Price List'], addMaster: 'Price List' },
       { key: 'currency', label: 'Currency', type: 'select', options: INVENTORY_OPTIONS.currencies },
       { key: 'enquiryRef', label: 'Enquiry Reference' },
@@ -1910,7 +1910,7 @@ export const salesOrderConfig = transaction(
     fields: [
       { key: 'soNo', label: 'SO Number' },
       { key: 'soDate', label: 'SO Date', type: 'date' },
-      { key: 'customer', label: 'Party / Customer', type: 'select', options: INVENTORY_OPTIONS.customers, addMaster: 'Customer' },
+      { key: 'customer', label: 'Party / Customer', type: 'select', options: [], addMaster: 'Customer' },
       { key: 'creditSale', label: 'Credit Sale', type: 'select', options: ['Yes', 'No'] },
       { key: 'paymentTerms', label: 'Payment Terms', type: 'select', options: INVENTORY_OPTIONS.paymentTerms },
       { key: 'dueDate', label: 'Due Date', type: 'date' },
@@ -1946,7 +1946,7 @@ export const deliveryChallanConfig = transaction(
       { key: 'dcNo', label: 'DC Number' },
       { key: 'dcDate', label: 'DC Date', type: 'date' },
       { key: 'soReference', label: 'Reference (SO / Invoice)', type: 'select', options: [] },
-      { key: 'customer', label: 'Party / Customer', type: 'select', options: INVENTORY_OPTIONS.customers, addMaster: 'Customer' },
+      { key: 'customer', label: 'Party / Customer', type: 'select', options: [], addMaster: 'Customer' },
       { key: 'fromWarehouse', label: 'From Warehouse / Branch', type: 'select', options: [], addMaster: 'Location' },
       { key: 'vehicle', label: 'Vehicle', type: 'select', options: ['TS09AB1234', 'KA03CD7788', 'TS10RF4421'], addMaster: 'Vehicle' },
       { key: 'transporter', label: 'Transporter', type: 'select', options: ['BuildWell Logistics', 'Fresh Cold Chain', 'Own Fleet'], addMaster: 'Transporter' },
@@ -1983,7 +1983,7 @@ export const salesReturnConfig = transaction(
     fields: [
       { key: 'returnNo', label: 'Return Number' },
       { key: 'returnDate', label: 'Return Date', type: 'date' },
-      { key: 'customer', label: 'Party / Customer', type: 'select', options: INVENTORY_OPTIONS.customers, addMaster: 'Customer' },
+      { key: 'customer', label: 'Party / Customer', type: 'select', options: [], addMaster: 'Customer' },
       { key: 'invoiceReference', label: 'Invoice Reference', type: 'select', options: [] },
       // Previous: { key: 'returnToWarehouse', label: 'Return To Warehouse', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
       { key: 'returnToWarehouse', label: 'Return To Branch', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
@@ -2544,7 +2544,7 @@ export const debitNoteConfig = transaction(
     fields: [
       { key: 'debitNoteNo', label: 'Debit Note Number' },
       { key: 'debitNoteDate', label: 'Debit Note Date', type: 'date' },
-      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: INVENTORY_OPTIONS.suppliers, addMaster: 'Vendor' },
+      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: [], addMaster: 'Vendor' },
       { key: 'reference', label: 'Settlement Reference', type: 'select', options: ['Direct Debit Note'] },
       { key: 'reason', label: 'Reason', type: 'select', options: ['Purchase Return Settlement', 'Price Difference', 'Short Supply', 'Quality Deduction', 'Freight Overcharge', 'Direct Vendor Adjustment'] },
       { key: 'gstAdjustment', label: 'GST Adjustment', type: 'select', options: ['Yes', 'No'] },
