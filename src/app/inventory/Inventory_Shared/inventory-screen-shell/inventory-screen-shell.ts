@@ -7929,7 +7929,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   runGridToolbarAction(tableId: string, action: 'print' | 'pdf' | 'excel'): void {
     // Previous: const docStyledKeys = ['purchaseInvoice', 'salesInvoice', 'deliveryChallan'];
-    const docStyledKeys = ['purchaseInvoice', 'salesInvoice', 'deliveryChallan', 'salesReturn'];
+    // Previous: const docStyledKeys = ['purchaseInvoice', 'salesInvoice', 'deliveryChallan', 'salesReturn'];
+    const docStyledKeys = ['purchaseInvoice', 'salesInvoice', 'deliveryChallan', 'salesReturn', 'purchaseReturn'];
     if ((action === 'print' || action === 'pdf') && tableId === 'records'
       && docStyledKeys.includes(this.config?.key || '') && !this.expandedGrnId()) {
       this.saveMsg.set(`Expand a ${this.config?.title || 'record'} row first, then use Print or PDF for the document format.`);
@@ -8007,8 +8008,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const key = this.config?.key || '';
     // Previous: if (key !== 'goodsReceipt' && key !== 'purchaseInvoice' && key !== 'debitNote' && key !== 'creditNote'
     //   && key !== 'salesInvoice' && key !== 'deliveryChallan') return null;
+    // Previous: if (key !== 'goodsReceipt' && key !== 'purchaseInvoice' && key !== 'debitNote' && key !== 'creditNote'
+    //   && key !== 'salesInvoice' && key !== 'deliveryChallan' && key !== 'salesReturn') return null;
     if (key !== 'goodsReceipt' && key !== 'purchaseInvoice' && key !== 'debitNote' && key !== 'creditNote'
-      && key !== 'salesInvoice' && key !== 'deliveryChallan' && key !== 'salesReturn') return null;
+      && key !== 'salesInvoice' && key !== 'deliveryChallan' && key !== 'salesReturn' && key !== 'purchaseReturn') return null;
 
     const expandedId = this.expandedGrnId();
     if (!expandedId) return null;
@@ -8060,7 +8063,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         ? String(record.doc_number || record.docNumber || '')
         : key === 'deliveryChallan'
           ? String(record.dc_number || record.dcNumber || '')
-          : key === 'salesReturn'
+          // Previous: : key === 'salesReturn'
+          : key === 'salesReturn' || key === 'purchaseReturn'
             ? String(record.return_number || record.returnNumber || '')
             : String(record.grn_number || record.grnNumber || '');
     const row = this.liveRows().find(candidate => candidate[0] === docNo) || [docNo];
@@ -8071,6 +8075,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
     if (key === 'salesReturn') {
       return this.salesReturnDocumentExportPayload(record, docNo, columns, rows);
+    }
+
+    if (key === 'purchaseReturn') {
+      return this.purchaseReturnDocumentExportPayload(record, docNo, columns, rows);
     }
 
     if (key === 'purchaseInvoice') {
@@ -8752,6 +8760,80 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       orientation: 'portrait',
       fitOnePage: true,
       fileName: `Sales_Return_${docNo || 'Selected_Record'}`
+    };
+  }
+
+  // Purchase Return prints in the same layout as the Sales Return above, with
+  // the vendor in place of the customer and the PI as the reference. Return
+  // lines are mapped onto qty / amount so the Sales Invoice row helper applies;
+  // CGST + SGST vs IGST is decided against the vendor, as on the PI.
+  private purchaseReturnDocumentExportPayload(
+    record: any,
+    docNo: string,
+    fallbackColumns: string[],
+    fallbackRows: string[][]
+  ): GridExportPayload {
+    const items = (record?.items || []).map((item: any) => ({
+      ...item,
+      qty: item?.return_qty ?? item?.returnQty ?? item?.qty ?? 0,
+      amount: item?.return_amount ?? item?.returnAmount ?? item?.amount ?? 0
+    }));
+    const invoiceShaped = { ...record, items };
+    const vendor = this.vendorForRecord(record);
+    const vendorName = String(record.vendor_name || record.vendorName || vendor?.vendor_name || '');
+    const vendorGstin = String(record.vendor_gstin || record.vendorGstin || this.partyPrimaryGstin(vendor) || '').trim();
+    const vendorState = String(vendor?.state || this.partyPrimaryState(vendor)
+      || this.gstStateNameFromGstin(vendorGstin) || '').trim();
+    const vendorStateCode = this.gstStateCode(vendorGstin, vendorState);
+    const totals = this.purchaseInvoiceFinancials(invoiceShaped);
+    const isInterstate = totals.isInterstate;
+    const { rows, totalRow } = this.salesInvoiceDocumentRows(invoiceShaped, isInterstate);
+    const columns = ['S.No', 'Product Description', 'HSN/SAC Code', 'Qty', 'Rate', 'Amount', 'Disc.', 'Taxable Value',
+      ...(isInterstate ? ['Rate %', 'Amount'] : ['Rate %', 'Amount', 'Rate %', 'Amount']), 'TOTAL'];
+    const columnGroups: Array<[string, number]> = [
+      ['S.No', 1], ['Product Description', 1], ['HSN/SAC Code', 1], ['Qty', 1], ['Rate', 1], ['Amount', 1], ['Disc.', 1], ['Taxable Value', 1],
+      ...(isInterstate ? [['IGST', 2]] : [['CGST', 2], ['SGST', 2]]) as Array<[string, number]>,
+      ['TOTAL', 1]
+    ];
+    const vendorAddress = toInventoryTitleCase(this.partyFullAddress(vendor));
+    const fields: Array<[string, string]> = [
+      ['Return No', docNo || '-'],
+      ['Return Date', this.fullYearDateDisplay(record.return_date || record.returnDate) || '-'],
+      ['PI Reference', String(record.pi_number || record.piNumber || '').trim() || 'Direct'],
+      ['Vendor', vendorName || '-'],
+      ['Vendor Phone', String(vendor?.mobile || vendor?.contact_mobile || '').trim() || '-'],
+      ['GSTIN No', vendorGstin || '-'],
+      ['Bill To Address', vendorAddress || '-'],
+      ['Ship To Address', vendorAddress || '-'],
+      ['State', vendorState || '-'],
+      ['State Code', vendorStateCode || '-'],
+      ['Warehouse', String(record.warehouse_name || record.warehouseName || record.branch_name || record.branchName || '')],
+      ['Return Reason', String(record.return_reason || record.returnReason || '')]
+    ];
+    const summaryRows: Array<[string, string]> = [
+      ['Sub total', this.moneyValue(totals.gross)],
+      ['Discount', totals.discount ? `-${this.moneyValue(totals.discount)}` : this.moneyValue(0)],
+      ['Taxable amount', this.moneyValue(totals.taxable)],
+      ...(isInterstate
+        ? [['IGST', this.moneyValue(totals.igst)]]
+        : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]]) as Array<[string, string]>
+    ];
+    return {
+      title: 'Tax Invoice',
+      fields,
+      columns: rows.length ? columns : fallbackColumns,
+      rows: rows.length ? rows : fallbackRows,
+      columnGroups: rows.length ? columnGroups : undefined,
+      totalRow: rows.length ? totalRow : undefined,
+      summary: [...summaryRows, ['Grand Total', this.invoiceGrandTotalText(totals.total)]],
+      notes: String(record.remarks || ''),
+      notesLabel: 'Notes',
+      amountInWords: rupeesInWords(totals.total).toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase()),
+      amountInWordsPosition: 'box',
+      signatures: ['Vendor Signature', 'Authorised Signatory'],
+      orientation: 'portrait',
+      fitOnePage: true,
+      fileName: `Purchase_Return_${docNo || 'Selected_Record'}`
     };
   }
 
@@ -13104,6 +13186,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (invoiceQty > 0 && returnQty > invoiceQty) {
         return `"${productName}": Return Qty cannot be greater than Invoice Qty.`;
       }
+    }
+    return '';
+  }
+
+  // Sales Invoice had no line-level check at all, so an invoice with an
+  // empty grid (or only blank rows, which salesLineItems() drops) saved.
+  private validateSalesInvoiceLineItems(items: any[]): string {
+    if (!Array.isArray(items) || !items.length) {
+      return 'Add at least one product line to the Sales Invoice before saving.';
+    }
+    for (const item of items) {
+      const productName = String(item?.product_name || '').trim();
+      if (!productName) return 'Every Sales Invoice line needs a Product selected.';
+      if ((Number(item?.qty) || 0) <= 0) return `"${productName}": Qty must be greater than zero.`;
     }
     return '';
   }
@@ -25117,6 +25213,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         return 'Invoice No. is required for Sales Invoice.';
       }
       if (!hasValue(payload['doc_date'])) return 'Invoice Date is required for Sales Invoice.';
+      const invoiceItemsError = this.validateSalesInvoiceLineItems(payload['items']);
+      if (invoiceItemsError) return invoiceItemsError;
     }
 
     // The MRP-ceiling check that used to live here (validateSalesRateBounds)

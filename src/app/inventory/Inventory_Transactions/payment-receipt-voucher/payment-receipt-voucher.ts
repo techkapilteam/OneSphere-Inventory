@@ -1039,15 +1039,17 @@ export class PaymentReceiptVoucherComponent {
       // Always print the Narration line, even when none was entered.
       notes: v.narration || '-',
       notesLabel: 'Narration',
-      // Customer Receipt: Narration printed inside a box.
-      notesBoxed: !isPay,
+      // Narration printed inside a box (Vendor Payment and Customer Receipt).
+      // Previous: notesBoxed: !isPay,
+      notesBoxed: true,
       // Payment vouchers and customer receipts both get a receiver's signature
       // slot. It goes first because the export prints signedBy above the LAST
       // caption (Posted By).
       signatures: ["(Receiver's Signature)", '(Approved By)', '(Verified By)', '(Posted By)'],
       signedBy: this.exportService.userName(),
-      // Customer Receipt: signature row at the bottom of the page.
-      ...(isPay ? {} : { signaturesAtBottom: true }),
+      // Signature row in the lower part of the page (Vendor Payment and Customer Receipt).
+      // Previous: ...(isPay ? {} : { signaturesAtBottom: true }),
+      signaturesAtBottom: true,
       orientation: 'portrait',
       fileName: `${title} ${v.voucher_number || ''}`.trim()
     // Previous: }, action);
