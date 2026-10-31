@@ -715,6 +715,14 @@ export class InventoryReportPageComponent implements OnInit {
       });
     }
 
+    // Dues List: Grand Total line after the last group (Total / Received / Due),
+    // same figures as the on-screen footer (user request).
+    if (this.report().key === 'duesList' && rows.length && columns.some(column => column.total)) {
+      const totals = this.totals();
+      groupRowIndexes.push(rows.length);
+      rows.push(columns.map((column, index) => index === 0 ? 'Grand Total' : (column.total ? totals[column.key] ?? '' : '')));
+    }
+
     return {
       title: this.report().title,
       columns: columns.map(column => column.label),
