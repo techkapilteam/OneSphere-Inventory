@@ -1204,7 +1204,21 @@ export class InventoryExportService {
     };
     const authUser = read('authUser');
     const currentUser = read('currentUser');
-    return String(authUser.fullName || currentUser.pEmployeeName || sessionStorage.getItem('username') || '');
+    // Previous: return String(authUser.fullName || currentUser.pEmployeeName || sessionStorage.getItem('username') || '');
+    // Auto-created logins store a placeholder as full_name -- the branch name
+    // (branch logins) or "{CompanyName} Admin" (company registration without
+    // the admin's first/last name; the company may not be the one switched
+    // to now). For those the login's username is printed instead.
+    const norm = (s: unknown) => String(s || '').trim().toLowerCase();
+    const company = read('authCompany');
+    let branches: Array<{ branchName?: string }> = [];
+    try { branches = JSON.parse(sessionStorage.getItem('authBranches') || '[]') || []; } catch { branches = []; }
+    const fullName = norm(authUser.fullName);
+    const isOrgName = !!fullName &&
+      (fullName === norm(company.companyName) || fullName.endsWith(' admin') ||
+        branches.some(b => norm(b?.branchName) === fullName));
+    const username = authUser.username || sessionStorage.getItem('username');
+    return String((isOrgName ? username : authUser.fullName) || currentUser.pEmployeeName || username || '');
   }
 
   private imageFormat(dataUrl: string): string {
