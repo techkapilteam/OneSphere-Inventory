@@ -490,19 +490,30 @@ export class InventoryExportService {
     const centerX = pageWidth / 2;
     const company = this.companyDetails();
 
+    // The centred letterhead text keeps clear of the logo on both sides, so a
+    // wide logo (ACE TECH, 45mm) no longer prints over the start of the address.
+    const logo = company?.companyLogo || '';
+    const logoBox = logo ? this.logoSize(logo, 45, 20) : null;
+    const textWidth = Math.min(pageWidth - 70, pageWidth - 2 * (10 + (logoBox?.width || 0) + 3));
+
     // Letterhead — first page only. Company name is 12pt: smaller than the
     // title, still larger than the 9pt address.
     doc.setTextColor('black');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(12);
-    doc.text(company?.companyName || '', centerX, 14, { align: 'center' });
+    const nameLines = doc.splitTextToSize(company?.companyName || '', textWidth) as string[];
+    let y = 14;
+    nameLines.forEach((line, index) => {
+      if (index) y += 5;
+      doc.text(line, centerX, y, { align: 'center' });
+    });
 
-    let y = 20;
+    y += 6;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     const address = String(company?.registrationAddress || '').trim();
     if (address) {
-      const lines = doc.splitTextToSize(address, pageWidth - 70) as string[];
+      const lines = doc.splitTextToSize(address, textWidth) as string[];
       lines.forEach(line => {
         doc.text(line, centerX, y, { align: 'center' });
         y += 4.5;
@@ -512,14 +523,19 @@ export class InventoryExportService {
       y += 6;
     }
     const cinGst = this.cinGstLine(company);
-    if (cinGst) doc.text(cinGst, centerX, y, { align: 'center' });
+    if (cinGst) {
+      const lines = doc.splitTextToSize(cinGst, textWidth) as string[];
+      lines.forEach((line, index) => {
+        if (index) y += 4.5;
+        doc.text(line, centerX, y, { align: 'center' });
+      });
+    }
 
     // Logo sits vertically centred on the name/address/GST block (name cap
     // top ~11mm to the GST baseline), never running into the title below.
-    const logo = company?.companyLogo || '';
-    if (logo) {
+    if (logo && logoBox) {
       try {
-        const size = this.logoSize(logo, 45, 20);
+        const size = logoBox;
         const centred = (11 + y) / 2 - size.height / 2;
         const logoY = Math.max(5, Math.min(centred, y + 2.5 - size.height));
         doc.addImage(logo, this.imageFormat(logo), 10, logoY, size.width, size.height);
