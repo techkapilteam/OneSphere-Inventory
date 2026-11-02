@@ -74,6 +74,8 @@ export interface InventoryExportDocument {
   signatureBlock?: boolean;
     /** Rows (indexes in `rows`) that are group headers / subtotals: printed bold and shaded. */
   groupRowIndexes?: number[];
+  /** PDF only: print every body row of the main table in bold. */
+  boldRows?: boolean;
 }
 
 const HEADER_COLOR = '#0b4093';
@@ -524,9 +526,19 @@ export class InventoryExportService {
     } else {
       y += 6;
     }
-    const cinGst = this.cinGstLine(company);
-    if (cinGst) {
-      const lines = doc.splitTextToSize(cinGst, textWidth) as string[];
+    // CIN, GST NO and PAN each on their own line, so a wrap never splits a
+    // label from its number.
+    // Previous: const cinGst = this.cinGstLine(company);
+    // Previous: if (cinGst) {
+    // Previous:   const lines = doc.splitTextToSize(cinGst, textWidth) as string[];
+    // Previous: const gstPan = [GST NO, PAN].filter(Boolean).join('   ');  (GST NO and PAN on one line)
+    const cinGstLines = [
+      company?.cinNumber ? `CIN : ${company.cinNumber}` : '',
+      company?.gstNumber ? `GST NO : ${company.gstNumber}` : '',
+      company?.panNumber ? `PAN : ${company.panNumber}` : ''
+    ].filter(Boolean);
+    if (cinGstLines.length) {
+      const lines = cinGstLines.flatMap(text => doc.splitTextToSize(text, textWidth) as string[]);
       lines.forEach((line, index) => {
         if (index) y += 4.5;
         doc.text(line, centerX, y, { align: 'center' });
@@ -641,6 +653,12 @@ export class InventoryExportService {
         : { fontSize: 8, cellPadding: 0.8, overflow: 'linebreak', valign: 'middle' } as any,
       columnStyles,
       didParseCell: (data: any) => {
+        // Bold and the same 9pt as the header labels (e.g. "Cheque Date :").
+        // Previous: if (document.boldRows && data.section === 'body') data.cell.styles.fontStyle = 'bold';
+        if (document.boldRows && data.section === 'body') {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fontSize = 9 * s;
+        }
         if (document.totalRow && data.section === 'body' && data.row.index === bodyRows.length - 1) {
           data.cell.styles.fontStyle = 'bold';
           data.cell.styles.fontSize = 8.5 * s;
