@@ -55,6 +55,8 @@ export interface InventoryExportDocument {
   signedBy?: string;
   /** PDF only: print the signature row in the lower part of the last page, ~7 cm above the page bottom (Customer Receipt). */
   signaturesAtBottom?: boolean;
+  /** PDF only: draw an empty box above the FIRST signature caption, e.g. for the receiver's signature/stamp (Vendor Payment). */
+  firstSignatureBoxed?: boolean;
   fileName?: string;
   orientation?: 'portrait' | 'landscape';
   /** PDF only: fixed width (mm) per column index, for values that can't wrap
@@ -804,6 +806,12 @@ export class InventoryExportService {
           doc.text(document.signedBy, x, signY - 6, { align: 'center' });
         }
         doc.text(caption, x, signY, { align: 'center' });
+        if (index === 0 && document.firstSignatureBoxed) {
+          const boxWidth = Math.min(slot - 4, 50);
+          doc.setDrawColor(0, 0, 0);
+          doc.setLineWidth(0.3);
+          doc.rect(x - boxWidth / 2, signY - 25, boxWidth, 20);
+        }
       });
     }
 

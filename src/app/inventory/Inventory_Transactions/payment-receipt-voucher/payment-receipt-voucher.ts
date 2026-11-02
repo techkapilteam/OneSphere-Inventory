@@ -1028,8 +1028,8 @@ export class PaymentReceiptVoucherComponent {
         ['Mode of Payment', modes],
         ['Cheque No', cheque.numbers],
         ['Cheque Date', cheque.dates],
-        // Customer Receipt prints without the Status line.
-        ...(isPay ? [['Status', v.status ? v.status.charAt(0).toUpperCase() + v.status.slice(1) : ''] as [string, string]] : [])
+        // Status line removed from Vendor Payment too (Customer Receipt never had it).
+        // Previous: ...(isPay ? [['Status', v.status ? v.status.charAt(0).toUpperCase() + v.status.slice(1) : ''] as [string, string]] : [])
       ],
       columns: ['S.No.', 'Particulars', 'Amount'],
       rows,
@@ -1050,6 +1050,8 @@ export class PaymentReceiptVoucherComponent {
       // Signature row in the lower part of the page (Vendor Payment and Customer Receipt).
       // Previous: ...(isPay ? {} : { signaturesAtBottom: true }),
       signaturesAtBottom: true,
+      // Vendor Payment: empty box above (Receiver's Signature) to sign/stamp in.
+      firstSignatureBoxed: isPay,
       orientation: 'portrait',
       fileName: `${title} ${v.voucher_number || ''}`.trim()
     // Previous: }, action);
