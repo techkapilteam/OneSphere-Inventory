@@ -940,8 +940,12 @@ export class PaymentReceiptVoucherComponent {
     const modes = (v.modes || [])
       .map(m => {
         const label = m.ref_json?.['summary'] || m.mode_key;
-        // Customer Receipt prints the mode without its amount.
-        return isPay ? `${label} (${this.pdfAmt(m.amount)})` : label;
+        // Customer Receipt prints the mode without its amount, in the Accounts
+        // Payment Voucher style: CHEQUE (Ref: 9999, Bank: ICICI BANK, A/c No.: ...).
+        // Previous: return isPay ? `${label} (${this.pdfAmt(m.amount)})` : label;
+        // Vendor Payment no longer prints the mode amount, e.g. "(2,17,120)".
+        // Previous: return isPay ? `${label} (${this.pdfAmt(m.amount)})` : this.accountsStyleMode(m);
+        return isPay ? label : this.accountsStyleMode(m);
       })
       .join(', ');
     const cheque = this.chequeDetails(v);
@@ -1029,9 +1033,10 @@ export class PaymentReceiptVoucherComponent {
         [isPay ? 'Paid To' : 'Received From', v.party_name || ''],
         ['GSTIN', v.party_gstin || ''],
         ['Mode of Payment', modes],
-        // Customer Receipt drops the Cheque No line (it is already in Mode of Payment).
+        // Neither Vendor Payment nor Customer Receipt prints a Cheque No line
+        // (the cheque number is already in Mode of Payment).
         // Previous: ['Cheque No', cheque.numbers],
-        ...(isPay ? [['Cheque No', cheque.numbers] as [string, string]] : []),
+        // Previous: ...(isPay ? [['Cheque No', cheque.numbers] as [string, string]] : []),
         ['Cheque Date', cheque.dates],
         // Status line removed from Vendor Payment too (Customer Receipt never had it).
         // Previous: ...(isPay ? [['Status', v.status ? v.status.charAt(0).toUpperCase() + v.status.slice(1) : ''] as [string, string]] : [])
@@ -1091,6 +1096,29 @@ export class PaymentReceiptVoucherComponent {
         },
         error: () => output()
       });
+  }
+
+  // One receipt mode as the Accounts Payment Voucher prints it:
+  // CASH / CHEQUE (Ref: 9999, Bank: ICICI BANK, A/c No.: 1234) / Online(NEFT) (Ref: ...).
+  private accountsStyleMode(m: { mode_key: string; ref_json?: Record<string, any> | null }): string {
+    const ref = m.ref_json || {};
+    const sub = String(ref['bankSubType'] || '').toUpperCase();
+    if (m.mode_key === 'cash' || ref['mode'] === 'CASH') return 'CASH';
+    const mode = sub === 'CHEQUE' || m.mode_key === 'cheque' ? 'CHEQUE'
+      : sub === 'ONLINE' || m.mode_key === 'online' ? `Online(${ref['typeOfPayment'] || ''})`
+        : sub === 'DEBIT_CARD' || m.mode_key === 'debit_card' ? 'DEBIT CARD'
+          : sub === 'CREDIT_CARD' || m.mode_key === 'credit_card' ? 'CREDIT CARD'
+            : String(m.mode_key || '').toUpperCase();
+    // Bank list labels can be "BANK NAME@ACCOUNTNO".
+    const [bank, acctFromLabel] = String(ref['bankName'] || '').split('@');
+    const accountNo = String(ref['accountNumber'] || acctFromLabel || '').trim();
+    const refNo = String(ref['chequeNumber'] || ref['referenceNumber'] || '').trim();
+    const parts = [
+      refNo ? `Ref: ${refNo}` : '',
+      bank?.trim() ? `Bank: ${bank.trim()}` : '',
+      accountNo ? `A/c No.: ${accountNo}` : ''
+    ].filter(Boolean);
+    return parts.length ? `${mode} (${parts.join(', ')})` : mode;
   }
 
   // Cheque no./date straight from the saved ref_json, so they print even when
