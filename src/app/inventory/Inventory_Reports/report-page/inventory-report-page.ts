@@ -888,8 +888,8 @@ export class InventoryReportPageComponent implements OnInit {
 
   private formatCurrency(value: number): string {
     const amount = value.toLocaleString('en-IN', { maximumFractionDigits: 2 });
-    // Stock Ledger shows plain amounts, no "Rs." prefix (user request).
-    if (this.report().key === 'stockLedger') return amount;
+    // Stock Ledger and Dues List show plain amounts, no "Rs." prefix (user request).
+    if (this.report().key === 'stockLedger' || this.report().key === 'duesList') return amount;
     return `Rs. ${amount}`;
   }
 
