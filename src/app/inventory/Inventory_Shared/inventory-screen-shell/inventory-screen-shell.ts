@@ -3960,9 +3960,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return null;
   }
 
+   // State code from a GSTIN's first two digits (e.g. 37ABC… -> 37); '' when not a GSTIN.
   private gstStateCodeFromGstin(gstin: string | null | undefined): string {
-    const clean = String(gstin || '').trim();
-    return /^\d{2}/.test(clean) ? clean.slice(0, 2) : '';
+    const text = String(gstin || '').trim();
+    return /^[0-9]{2}/.test(text) ? text.slice(0, 2) : '';
   }
 
   // India's states with their GST code from global.tbl_mst_state.
@@ -3995,11 +3996,40 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return code ? (this.gstStateNames()[code] || '') : '';
   }
 
-  // GST State Code for a party: the GSTIN's first two digits, else the
-  // state name looked up in the state master.
-  private gstStateCode(gstin: string | null | undefined, stateName: string | null | undefined): string {
-    return this.gstStateCodeFromGstin(gstin) || this.gstStateCodes()[this.normalizeKey(stateName || '')] || '';
+    // Official GST state codes, used when gstStateCodes() has no entry for a state name
+  // (e.g. the print's State Code for a delivery state). Same list as
+  // inventory.fn_gst_state_code (migration 278).
+  private static readonly GST_STATE_CODE_BY_NAME: Record<string, string> = {
+    'jammu and kashmir': '01', 'himachal pradesh': '02', 'punjab': '03', 'chandigarh': '04',
+    'uttarakhand': '05', 'uttaranchal': '05', 'haryana': '06', 'delhi': '07', 'new delhi': '07',
+    'rajasthan': '08', 'uttar pradesh': '09', 'bihar': '10', 'sikkim': '11', 'arunachal pradesh': '12',
+    'nagaland': '13', 'manipur': '14', 'mizoram': '15', 'tripura': '16', 'meghalaya': '17',
+    'assam': '18', 'west bengal': '19', 'jharkhand': '20', 'odisha': '21', 'orissa': '21',
+    'chhattisgarh': '22', 'chattisgarh': '22', 'madhya pradesh': '23', 'gujarat': '24',
+    'daman and diu': '26', 'dadra and nagar haveli': '26', 'dadra and nagar haveli and daman and diu': '26',
+    'maharashtra': '27', 'karnataka': '29', 'goa': '30', 'lakshadweep': '31', 'kerala': '32',
+    'tamil nadu': '33', 'puducherry': '34', 'pondicherry': '34', 'andaman and nicobar islands': '35',
+    'telangana': '36', 'andhra pradesh': '37', 'ladakh': '38'
+  };
+
+    private gstStateCode(gstin: string | null | undefined, stateName: string | null | undefined): string {
+    // 1. GSTIN: its first two digits are the state code (e.g. 37ABC… -> 37)
+    const gstinText = String(gstin || '').trim();
+    if (/^[0-9]{2}/.test(gstinText)) return gstinText.slice(0, 2);
+
+    const name = String(stateName || '').trim();
+    if (!name) return '';
+    // A value that is already a code ("37", or "1" -> "01")
+    if (/^[0-9]{1,2}$/.test(name)) return name.padStart(2, '0');
+
+    // 2. The loaded list, 3. the built-in GST list (works even when the list
+    //    isn't loaded yet or has no entry for this state)
+    const builtInKey = name.toLowerCase().replace(/&/g, ' and ').replace(/\s+/g, ' ').trim();
+    return this.gstStateCodes()[this.normalizeKey(name)]
+      || InventoryScreenShell.GST_STATE_CODE_BY_NAME[builtInKey]
+      || '';
   }
+  
 
   // true => interstate (IGST); false => intrastate (CGST+SGST); null => not
   // enough data on one side to tell, so the caller keeps the old CGST+SGST
@@ -8185,15 +8215,33 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // Previous: const total = computed.taxable + computed.tax;
     const total = computed.taxable + computed.tax + roundOff;
 
-    const customer = this.customerForRecord(record);
+    // const customer = this.customerForRecord(record);
+    // const branch = this.ourBranchForRecord(record);
+    // const customerGstin = record?.customer_gstin || record?.customerGstin || this.partyPrimaryGstin(customer);
+    // const customerState = this.partyPrimaryState(customer);
+    // const isInterstate = !!this.isInterstateTransaction(
+    //   branch?.gstin, branch?.state,
+    //   customerGstin, customerState,
+    //   record?.place_of_supply || record?.placeOfSupply || null
+    // );
+        const customer = this.customerForRecord(record);
     const branch = this.ourBranchForRecord(record);
     const customerGstin = record?.customer_gstin || record?.customerGstin || this.partyPrimaryGstin(customer);
     const customerState = this.partyPrimaryState(customer);
-    const isInterstate = !!this.isInterstateTransaction(
-      branch?.gstin, branch?.state,
-      customerGstin, customerState,
-      record?.place_of_supply || record?.placeOfSupply || null
-    );
+    // Previous: const isInterstate = !!this.isInterstateTransaction(
+    //   branch?.gstin, branch?.state, customerGstin, customerState,
+    //   record?.place_of_supply || record?.placeOfSupply || null);
+    // Place of supply (the delivery state) decides first, then the customer's GSTIN,
+    // then the customer's state, compared as GST state codes (same rule as
+    // inventory.fn_is_interstate_transaction, migration 278).
+    const placeOfSupply = String(record?.place_of_supply || record?.placeOfSupply || '').trim();
+    const ourCode = this.gstStateCode(String(branch?.gstin || ''), String(branch?.state || ''));
+    const theirCode = placeOfSupply
+      ? this.gstStateCode('', placeOfSupply)
+      : this.gstStateCode(String(customerGstin || ''), String(customerState || ''));
+    const isInterstate = ourCode && theirCode
+      ? ourCode !== theirCode
+      : !!this.isInterstateTransaction(branch?.gstin, branch?.state, customerGstin, customerState, placeOfSupply || null);
 
     return {
       gross: computed.gross,
@@ -8467,10 +8515,19 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // Previous: const customerState = String(customer?.state || this.partyPrimaryState(customer)
     //   || record.place_of_supply || record.placeOfSupply || '').trim();
     // State from the GSTIN's first two digits too, when the master has none.
-    const customerState = String(customer?.state || this.partyPrimaryState(customer)
-      || this.gstStateNameFromGstin(customerGstin)
-      || record.place_of_supply || record.placeOfSupply || '').trim();
-    const customerStateCode = this.gstStateCode(customerGstin, customerState);
+    // const customerState = String(customer?.state || this.partyPrimaryState(customer)
+    //   || this.gstStateNameFromGstin(customerGstin)
+    //   || record.place_of_supply || record.placeOfSupply || '').trim();
+    // const customerStateCode = this.gstStateCode(customerGstin, customerState);
+
+    
+    const placeOfSupply = String(record.place_of_supply || record.placeOfSupply || '').trim();
+    const customerState = placeOfSupply || String(customer?.state || this.partyPrimaryState(customer)
+      || this.gstStateNameFromGstin(customerGstin) || '').trim();
+    const customerStateCode = placeOfSupply
+      ? this.gstStateCode('', placeOfSupply)
+      : this.gstStateCode(customerGstin, customerState);
+
     const warehouseName = String(record.warehouse_name || record.warehouseName || '');
     const deliveryAddress = String(record.delivery_address || record.deliveryAddress || '').trim()
       || this.partyFullAddress(customer);
@@ -9137,8 +9194,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return null;
   }
 
-  procurementVendorHeaderOptions(field: InventoryField): string[] {
-    if (field.options?.length) return field.options;
+  // procurementVendorHeaderOptions(field: InventoryField): string[] {
+  //   if (field.options?.length) return field.options;
+  //   return this.config?.key === 'salesReturn' ? this.customerOptions : this.vendorOptions;
+  // }
+    procurementVendorHeaderOptions(field: InventoryField): string[] {
+    // Previous: if (field.options?.length) return field.options;
+    // The field's config options were the pre-backend demo list (INVENTORY_OPTIONS.suppliers:
+    // 'ElectroMart Supplies', 'Aero Labs', …). They won whenever no real vendor existed yet,
+    // so a company with no vendors saw fake ones. Only real master data is offered now;
+    // an empty list is correct (the + button adds a vendor).
     return this.config?.key === 'salesReturn' ? this.customerOptions : this.vendorOptions;
   }
 
@@ -18000,6 +18065,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         deliveryDistrict: currentDistrict && districts.length && !districts.some(item => this.optionEquals(item, currentDistrict)) ? '' : currentDistrict
       };
       next['deliveryAddress'] = this.composeDcDeliveryAddress(next);
+      if (this.config?.key === 'salesInvoice') next['placeOfSupply'] = state;
       return next;
     });
   }
@@ -22123,6 +22189,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         // referral business, so the switch reopens on and both stay visible.
         referralBusiness: (record.channel_partner_name || record.lead_by_name) ? 'Yes' : 'No',
         placeOfSupply: record.place_of_supply || '',
+        // The delivery State dropdown shows the saved place of supply again.
+        deliveryState: record.place_of_supply || '',
         warehouseId: record.warehouse_id ?? null,
         // Bug fix (2026-09-20): a Branch pick on this merged Warehouse/Branch
         // field saves with warehouse_name NULL and the real location carried
