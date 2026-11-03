@@ -6869,6 +6869,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!name) { this.quickAddError.set('Vendor name is required.'); return; }
     const quickVendorPanError = this.panValidationMessage(this.formValues()['quickVendorPan']);
     if (quickVendorPanError) { this.quickAddError.set(quickVendorPanError); return; }
+    if (!String(this.formValues()['quickVendorState'] ?? '').trim()) { this.quickAddError.set('State is required.'); return; }
     const quickVendorTaxIdError = this.quickVendorTaxIdValidationMessage();
     if (quickVendorTaxIdError) { this.quickAddError.set(quickVendorTaxIdError); return; }
     if (this.isSavingQuickAdd()) return;
@@ -6952,6 +6953,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!name) { this.quickAddError.set('Customer name is required.'); return; }
     const quickCustomerPanError = this.panValidationMessage(this.formValues()['quickCustomerPan']);
     if (quickCustomerPanError) { this.quickAddError.set(quickCustomerPanError); return; }
+    if (!String(this.formValues()['quickCustomerState'] ?? '').trim()) { this.quickAddError.set('State is required.'); return; }
     if (this.isSavingQuickAdd()) return;
     const v = this.formValues();
     const code = this.quickAddCode().trim() || this.generateCodeFromName(name) || null;
@@ -25213,6 +25215,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         return 'Invoice No. is required for Sales Invoice.';
       }
       if (!hasValue(payload['doc_date'])) return 'Invoice Date is required for Sales Invoice.';
+      // Delivery Address is optional, but once switched on its State is mandatory.
+      if (this.deliveryAddressEnabled() && !String(this.formValues()['deliveryState'] ?? '').trim()) {
+        return 'State is required in Delivery Address.';
+      }
       const invoiceItemsError = this.validateSalesInvoiceLineItems(payload['items']);
       if (invoiceItemsError) return invoiceItemsError;
     }
