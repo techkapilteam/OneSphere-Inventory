@@ -24,4 +24,6 @@ export class InventoryDeliveryAddressComponent {
   // (host.shipSameAsDelivery()/toggleShipSameAsDelivery(), formValues
   // 'shipAddress') shown inside this section.
   @Input() showShipAddress = false;
+  // Sales Invoice only: State asterisk; enforced in the host's save validation.
+  @Input() stateRequired = false;
 }

@@ -106,7 +106,8 @@
         }
       } @else {
         <div class="erp-form-group">
-          <label class="erp-label">State</label>
+          <!-- Previous: <label class="erp-label">State @if (taxIdsRequired) {<span class="text-danger">*</span>}</label> -->
+          <label class="erp-label">State @if (stateRequired) {<span class="text-danger">*</span>}</label>
           <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
             [items]="host.dcAddressStates" [searchable]="true" [clearable]="true"
             [ngModel]="host.formValues()[pfx('state')] || ''"

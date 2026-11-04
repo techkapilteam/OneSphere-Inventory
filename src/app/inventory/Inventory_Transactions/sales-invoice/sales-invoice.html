@@ -260,7 +260,8 @@
           }
         </div>
 
-        <app-inventory-delivery-address [host]="this" [showShipAddress]="true"></app-inventory-delivery-address>
+        <!-- Previous: <app-inventory-delivery-address [host]="this" [showShipAddress]="true"></app-inventory-delivery-address> -->
+        <app-inventory-delivery-address [host]="this" [showShipAddress]="true" [stateRequired]="true"></app-inventory-delivery-address>
 
         <app-inventory-transport-details [host]="this"></app-inventory-transport-details>
 

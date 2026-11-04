@@ -940,8 +940,12 @@ export class PaymentReceiptVoucherComponent {
     const modes = (v.modes || [])
       .map(m => {
         const label = m.ref_json?.['summary'] || m.mode_key;
-        // Customer Receipt prints the mode without its amount.
-        return isPay ? `${label} (${this.pdfAmt(m.amount)})` : label;
+        // Customer Receipt prints the mode without its amount, in the Accounts
+        // Payment Voucher style: CHEQUE (Ref: 9999, Bank: ICICI BANK, A/c No.: ...).
+        // Previous: return isPay ? `${label} (${this.pdfAmt(m.amount)})` : label;
+        // Vendor Payment no longer prints the mode amount, e.g. "(2,17,120)".
+        // Previous: return isPay ? `${label} (${this.pdfAmt(m.amount)})` : this.accountsStyleMode(m);
+        return isPay ? label : this.accountsStyleMode(m);
       })
       .join(', ');
     const cheque = this.chequeDetails(v);
@@ -1003,7 +1007,9 @@ export class PaymentReceiptVoucherComponent {
     if (hasBalance) summary.push(['Remaining Due', this.pdfAmt(v.remaining_due!)]);
     if (v.tds_amount) summary.push(['TDS', this.pdfAmt(v.tds_amount)]);
     if (v.tcs_amount) summary.push([`TCS${v.tcs_percentage ? ` (${v.tcs_percentage}%)` : ''}`, this.pdfAmt(v.tcs_amount)]);
-    summary.push(['Net Amount', this.pdfAmt(v.net_amount)]);
+    // Customer Receipt labels the net total "Received Amount".
+    // Previous: summary.push(['Net Amount', this.pdfAmt(v.net_amount)]);
+    summary.push([isPay ? 'Net Amount' : 'Received Amount', this.pdfAmt(v.net_amount)]);
     // Vendor Payment prints only these four. Previous Balance = what was owed
     // before this voucher's first-time invoices (floored at 0, MV996 -> 0);
     // a repeat payment on the same invoice shows the full saved balance.
@@ -1021,18 +1027,24 @@ export class PaymentReceiptVoucherComponent {
     const exportDoc: InventoryExportDocument = {
       title,
       fields: [
-        ['Voucher No', v.voucher_number || ''],
+        // Previous: ['Voucher No', v.voucher_number || ''],
+        [isPay ? 'Voucher No' : 'Receipt No', v.voucher_number || ''],
         ['Date', this.pdfDate(v.voucher_date)],
         [isPay ? 'Paid To' : 'Received From', v.party_name || ''],
         ['GSTIN', v.party_gstin || ''],
         ['Mode of Payment', modes],
-        ['Cheque No', cheque.numbers],
+        // Neither Vendor Payment nor Customer Receipt prints a Cheque No line
+        // (the cheque number is already in Mode of Payment).
+        // Previous: ['Cheque No', cheque.numbers],
+        // Previous: ...(isPay ? [['Cheque No', cheque.numbers] as [string, string]] : []),
         ['Cheque Date', cheque.dates],
-        // Customer Receipt prints without the Status line.
-        ...(isPay ? [['Status', v.status ? v.status.charAt(0).toUpperCase() + v.status.slice(1) : ''] as [string, string]] : [])
+        // Status line removed from Vendor Payment too (Customer Receipt never had it).
+        // Previous: ...(isPay ? [['Status', v.status ? v.status.charAt(0).toUpperCase() + v.status.slice(1) : ''] as [string, string]] : [])
       ],
       columns: ['S.No.', 'Particulars', 'Amount'],
       rows,
+      // Customer Receipt prints the particulars (e.g. Sales Invoice INV00001/26-27) in bold.
+      boldRows: !isPay,
       summary,
       amountInWords: this.exportService.amountInWords(v.net_amount),
       amountInWordsPosition: 'below',
@@ -1045,11 +1057,17 @@ export class PaymentReceiptVoucherComponent {
       // Payment vouchers and customer receipts both get a receiver's signature
       // slot. It goes first because the export prints signedBy above the LAST
       // caption (Posted By).
-      signatures: ["(Receiver's Signature)", '(Approved By)', '(Verified By)', '(Posted By)'],
+      // Customer Receipt no longer prints the (Receiver's Signature) slot.
+      // Previous: signatures: ["(Receiver's Signature)", '(Approved By)', '(Verified By)', '(Posted By)'],
+      signatures: isPay
+        ? ["(Receiver's Signature)", '(Approved By)', '(Verified By)', '(Posted By)']
+        : ['(Approved By)', '(Verified By)', '(Posted By)'],
       signedBy: this.exportService.userName(),
       // Signature row in the lower part of the page (Vendor Payment and Customer Receipt).
       // Previous: ...(isPay ? {} : { signaturesAtBottom: true }),
       signaturesAtBottom: true,
+      // Vendor Payment: empty box above (Receiver's Signature) to sign/stamp in.
+      firstSignatureBoxed: isPay,
       orientation: 'portrait',
       fileName: `${title} ${v.voucher_number || ''}`.trim()
     // Previous: }, action);
@@ -1078,6 +1096,29 @@ export class PaymentReceiptVoucherComponent {
         },
         error: () => output()
       });
+  }
+
+  // One receipt mode as the Accounts Payment Voucher prints it:
+  // CASH / CHEQUE (Ref: 9999, Bank: ICICI BANK, A/c No.: 1234) / Online(NEFT) (Ref: ...).
+  private accountsStyleMode(m: { mode_key: string; ref_json?: Record<string, any> | null }): string {
+    const ref = m.ref_json || {};
+    const sub = String(ref['bankSubType'] || '').toUpperCase();
+    if (m.mode_key === 'cash' || ref['mode'] === 'CASH') return 'CASH';
+    const mode = sub === 'CHEQUE' || m.mode_key === 'cheque' ? 'CHEQUE'
+      : sub === 'ONLINE' || m.mode_key === 'online' ? `Online(${ref['typeOfPayment'] || ''})`
+        : sub === 'DEBIT_CARD' || m.mode_key === 'debit_card' ? 'DEBIT CARD'
+          : sub === 'CREDIT_CARD' || m.mode_key === 'credit_card' ? 'CREDIT CARD'
+            : String(m.mode_key || '').toUpperCase();
+    // Bank list labels can be "BANK NAME@ACCOUNTNO".
+    const [bank, acctFromLabel] = String(ref['bankName'] || '').split('@');
+    const accountNo = String(ref['accountNumber'] || acctFromLabel || '').trim();
+    const refNo = String(ref['chequeNumber'] || ref['referenceNumber'] || '').trim();
+    const parts = [
+      refNo ? `Ref: ${refNo}` : '',
+      bank?.trim() ? `Bank: ${bank.trim()}` : '',
+      accountNo ? `A/c No.: ${accountNo}` : ''
+    ].filter(Boolean);
+    return parts.length ? `${mode} (${parts.join(', ')})` : mode;
   }
 
   // Cheque no./date straight from the saved ref_json, so they print even when

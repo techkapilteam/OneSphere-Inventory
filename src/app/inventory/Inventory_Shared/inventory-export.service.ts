@@ -55,6 +55,8 @@ export interface InventoryExportDocument {
   signedBy?: string;
   /** PDF only: print the signature row in the lower part of the last page, ~7 cm above the page bottom (Customer Receipt). */
   signaturesAtBottom?: boolean;
+  /** PDF only: draw an empty box above the FIRST signature caption, e.g. for the receiver's signature/stamp (Vendor Payment). */
+  firstSignatureBoxed?: boolean;
   fileName?: string;
   orientation?: 'portrait' | 'landscape';
   /** PDF only: fixed width (mm) per column index, for values that can't wrap
@@ -72,6 +74,8 @@ export interface InventoryExportDocument {
   signatureBlock?: boolean;
     /** Rows (indexes in `rows`) that are group headers / subtotals: printed bold and shaded. */
   groupRowIndexes?: number[];
+  /** PDF only: print every body row of the main table in bold. */
+  boldRows?: boolean;
 }
 
 const HEADER_COLOR = '#0b4093';
@@ -490,19 +494,30 @@ export class InventoryExportService {
     const centerX = pageWidth / 2;
     const company = this.companyDetails();
 
+    // The centred letterhead text keeps clear of the logo on both sides, so a
+    // wide logo (ACE TECH, 45mm) no longer prints over the start of the address.
+    const logo = company?.companyLogo || '';
+    const logoBox = logo ? this.logoSize(logo, 45, 20) : null;
+    const textWidth = Math.min(pageWidth - 70, pageWidth - 2 * (10 + (logoBox?.width || 0) + 3));
+
     // Letterhead — first page only. Company name is 12pt: smaller than the
     // title, still larger than the 9pt address.
     doc.setTextColor('black');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(12);
-    doc.text(company?.companyName || '', centerX, 14, { align: 'center' });
+    const nameLines = doc.splitTextToSize(company?.companyName || '', textWidth) as string[];
+    let y = 14;
+    nameLines.forEach((line, index) => {
+      if (index) y += 5;
+      doc.text(line, centerX, y, { align: 'center' });
+    });
 
-    let y = 20;
+    y += 6;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     const address = String(company?.registrationAddress || '').trim();
     if (address) {
-      const lines = doc.splitTextToSize(address, pageWidth - 70) as string[];
+      const lines = doc.splitTextToSize(address, textWidth) as string[];
       lines.forEach(line => {
         doc.text(line, centerX, y, { align: 'center' });
         y += 4.5;
@@ -511,15 +526,30 @@ export class InventoryExportService {
     } else {
       y += 6;
     }
-    const cinGst = this.cinGstLine(company);
-    if (cinGst) doc.text(cinGst, centerX, y, { align: 'center' });
+    // CIN, GST NO and PAN each on their own line, so a wrap never splits a
+    // label from its number.
+    // Previous: const cinGst = this.cinGstLine(company);
+    // Previous: if (cinGst) {
+    // Previous:   const lines = doc.splitTextToSize(cinGst, textWidth) as string[];
+    // Previous: const gstPan = [GST NO, PAN].filter(Boolean).join('   ');  (GST NO and PAN on one line)
+    const cinGstLines = [
+      company?.cinNumber ? `CIN : ${company.cinNumber}` : '',
+      company?.gstNumber ? `GST NO : ${company.gstNumber}` : '',
+      company?.panNumber ? `PAN : ${company.panNumber}` : ''
+    ].filter(Boolean);
+    if (cinGstLines.length) {
+      const lines = cinGstLines.flatMap(text => doc.splitTextToSize(text, textWidth) as string[]);
+      lines.forEach((line, index) => {
+        if (index) y += 4.5;
+        doc.text(line, centerX, y, { align: 'center' });
+      });
+    }
 
     // Logo sits vertically centred on the name/address/GST block (name cap
     // top ~11mm to the GST baseline), never running into the title below.
-    const logo = company?.companyLogo || '';
-    if (logo) {
+    if (logo && logoBox) {
       try {
-        const size = this.logoSize(logo, 45, 20);
+        const size = logoBox;
         const centred = (11 + y) / 2 - size.height / 2;
         const logoY = Math.max(5, Math.min(centred, y + 2.5 - size.height));
         doc.addImage(logo, this.imageFormat(logo), 10, logoY, size.width, size.height);
@@ -623,6 +653,12 @@ export class InventoryExportService {
         : { fontSize: 8, cellPadding: 0.8, overflow: 'linebreak', valign: 'middle' } as any,
       columnStyles,
       didParseCell: (data: any) => {
+        // Bold and the same 9pt as the header labels (e.g. "Cheque Date :").
+        // Previous: if (document.boldRows && data.section === 'body') data.cell.styles.fontStyle = 'bold';
+        if (document.boldRows && data.section === 'body') {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fontSize = 9 * s;
+        }
         if (document.totalRow && data.section === 'body' && data.row.index === bodyRows.length - 1) {
           data.cell.styles.fontStyle = 'bold';
           data.cell.styles.fontSize = 8.5 * s;
@@ -788,6 +824,12 @@ export class InventoryExportService {
           doc.text(document.signedBy, x, signY - 6, { align: 'center' });
         }
         doc.text(caption, x, signY, { align: 'center' });
+        if (index === 0 && document.firstSignatureBoxed) {
+          const boxWidth = Math.min(slot - 4, 50);
+          doc.setDrawColor(0, 0, 0);
+          doc.setLineWidth(0.3);
+          doc.rect(x - boxWidth / 2, signY - 25, boxWidth, 20);
+        }
       });
     }
 
@@ -1180,7 +1222,21 @@ export class InventoryExportService {
     };
     const authUser = read('authUser');
     const currentUser = read('currentUser');
-    return String(authUser.fullName || currentUser.pEmployeeName || sessionStorage.getItem('username') || '');
+    // Previous: return String(authUser.fullName || currentUser.pEmployeeName || sessionStorage.getItem('username') || '');
+    // Auto-created logins store a placeholder as full_name -- the branch name
+    // (branch logins) or "{CompanyName} Admin" (company registration without
+    // the admin's first/last name; the company may not be the one switched
+    // to now). For those the login's username is printed instead.
+    const norm = (s: unknown) => String(s || '').trim().toLowerCase();
+    const company = read('authCompany');
+    let branches: Array<{ branchName?: string }> = [];
+    try { branches = JSON.parse(sessionStorage.getItem('authBranches') || '[]') || []; } catch { branches = []; }
+    const fullName = norm(authUser.fullName);
+    const isOrgName = !!fullName &&
+      (fullName === norm(company.companyName) || fullName.endsWith(' admin') ||
+        branches.some(b => norm(b?.branchName) === fullName));
+    const username = authUser.username || sessionStorage.getItem('username');
+    return String((isOrgName ? username : authUser.fullName) || currentUser.pEmployeeName || username || '');
   }
 
   private imageFormat(dataUrl: string): string {

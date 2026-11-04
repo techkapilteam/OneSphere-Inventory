@@ -3960,6 +3960,24 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return null;
   }
 
+    // Our GSTIN / state for a document: the branch's own (inventory branch config),
+  // else the company's GSTIN from the login company (as on the PDF letterhead),
+  // same fallback as inventory.fn_branch_gstin_state (migration 278).
+  // A GSTIN belongs to one state, so the company's GSTIN is used only for a
+  // branch in that state, or a branch with no state of its own.
+  private ourGstOrigin(record: any): { gstin: string; state: string } {
+    const branch = this.ourBranchForRecord(record);
+    let gstin = String(branch?.gstin || '').trim();
+    let state = String(branch?.state || '').trim();
+    const companyGstin = String(this.exportService.companyDetails()?.gstNumber || '').trim();
+    if (!gstin && companyGstin) {
+      const branchCode = this.gstStateCode('', state);
+      if (!branchCode || branchCode === this.gstStateCode(companyGstin, '')) gstin = companyGstin;
+    }
+    if (!state && gstin) state = this.gstStateNameFromGstin(gstin);
+    return { gstin, state };
+  }
+
    // State code from a GSTIN's first two digits (e.g. 37ABC… -> 37); '' when not a GSTIN.
   private gstStateCodeFromGstin(gstin: string | null | undefined): string {
     const text = String(gstin || '').trim();
@@ -4031,18 +4049,22 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
   
 
-  // true => interstate (IGST); false => intrastate (CGST+SGST); null => not
-  // enough data on one side to tell, so the caller keeps the old CGST+SGST
-  // default rather than guessing.
-  private isInterstateTransaction(
+    private isInterstateTransaction(
     ourGstin: string | null | undefined, ourState: string | null | undefined,
     theirGstin: string | null | undefined, theirState: string | null | undefined,
     placeOfSupply?: string | null
   ): boolean | null {
-    const ourCode = this.gstStateCodeFromGstin(ourGstin);
-    const theirCode = this.gstStateCodeFromGstin(theirGstin);
+    // Previous: GSTIN pair first, then state names (place of supply only as a name).
+    // Now the same rule as inventory.fn_is_interstate_transaction (migration 278):
+    //   ours   = our GSTIN -> our state
+    //   theirs = place of supply -> their GSTIN -> their state
+    // compared as GST state codes.
+    const ourCode = this.gstStateCode(ourGstin, ourState);
+    const theirCode = (placeOfSupply ? this.gstStateCode('', placeOfSupply) : '')
+      || this.gstStateCode(theirGstin, theirState);
     if (ourCode && theirCode) return ourCode !== theirCode;
 
+    // Unknown state names (not in the GST list): compare the names as before
     const ourStateKey = this.normalizeKey(ourState || '');
     const theirStateKey = this.normalizeKey(placeOfSupply || theirState || '');
     if (ourStateKey && theirStateKey) return ourStateKey !== theirStateKey;
@@ -6869,6 +6891,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!name) { this.quickAddError.set('Vendor name is required.'); return; }
     const quickVendorPanError = this.panValidationMessage(this.formValues()['quickVendorPan']);
     if (quickVendorPanError) { this.quickAddError.set(quickVendorPanError); return; }
+    if (!String(this.formValues()['quickVendorState'] ?? '').trim()) { this.quickAddError.set('State is required.'); return; }
     const quickVendorTaxIdError = this.quickVendorTaxIdValidationMessage();
     if (quickVendorTaxIdError) { this.quickAddError.set(quickVendorTaxIdError); return; }
     if (this.isSavingQuickAdd()) return;
@@ -6952,6 +6975,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!name) { this.quickAddError.set('Customer name is required.'); return; }
     const quickCustomerPanError = this.panValidationMessage(this.formValues()['quickCustomerPan']);
     if (quickCustomerPanError) { this.quickAddError.set(quickCustomerPanError); return; }
+    if (!String(this.formValues()['quickCustomerState'] ?? '').trim()) { this.quickAddError.set('State is required.'); return; }
     if (this.isSavingQuickAdd()) return;
     const v = this.formValues();
     const code = this.quickAddCode().trim() || this.generateCodeFromName(name) || null;
@@ -8182,13 +8206,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const tax = computed.tax || storedTax;
 
     const vendor = this.vendorForRecord(record);
-    const branch = this.ourBranchForRecord(record);
+    // const branch = this.ourBranchForRecord(record);
+    const origin = this.ourGstOrigin(record);
     const vendorGstin = record?.vendor_gstin || record?.vendorGstin || this.partyPrimaryGstin(vendor);
     const vendorState = this.partyPrimaryState(vendor);
-    const isInterstate = !!this.isInterstateTransaction(
-      branch?.gstin, branch?.state,
-      vendorGstin, vendorState
-    );
+    const isInterstate = !!this.isInterstateTransaction(origin.gstin, origin.state, vendorGstin, vendorState);
 
     return {
       gross: computed.gross || taxable,
@@ -8224,25 +8246,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     //   customerGstin, customerState,
     //   record?.place_of_supply || record?.placeOfSupply || null
     // );
-        const customer = this.customerForRecord(record);
-    const branch = this.ourBranchForRecord(record);
+    const customer = this.customerForRecord(record);
+    const origin = this.ourGstOrigin(record);
     const customerGstin = record?.customer_gstin || record?.customerGstin || this.partyPrimaryGstin(customer);
     const customerState = this.partyPrimaryState(customer);
-    // Previous: const isInterstate = !!this.isInterstateTransaction(
-    //   branch?.gstin, branch?.state, customerGstin, customerState,
-    //   record?.place_of_supply || record?.placeOfSupply || null);
-    // Place of supply (the delivery state) decides first, then the customer's GSTIN,
-    // then the customer's state, compared as GST state codes (same rule as
-    // inventory.fn_is_interstate_transaction, migration 278).
     const placeOfSupply = String(record?.place_of_supply || record?.placeOfSupply || '').trim();
-    const ourCode = this.gstStateCode(String(branch?.gstin || ''), String(branch?.state || ''));
-    const theirCode = placeOfSupply
-      ? this.gstStateCode('', placeOfSupply)
-      : this.gstStateCode(String(customerGstin || ''), String(customerState || ''));
-    const isInterstate = ourCode && theirCode
-      ? ourCode !== theirCode
-      : !!this.isInterstateTransaction(branch?.gstin, branch?.state, customerGstin, customerState, placeOfSupply || null);
-
+    const isInterstate = !!this.isInterstateTransaction(origin.gstin, origin.state, customerGstin, customerState, placeOfSupply || null);
     return {
       gross: computed.gross,
       discount: computed.discount,
@@ -25213,6 +25222,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         return 'Invoice No. is required for Sales Invoice.';
       }
       if (!hasValue(payload['doc_date'])) return 'Invoice Date is required for Sales Invoice.';
+      // Delivery Address is optional, but once switched on its State is mandatory.
+      if (this.deliveryAddressEnabled() && !String(this.formValues()['deliveryState'] ?? '').trim()) {
+        return 'State is required in Delivery Address.';
+      }
       const invoiceItemsError = this.validateSalesInvoiceLineItems(payload['items']);
       if (invoiceItemsError) return invoiceItemsError;
     }
