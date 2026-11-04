@@ -291,7 +291,9 @@ export class InventoryReportPageComponent implements OnInit {
 
   // Stock Summary shows From Date / To Date as two separate pickers instead of
   // the single range picker; both still write the same fromDate/toDate filters.
-  readonly separateFromToDates = computed(() => this.report().key === 'stockSummary');
+  // Collection Report uses the same separate From Date / To Date pickers (user request).
+  // Previous: readonly separateFromToDates = computed(() => this.report().key === 'stockSummary');
+  readonly separateFromToDates = computed(() => ['stockSummary', 'collectionReport'].includes(this.report().key));
 
   // Stock Summary's location filter is "Branch" only — no warehouses listed.
   readonly branchOnlyLocation = computed(() => this.report().key === 'stockSummary');
@@ -717,7 +719,9 @@ export class InventoryReportPageComponent implements OnInit {
 
     // Dues List: Grand Total line after the last group (Total / Received / Due),
     // same figures as the on-screen footer (user request).
-    if (this.report().key === 'duesList' && rows.length && columns.some(column => column.total)) {
+    // Collection Report gets the same Grand Total line so PDF / Excel totals match the screen.
+    // Previous: if (this.report().key === 'duesList' && rows.length && columns.some(column => column.total)) {
+    if (['duesList', 'collectionReport'].includes(this.report().key) && rows.length && columns.some(column => column.total)) {
       const totals = this.totals();
       groupRowIndexes.push(rows.length);
       rows.push(columns.map((column, index) => index === 0 ? 'Grand Total' : (column.total ? totals[column.key] ?? '' : '')));

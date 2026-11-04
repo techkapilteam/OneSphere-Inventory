@@ -470,6 +470,40 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       { invoiceDate: '2026-10-13', invoiceNo: 'CPINV1621/26', customer: 'Kapil Chits (Kakatiya) Private Limited', totalAmount: 11772, receivedAmount: 0, dueAmount: 11772, ageDays: 10 }
     ]
   }),
+  // Collection Report: money received from customers between "Date From" and
+  // "Date To" (posted Customer Receipts), one row per customer. Cash = 'cash'
+  // mode; Cheque = cheque / online / card / bank. "Pre" = receipts against
+  // invoices dated before "Date From". JV columns stay 0 until the "Company
+  // Adjustment" receipt mode is added. Zone / Region / Branch grouping later.
+  phaseOneReport({
+    key: 'collectionReport',
+    slug: 'collection-report',
+    title: 'Collection Report',
+    groupId: 'customerSupplier',
+    endpoint: 'collection-report',
+    icon: 'pi pi-money-bill',
+    purpose: 'Customer-wise money received in a period, split into cash, cheque and JV for current and previous-period invoices.',
+    audience: ['Accountant', 'Sales', 'Business Owner'],
+    filters: ['branchId', 'fromDate', 'toDate', 'customerId'],
+    columns: cols([
+      // Segment is auto-added to every report; hidden here, same as Dues List.
+      ['segment', 'Segment', 'text', false, false],
+      ['customer', 'Customer'],
+      ['noOfInvoices', 'No. of Invoices', 'number', true],
+      ['cashAmount', 'Cash', 'currency', true],
+      ['preCashAmount', 'Pre Cash', 'currency', true],
+      ['chequeAmount', 'Cheque', 'currency', true],
+      ['preChequeAmount', 'Pre Cheque', 'currency', true],
+      ['jvAmount', 'JV', 'currency', true],
+      ['preJvAmount', 'Pre JV', 'currency', true],
+      ['grandTotal', 'Grand Total', 'currency', true]
+    ]),
+    sampleRows: [
+      { customer: 'Dakshin Infrastructures Private Limited', noOfInvoices: 3, cashAmount: 15000, preCashAmount: 0, chequeAmount: 40027, preChequeAmount: 24321, jvAmount: 0, preJvAmount: 0, grandTotal: 79348 },
+      { customer: 'Kapil Chits (Kakatiya) Private Limited', noOfInvoices: 1, cashAmount: 11772, preCashAmount: 0, chequeAmount: 0, preChequeAmount: 0, jvAmount: 0, preJvAmount: 0, grandTotal: 11772 },
+      { customer: 'Tenant Works Pvt Ltd', noOfInvoices: 2, cashAmount: 0, preCashAmount: 5000, chequeAmount: 120000, preChequeAmount: 0, jvAmount: 0, preJvAmount: 0, grandTotal: 125000 }
+    ]
+  }),
   phaseOneReport({
     key: 'pendingDocument',
     slug: 'pending-document',
