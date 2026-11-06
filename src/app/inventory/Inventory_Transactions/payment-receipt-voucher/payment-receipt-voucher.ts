@@ -167,7 +167,7 @@ export class PaymentReceiptVoucherComponent {
   readonly maxVoucherDate = new Date();
 
   readonly drawerInvoice = signal<OutstandingInvoice | null>(null);
-  readonly drawerHistory = signal<{ voucherNumber: string; date?: string; amount: number }[]>([]);
+  readonly drawerHistory = signal<{ voucherNumber: string; date?: string; amount: number; status?: { text: string; cls: string; title?: string } }[]>([]);
   readonly drawerParty = computed(() => {
     const inv = this.drawerInvoice();
     const partyId = inv ? this.partyOfInvoice(inv.invoice_id) : null;
@@ -874,14 +874,33 @@ export class PaymentReceiptVoucherComponent {
 
   openDrawer(inv: OutstandingInvoice): void {
     this.drawerInvoice.set(inv);
-    const history: { voucherNumber: string; date?: string; amount: number }[] = [];
+    const history: { voucherNumber: string; date?: string; amount: number; status?: { text: string; cls: string; title?: string } }[] = [];
+    const withStatus = this.mode() === 'receipt';
     for (const v of this.vouchers()) {
       if (v.status !== 'posted') continue;
       for (const a of v.allocations) {
-        if (a.invoice_id === inv.invoice_id) history.push({ voucherNumber: v.voucher_number, date: v.voucher_date, amount: a.allocated_amount });
+        if (a.invoice_id === inv.invoice_id) history.push({
+          voucherNumber: v.voucher_number, date: v.voucher_date, amount: a.allocated_amount,
+          status: withStatus ? this.receiptClearStatus(v) : undefined
+        });
       }
     }
     this.drawerHistory.set(history);
+  }
+
+  // Customer Receipt clearance as Accounts sees it: cash is cleared once saved;
+  // a bank receipt stays Pending until its cheque/bank row is cleared in Accounts
+  // (clear_status Y), or shows Returned if the cheque bounced (R).
+  private receiptClearStatus(v: PaymentVoucher): { text: string; cls: string; title?: string } {
+    const cs = (v.clear_status || '').trim().toUpperCase();
+    if (cs === 'Y') return { text: 'Cleared', cls: 'badge-success', title: v.clear_date ? `Cleared on ${this.fmtDate(v.clear_date)}` : undefined };
+    if (cs === 'R') return { text: 'Returned', cls: 'badge-danger' };
+    if (cs === 'N') return { text: 'Pending', cls: 'badge-warning' };
+    // Settled only by a credit note — no cash/bank moved, nothing to clear.
+    const paidModes = v.modes.filter(m => (m.amount || 0) > 0);
+    if (!paidModes.length) return { text: 'Adjusted', cls: 'badge-info', title: 'Settled by credit note' };
+    const isCash = paidModes.every(m => (m.mode_key || '').toLowerCase() === 'cash');
+    return isCash ? { text: 'Cleared', cls: 'badge-success' } : { text: 'Pending', cls: 'badge-warning' };
   }
   closeDrawer(): void { this.drawerInvoice.set(null); }
 

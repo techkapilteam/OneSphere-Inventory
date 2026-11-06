@@ -454,12 +454,12 @@
         <article class="inventory-card inventory-kpi-card pay-kpi-emphasis"><span class="inventory-card-icon"><i class="pi pi-exclamation-triangle"></i></span><div><small>Outstanding</small><strong>{{ fmt(inv.outstanding) }}</strong></div></article>
       </div>
       <div class="pay-dr-sec">Payment History</div>
-      <div class="pay-hist">
+      <div class="pay-hist" [class.with-status]="mode() === 'receipt'">
         @if (drawerHistory().length) {
-          <div class="pay-hist-row pay-hist-head"><span>Date</span><span>Voucher</span><b>Amount</b></div>
+          <div class="pay-hist-row pay-hist-head"><span>Date</span><span>Voucher</span><b>Amount</b>@if (mode() === 'receipt') {<span class="st">Status</span>}</div>
         }
         @for (h of drawerHistory(); track h.voucherNumber) {
-          <div class="pay-hist-row"><span>{{ fmtDate(h.date) }}</span><span class="m">{{ h.voucherNumber }}</span><b>{{ fmt(h.amount) }}</b></div>
+          <div class="pay-hist-row"><span>{{ fmtDate(h.date) }}</span><span class="m">{{ h.voucherNumber }}</span><b>{{ fmt(h.amount) }}</b>@if (h.status; as s) {<span class="st"><span class="erp-badge" [class]="s.cls" [title]="s.title || ''">{{ s.text }}</span></span>}</div>
         } @empty {
           <div class="pay-hist-row"><span class="m">No payments recorded yet against this invoice.</span></div>
         }

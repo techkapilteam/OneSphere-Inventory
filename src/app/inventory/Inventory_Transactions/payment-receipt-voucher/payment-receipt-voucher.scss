@@ -427,6 +427,13 @@
 
   // The "no payments yet" line has nothing to align against.
   > span:only-child { grid-column: 1 / -1; }
+
+  .st { text-align: center; }
+}
+
+// Customer Receipt adds a clearance Status column (Cleared / Pending / Returned).
+.pay-hist.with-status .pay-hist-row {
+  grid-template-columns: 92px minmax(0, 1fr) auto 84px;
 }
 
 .pay-hist-head {

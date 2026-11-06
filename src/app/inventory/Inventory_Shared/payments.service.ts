@@ -125,6 +125,10 @@ export interface PaymentVoucher {
   // Snapshot taken at save time; null on vouchers saved before it existed.
   previous_balance?: number | null;
   remaining_due?: number | null;
+  // Receipts: Accounts clearance of the bank/cheque leg (N pending, Y cleared,
+  // R returned). Null for cash receipts.
+  clear_status?: string | null;
+  clear_date?: string | null;
   narration?: string;
   status: string;
   created_at?: string;
@@ -291,6 +295,8 @@ export class PaymentsService {
       net_amount: r?.netAmount ?? r?.net_amount ?? 0,
       previous_balance: r?.previousBalance ?? r?.previous_balance ?? null,
       remaining_due: r?.remainingDue ?? r?.remaining_due ?? null,
+      clear_status: r?.clearStatus ?? r?.clear_status ?? null,
+      clear_date: r?.clearDate ?? r?.clear_date ?? null,
       narration: r?.narration,
       status: r?.status || 'posted',
       created_at: r?.createdAt ?? r?.created_at,
