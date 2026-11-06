@@ -139,6 +139,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
     filters: [...baseFilters, ...productFilters],
     summaryCards: [
       { label: 'Closing stock value', valueKey: 'stockValue', fallback: 'Rs. 4.82 Cr', icon: 'pi pi-wallet', tone: 'blue' },
+      { label: 'GST on stock', valueKey: 'gstAmount', fallback: 'Rs. 0', icon: 'pi pi-percentage', tone: 'amber' },
       { label: 'Products covered', valueKey: 'productCount', fallback: '1,248', icon: 'pi pi-list', tone: 'green' },
       { label: 'Inward quantity', valueKey: 'inwardQty', fallback: '8,420', icon: 'pi pi-arrow-down', tone: 'green' },
       { label: 'Outward quantity', valueKey: 'outwardQty', fallback: '6,870', icon: 'pi pi-arrow-up', tone: 'amber' }
@@ -155,6 +156,8 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['closingStock', 'Closing Stock', 'number', true],
       ['averageRate', 'Average Rate', 'currency'],
       ['stockValue', 'Stock Value', 'currency', true],
+      ['gstRate', 'GST %', 'percent'],
+      ['gstAmount', 'GST Amount', 'currency', true],
       ['pendingInvoiceQty', 'Dispatched Without SI', 'number', true]
     ]),
     defaultGroupBy: 'category',
