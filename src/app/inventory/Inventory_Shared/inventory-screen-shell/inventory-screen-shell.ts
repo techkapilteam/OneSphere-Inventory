@@ -8455,7 +8455,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       sum.total += lineTotal;
       return [
         String(index + 1),
-        [this.purchaseInvoiceItemName(item), batchNo ? `BATCH NUMBER : ${batchNo}` : ''].filter(Boolean).join('\n'),
+        // Previous: [this.purchaseInvoiceItemName(item), batchNo ? `BATCH NUMBER : ${batchNo}` : ''].filter(Boolean).join('\n'),
+        [this.salesInvoicePrintItemName(this.purchaseInvoiceItemName(item)), batchNo ? `BATCH NUMBER : ${batchNo}` : ''].filter(Boolean).join('\n'),
         this.purchaseInvoiceItemHsn(item),
         Number.isInteger(qty) ? String(qty) : this.moneyValue(qty),
         this.moneyValue(item?.rate ?? 0),
@@ -8479,6 +8480,17 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.moneyValue(sum.total)
     ];
     return { rows, totalRow };
+  }
+
+  // One-off print-only rename (user request 2026-11-07): the product master
+  // keeps its full name, but the Sales Invoice print/PDF drops the "3" from
+  // "Hobby wing X6 plus G2 motors- 3 cw". Add other products here if needed.
+  private salesInvoicePrintItemName(name: string): string {
+    const printNames: Record<string, string> = {
+      'hobby wing x6 plus g2 motors- 3 cw': 'Hobby wing X6 plus G2 motors- cw'
+    };
+    const key = String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    return printNames[key] ?? name;
   }
 
   // Same per-line taxable/tax rule as documentFinancials(): saved values first,
