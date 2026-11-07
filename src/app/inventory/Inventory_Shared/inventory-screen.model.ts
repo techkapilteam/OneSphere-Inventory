@@ -391,17 +391,17 @@ function partyMaster(key: string, title: string, subtitle: string, icon: string)
     columns: ['Code', 'Name', 'Type', 'Segment', 'GSTIN', 'Status'],
     rows: isChannelPartner
       ? [
-          ['CP-001', 'City Sales Associates', 'Referral Partner', 'Electronics', '36CPAAA0001A1Z5', 'Active'],
-          ['CP-002', 'Broker Network', 'Broker', 'Real Estate Inventory', '29CPBBB0002B1Z8', 'Active']
-        ]
+        ['CP-001', 'City Sales Associates', 'Referral Partner', 'Electronics', '36CPAAA0001A1Z5', 'Active'],
+        ['CP-002', 'Broker Network', 'Broker', 'Real Estate Inventory', '29CPBBB0002B1Z8', 'Active']
+      ]
       : [
-          ['V-1001', 'ElectroMart Supplies', 'Supplier', 'Electronics', '36ABCDE1234F1Z5', 'Active'],
-          ['C-204', 'Tenant Works Pvt Ltd', 'Corporate Client', 'Co-working Space', '29PQRSX2211K1Z9', 'Active'],
-          ['P-330', 'Aero Labs', 'Manufacturer', 'Drone Manufacturing', '36AEROL4421F1Z2', 'Active'],
-          isVendor
-            ? ['V-440', 'Fresh Foods Distributor', 'Food Supplier', 'Hotel / Restaurant', '36FOODX4400F1Z6', 'Active']
-            : ['C-501', 'Restaurant Walk-in Guest', 'Restaurant Guest', 'Hotel / Restaurant', 'NA', 'Active']
-        ]
+        ['V-1001', 'ElectroMart Supplies', 'Supplier', 'Electronics', '36ABCDE1234F1Z5', 'Active'],
+        ['C-204', 'Tenant Works Pvt Ltd', 'Corporate Client', 'Co-working Space', '29PQRSX2211K1Z9', 'Active'],
+        ['P-330', 'Aero Labs', 'Manufacturer', 'Drone Manufacturing', '36AEROL4421F1Z2', 'Active'],
+        isVendor
+          ? ['V-440', 'Fresh Foods Distributor', 'Food Supplier', 'Hotel / Restaurant', '36FOODX4400F1Z6', 'Active']
+          : ['C-501', 'Restaurant Walk-in Guest', 'Restaurant Guest', 'Hotel / Restaurant', 'NA', 'Active']
+      ]
   };
 }
 
@@ -866,16 +866,7 @@ export const categoryMasterConfig: InventoryScreenConfig = {
     { key: 'description', label: 'Description', type: 'textarea' },
     { key: 'status', label: 'Status', type: 'select', options: INVENTORY_OPTIONS.status }
   ],
-  columns: ['Category Code', 'Category Name', 'Parent Category', 'Serial Policy', 'Batch / Lot Policy', 'Description', 'Applicable UOMs', 'Status'],
-  rows: [
-    ['CAT-ELEC', 'Electronics', 'None / Main Category', 'Warranty Serial Tracking', 'No', 'Main group for devices, accessories and warranty items', 'Nos, Box', 'Active'],
-    ['CAT-MOB', 'Mobiles', 'Electronics', 'IMEI Required', 'No', 'Child category under Electronics for mobile phones', 'Nos', 'Active'],
-    ['CAT-SEED', 'Seeds', 'Agro Products', 'No', 'Agro Lot Tracking', 'Child category for agro seed stock', 'KG, Bag', 'Active'],
-    ['CAT-FLAT', 'Flats', 'Real Estate Units', 'No', 'No', 'Child category for saleable apartment units', 'Nos', 'Active'],
-    ['CAT-FNB', 'Food & Beverage', 'Hotel / Restaurant', 'No', 'Food Batch With Expiry', 'Main restaurant category for kitchen and counter items', 'KG, Plate', 'Active'],
-    ['CAT-MENU', 'Menu Items', 'Food & Beverage', 'No', 'Recipe Batch Optional', 'Child category for sellable dishes like Paneer Tikka', 'Plate', 'Active'],
-    ['CAT-ROOM', 'Rooms', 'Hotel / Restaurant', 'No', 'No', 'Hotel room inventory for room-night billing', 'Nos', 'Active']
-  ]
+  columns: ['Category Code', 'Category Name', 'Parent Category', 'Policies', 'Batch / Lot Policy', 'Description', 'Applicable UOMs', 'Status'], 
 };
 
 export const brandMasterConfig: InventoryScreenConfig = {
@@ -973,34 +964,55 @@ export const variantMasterConfig: InventoryScreenConfig = {
   lineColumns: ['Attribute Name', 'Attribute Value']
 };
 
+// export const serialNumberPolicyConfig: InventoryScreenConfig = {
+//   key: 'serialNumberPolicy',
+//   title: 'Serial Number Policy Master',
+//   subtitle: 'Define serial/IMEI policy defaults that can be mapped category-wise and overridden in Product Master.',
+//   kind: 'master',
+//   icon: 'pi pi-qrcode',
+//   dependsOn: [
+//     { name: 'Category Master', status: 'Ready' },
+//     { name: 'Product Master override', status: 'Pending Setup' }
+//   ],
+//   outputImpact: 'Serial policy controls whether products require IMEI, serial number, warranty tracking or unique item scanning.',
+//   screenMode: 'Master setup',
+//   fields: [
+//     { key: 'policyName', label: 'Policy Name' },
+//     { key: 'policyCode', label: 'Policy Code' },
+//     { key: 'applicableCategory', label: 'Applicable Category', type: 'select', options: INVENTORY_OPTIONS.categories, addMaster: 'Category' },
+//     { key: 'serialFormat', label: 'Format Notes (optional)' },
+//     { key: 'captureStage', label: 'Capture Stage', type: 'select', options: ['Purchase Inward', 'Sales Invoice', 'Both Inward and Sale', 'Warranty Registration'] },
+//     { key: 'allowDuplicate', label: 'Allow Duplicate Serial No.', type: 'select', options: ['Yes', 'No'] },
+//     { key: 'warrantyApplicable', label: 'Warranty Applicable', type: 'select', options: ['Yes', 'No'] },
+//     { key: 'status', label: 'Status', type: 'select', options: INVENTORY_OPTIONS.status }
+//   ],
+//   columns: ['Policy Code', 'Policy Name', 'Applicable Category', 'Serial Format', 'Capture Stage', 'Allow Duplicate', 'Warranty Applicable', 'Status'],
+//   rows: [
+//     ['SNP-IMEI', 'IMEI Required', 'Mobile & Accessories', '15 digit IMEI', 'Both Inward and Sale', 'No', 'Yes', 'Active'],
+//     ['SNP-SERIAL', 'Serial No Required', 'Computers & Devices', 'Brand serial number', 'Purchase Inward', 'No', 'No', 'Active'],
+//     ['SNP-WAR', 'Warranty Serial Tracking', 'Electronics', 'Alphanumeric', 'Warranty Registration', 'No', 'Yes', 'Active']
+//   ]
+// };
+
 export const serialNumberPolicyConfig: InventoryScreenConfig = {
   key: 'serialNumberPolicy',
-  title: 'Serial Number Policy Master',
-  subtitle: 'Define serial/IMEI policy defaults that can be mapped category-wise and overridden in Product Master.',
+  title: 'Policy Master',
+  subtitle: 'Define the identifiers your business captures per unit (Serial No, IMEI, Chassis No, UIN ...). Categories choose which policies apply, when they are captured and whether they are mandatory.',
   kind: 'master',
   icon: 'pi pi-qrcode',
   dependsOn: [
-    { name: 'Category Master', status: 'Ready' },
-    { name: 'Product Master override', status: 'Pending Setup' }
+    { name: 'Category Master (policies per category)', status: 'Ready' }
   ],
-  outputImpact: 'Serial policy controls whether products require IMEI, serial number, warranty tracking or unique item scanning.',
+  outputImpact: 'A policy is a reusable identifier type. Its capture stage, mandatory flag and Unique Identifier are set per category in Category Master.',
   screenMode: 'Master setup',
   fields: [
     { key: 'policyName', label: 'Policy Name' },
     { key: 'policyCode', label: 'Policy Code' },
-    { key: 'applicableCategory', label: 'Applicable Category', type: 'select', options: INVENTORY_OPTIONS.categories, addMaster: 'Category' },
     { key: 'serialFormat', label: 'Format Notes (optional)' },
-    { key: 'captureStage', label: 'Capture Stage', type: 'select', options: ['Purchase Inward', 'Sales Invoice', 'Both Inward and Sale', 'Warranty Registration'] },
-    { key: 'allowDuplicate', label: 'Allow Duplicate Serial No.', type: 'select', options: ['Yes', 'No'] },
-    { key: 'warrantyApplicable', label: 'Warranty Applicable', type: 'select', options: ['Yes', 'No'] },
     { key: 'status', label: 'Status', type: 'select', options: INVENTORY_OPTIONS.status }
   ],
-  columns: ['Policy Code', 'Policy Name', 'Applicable Category', 'Serial Format', 'Capture Stage', 'Allow Duplicate', 'Warranty Applicable', 'Status'],
-  rows: [
-    ['SNP-IMEI', 'IMEI Required', 'Mobile & Accessories', '15 digit IMEI', 'Both Inward and Sale', 'No', 'Yes', 'Active'],
-    ['SNP-SERIAL', 'Serial No Required', 'Computers & Devices', 'Brand serial number', 'Purchase Inward', 'No', 'No', 'Active'],
-    ['SNP-WAR', 'Warranty Serial Tracking', 'Electronics', 'Alphanumeric', 'Warranty Registration', 'No', 'Yes', 'Active']
-  ]
+  columns: ['Policy Code', 'Policy Name', 'Format Notes', 'Used In', 'Status'],
+  rows: []
 };
 
 export const batchLotPolicyConfig: InventoryScreenConfig = {
@@ -1051,7 +1063,8 @@ export const bomMasterConfig: InventoryScreenConfig = {
     { key: 'productionCost', label: 'Production Cost', type: 'number' },
     { key: 'status', label: 'Status', type: 'select', options: INVENTORY_OPTIONS.status }
   ],
-  columns: ['BOM Code', 'Finished Product', 'Version', 'Raw Materials', 'Quantity', 'Wastage %', 'Production Cost', 'Status'],
+  // columns: ['BOM Code', 'Finished Product', 'Version', 'Raw Materials', 'Quantity', 'Wastage %', 'Production Cost', 'Status'],
+  columns: ['BOM Code', 'Finished Product', 'Version', 'Raw Materials (per 1 unit)', 'Materials', 'Production Cost', 'Status'],
   rows: [
     ['BOM-DRN-01', 'Drone Motor', 'V1', 'Battery Pack, Flight Controller', '1', '2', '12500', 'Active'],
     ['BOM-MENU-01', 'Paneer Tikka', 'V1', 'Paneer, Spice Mix', '1 Plate', '3', '145', 'Active']
@@ -1231,14 +1244,14 @@ export const productServiceMasterConfig: InventoryScreenConfig = {
     { key: 'saleUom', label: 'Saleable / Billable UOM', type: 'select', options: INVENTORY_OPTIONS.uoms, addMaster: 'UOM' },
     { key: 'behavior', label: 'Transaction Behavior', type: 'select', options: INVENTORY_OPTIONS.behavior }
   ],
-  columns: ['Product Code', 'SKU', 'Name', 'Product Category', 'Base UOM', 'Variants', 'Mapped UOMs', 'Valuation', 'HSN/SAC', 'GST %', 'Status'],
+  columns: ['Product Code', 'SKU', 'Name', 'Product Category', 'Product Nature', 'Base UOM', 'Variants', 'Mapped UOMs', 'Valuation', 'HSN/SAC', 'GST %', 'Status'],
   rows: [
-    ['ITM-1001', 'LED Display', 'LED Display', 'Computers & Devices', 'Nos', '', '', 'FIFO', '8471', '18', 'Active'],
-    ['SRV-2090', 'AMC Support', 'AMC Support', 'IT Services', 'Month', '', '', 'Weighted Average', '998313', '18', 'Active'],
-    ['UNT-A1204', 'Flat A-1204', 'Flat A-1204', 'Real Estate Units', 'Unit', '', '', 'Specific Identification', '9954', '18', 'Active'],
-    ['FOD-1001', 'Basmati Rice', 'Basmati Rice', 'Raw Ingredients', 'KG', '', 'Bag x 25 (Purchase)', 'FIFO', '1006', '5', 'Active'],
-    ['MENU-204', 'Paneer Tikka', 'Paneer Tikka', 'Menu Items', 'Plate', '', '', 'Recipe Cost', '996331', '5', 'Active'],
-    ['ROOM-304', 'Deluxe Room 304', 'Deluxe Room 304', 'Rooms', 'Room-Night', '', '', 'Specific Identification', '996332', '12', 'Active']
+    ['ITM-1001', 'LED Display', 'LED Display', 'Computers & Devices', '', 'Nos', '', '', 'FIFO', '8471', '18', 'Active'],
+    ['SRV-2090', 'AMC Support', 'AMC Support', 'IT Services', '', 'Month', '', '', 'Weighted Average', '998313', '18', 'Active'],
+    ['UNT-A1204', 'Flat A-1204', 'Flat A-1204', 'Real Estate Units', '', 'Unit', '', '', 'Specific Identification', '9954', '18', 'Active'],
+    ['FOD-1001', 'Basmati Rice', 'Basmati Rice', 'Raw Ingredients', '', 'KG', '', 'Bag x 25 (Purchase)', 'FIFO', '1006', '5', 'Active'],
+    ['MENU-204', 'Paneer Tikka', 'Paneer Tikka', 'Menu Items', '', 'Plate', '', '', 'Recipe Cost', '996331', '5', 'Active'],
+    ['ROOM-304', 'Deluxe Room 304', 'Deluxe Room 304', 'Rooms', '', 'Room-Night', '', '', 'Specific Identification', '996332', '12', 'Active']
   ],
   lineTitle: 'Alternate UOM Conversion Mapping',
   lineColumns: ['Alternate UOM', 'Conversion Factor', 'Is Purchase', 'Is Sales', 'Active'],
@@ -1295,7 +1308,7 @@ export const purchaseOrderConfig = transaction(
       { key: 'poDate', label: 'PO Date', type: 'date' },
       { key: 'expectedDelivery', label: 'Expected Delivery', type: 'date' },
       { key: 'linkedPr', label: 'RFQ Reference' },
-      { key: 'supplier', label: 'Party / Vendor', type: 'select', options: INVENTORY_OPTIONS.suppliers, addMaster: 'Vendor' },
+      { key: 'supplier', label: 'Party / Vendor', type: 'select', options: [], addMaster: 'Vendor' },
       { key: 'receivingWarehouse', label: 'Receiving WH', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
       { key: 'currency', label: 'Currency', type: 'select', options: INVENTORY_OPTIONS.currencies },
       { key: 'paymentTerms', label: 'Payment Terms', type: 'select', options: INVENTORY_OPTIONS.paymentTerms },
@@ -1335,7 +1348,7 @@ export const goodsReceiptConfig = transaction(
       { key: 'segment', label: 'Business Segment', type: 'select', options: INVENTORY_OPTIONS.segments, addMaster: 'Business Segment' },
       { key: 'grnNo', label: 'GRN Number' },
       { key: 'grnDate', label: 'GRN Date', type: 'date' },
-      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: INVENTORY_OPTIONS.suppliers, addMaster: 'Vendor' },
+      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: [], addMaster: 'Vendor' },
       { key: 'poReference', label: 'PO Reference / Direct' },
       { key: 'vendorInvoiceNo', label: 'Vendor Invoice No' },
       { key: 'vendorInvoiceDate', label: 'Vendor Invoice Date', type: 'date' },
@@ -1376,7 +1389,7 @@ export const purchaseInvoiceConfig = transaction(
       { key: 'segment', label: 'Business Segment', type: 'select', options: INVENTORY_OPTIONS.segments, addMaster: 'Business Segment' },
       { key: 'piNo', label: 'PI Number' },
       { key: 'piDate', label: 'PI Date', type: 'date' },
-      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: INVENTORY_OPTIONS.suppliers, addMaster: 'Vendor' },
+      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: [], addMaster: 'Vendor' },
       { key: 'grnReference', label: 'GRN Reference / Direct' },
       { key: 'vendorInvoiceNo', label: 'Vendor Invoice No' },
       { key: 'vendorInvoiceDate', label: 'Vendor Invoice Date', type: 'date' },
@@ -1392,9 +1405,14 @@ export const purchaseInvoiceConfig = transaction(
     // actually references a posted GRN, where it displays (read-only) the
     // GRN's accepted quantity -- see item 5. Received Qty is intentionally
     // NOT a PI column: PI always bills on Accepted Qty when GRN-linked.
-    lineColumns: ['Product', 'Variant', 'Attribute', 'UOM', 'Qty', 'Accepted Qty', 'Rate', 'MRP', 'Selling Price', 'Disc %', 'GST', 'Batch No', 'Serial No', 'Expiry Date', 'Warranty Upto', 'Amount'],
+    // Previous: lineColumns: ['Product', 'Variant', 'Attribute', 'UOM', 'Qty', 'Accepted Qty', 'Rate', 'MRP', 'Selling Price', 'Disc %', 'GST', 'Batch No', 'Serial No', 'Expiry Date', 'Warranty Upto', 'Amount'],
+    // Warranty Upto column removed: warranty is entered per serial in the
+    // serial popup (saved on inv_serial_units), the only place the Sales
+    // Invoice reads it from.
+    lineColumns: ['Product', 'Variant', 'Attribute', 'UOM', 'Qty', 'Accepted Qty', 'Rate', 'MRP', 'Selling Price', 'Disc %', 'GST', 'Batch No', 'Serial No', 'Expiry Date', 'Amount'],
     lineRows: [],
-    columns: ['PI No', 'PI Date', 'Vendor', 'Warehouse / Branch', 'GRN Ref', 'Amount', 'Due Date', 'Status'],
+    // Previous: columns: ['PI No', 'PI Date', 'Vendor', 'Warehouse / Branch', 'GRN Ref', 'Amount', 'Due Date', 'Status'],
+    columns: ['PI No', 'PI Date', 'Vendor', 'Warehouse / Branch', 'GRN Ref', 'Transport Charges', 'Amount', 'Due Date', 'Status'],
     rows: []
   }
 );
@@ -1421,8 +1439,12 @@ export const salesInvoiceConfig = transaction(
       { key: 'dueDate', label: 'Due Date', type: 'date' },
       { key: 'soReference', label: 'Reference', type: 'select', options: [] },
       { key: 'referenceNo', label: 'Reference' },
-      { key: 'customer', label: 'Party / Customer', type: 'select', options: INVENTORY_OPTIONS.customers, addMaster: 'Customer' },
+      { key: 'customer', label: 'Party / Customer', type: 'select', options: [], addMaster: 'Customer' },
       { key: 'channelPartner', label: 'Channel Partner', type: 'select', options: [], addMaster: 'Channel Partner' },
+      // Global Contacts holding the "Lead By" role (Contacts screen tab after
+      // Freelancer). "+" opens Add Global Contact and marks the new contact
+      // Lead By.
+      { key: 'leadBy', label: 'Lead By', type: 'select', options: [], addMaster: 'Contact Person' },
       { key: 'placeOfSupply', label: 'Place of Supply', type: 'select', options: ['Telangana', 'Karnataka', 'Andhra Pradesh', 'Maharashtra'] },
       // Full Warehouse/Branch Independence: the same merged Warehouse/Branch
       // picker GRN/PI/DC/Purchase Return use -- a branch pick posts stock
@@ -1453,7 +1475,9 @@ export const salesInvoiceConfig = transaction(
     // Warehouse column (line ~1290 above) is a real, independently-editable
     // per-line field and stays untouched -- this removal is Sales Invoice
     // only.
-    lineColumns: ['Item / SKU', 'Variant', 'Attribute', 'UOM', 'Qty', 'Rate', 'Disc %', 'GST', 'Batch No', 'Serial No', 'Expiry Date', 'Warranty Upto', 'Amount'],
+    // Previous: lineColumns: ['Item / SKU', 'Variant', 'Attribute', 'UOM', 'Qty', 'Rate', 'Disc %', 'GST', 'Batch No', 'Serial No', 'Expiry Date', 'Warranty Upto', 'Amount'],
+    // Warranty Upto column removed from the Sales Invoice grid.
+    lineColumns: ['Item / SKU', 'Variant', 'Attribute', 'UOM', 'Qty', 'Rate', 'Disc %', 'GST', 'Batch No', 'Serial No', 'Expiry Date', 'Amount'],
     lineRows: [
       ['LED Display 32 inch', '', '', 'Nos', '2', '24,500', '26,000', '24,500', '0', '18%', 'NA', 'SN-1042, SN-1043', 'NA', 'HYD Main WH', '57,820'],
       ['Agro Seed Premium', '', '', 'Bag', '10', '2,150', '2,300', '2,150', '1', '5%', 'LOT-AGRO-0526-A', 'NA', '18-Dec-2026', 'BLR Store', '22,349'],
@@ -1630,7 +1654,7 @@ export const vendorPaymentConfig = transaction(
   {
     screenMode: 'Payment settlement',
     fields: [
-      { key: 'vendor', label: 'Vendor', type: 'select', options: INVENTORY_OPTIONS.suppliers, addMaster: 'Vendor' },
+      { key: 'vendor', label: 'Vendor', type: 'select', options: [], addMaster: 'Vendor' },
       { key: 'voucherDate', label: 'Voucher Date', type: 'date' },
       { key: 'amountToPay', label: 'Amount To Pay', type: 'number' },
       { key: 'purchaseInvoice', label: 'Purchase Invoice Allocation', type: 'multiselect' },
@@ -1657,7 +1681,7 @@ export const customerReceiptConfig = transaction(
   {
     screenMode: 'Receipt settlement',
     fields: [
-      { key: 'customer', label: 'Customer', type: 'select', options: INVENTORY_OPTIONS.customers, addMaster: 'Customer' },
+      { key: 'customer', label: 'Customer', type: 'select', options: [], addMaster: 'Customer' },
       { key: 'voucherDate', label: 'Voucher Date', type: 'date' },
       { key: 'amountReceived', label: 'Amount Received', type: 'number' },
       { key: 'salesInvoice', label: 'Sales Invoice Allocation', type: 'multiselect' },
@@ -1723,7 +1747,7 @@ export const requestForQuotationConfig = transaction(
       { key: 'rfqNo', label: 'RFQ Number' },
       { key: 'rfqDate', label: 'RFQ Date', type: 'date' },
       { key: 'validTill', label: 'Valid Till', type: 'date' },
-      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: INVENTORY_OPTIONS.suppliers, addMaster: 'Vendor' },
+      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: [], addMaster: 'Vendor' },
       { key: 'prReference', label: 'PR Reference' },
       { key: 'currency', label: 'Currency', type: 'select', options: INVENTORY_OPTIONS.currencies },
       { key: 'deliveryLocation', label: 'Delivery Location', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
@@ -1748,20 +1772,22 @@ export const requestForQuotationConfig = transaction(
 export const purchaseReturnConfig = transaction(
   'purchaseReturn',
   'Purchase Return',
-  'Return rejected or excess goods to vendor against a posted PI or direct return',
+  // Previous: 'Return rejected or excess goods to vendor against a posted PI or direct return',
+  'Return rejected or excess goods to vendor against a posted PI',
   'pi pi-reply',
   [
     { name: 'Posted Purchase Invoice reference', status: 'Required' },
     { name: 'Vendor Master', status: 'Ready' },
     { name: 'Product Master', status: 'Ready' }
   ],
-  'Purchase return reduces stock when posted. It can be raised against a posted Purchase Invoice or entered directly when needed.',
+  // Previous: 'Purchase return reduces stock when posted. It can be raised against a posted Purchase Invoice or entered directly when needed.',
+  'Purchase return reduces stock when posted. It can only be raised against a posted Purchase Invoice.',
   {
     screenMode: 'Purchase return entry',
     fields: [
       { key: 'returnNo', label: 'Return Number' },
       { key: 'returnDate', label: 'Return Date', type: 'date' },
-      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: INVENTORY_OPTIONS.suppliers, addMaster: 'Vendor' },
+      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: [], addMaster: 'Vendor' },
       { key: 'piReference', label: 'PI Reference', type: 'select', options: [] },
       // Full Warehouse/Branch Independence: now the same merged Warehouse/
       // Branch picker GRN/PI/DC use (runtimeOptions() returns the merged
@@ -1807,7 +1833,7 @@ export const salesEnquiryConfig = transaction(
       { key: 'enquiryNo', label: 'Enquiry Number' },
       { key: 'enquiryDate', label: 'Enquiry Date', type: 'date' },
       { key: 'referenceNo', label: 'Reference' },
-      { key: 'customer', label: 'Party / Customer', type: 'select', options: INVENTORY_OPTIONS.customers, addMaster: 'Customer' },
+      { key: 'customer', label: 'Party / Customer', type: 'select', options: [], addMaster: 'Customer' },
       { key: 'contactPerson', label: 'Contact Person', type: 'select', options: INVENTORY_OPTIONS.contactPersons, addMaster: 'Contact Person' },
       { key: 'expectedDelivery', label: 'Expected Delivery', type: 'date' },
       { key: 'branch', label: 'Branch', type: 'select', options: INVENTORY_OPTIONS.branches },
@@ -1847,7 +1873,7 @@ export const salesQuotationConfig = transaction(
       { key: 'quotationNo', label: 'Quotation Number' },
       { key: 'quotationDate', label: 'Quotation Date', type: 'date' },
       { key: 'validTill', label: 'Valid Till', type: 'date' },
-      { key: 'customer', label: 'Party / Customer', type: 'select', options: INVENTORY_OPTIONS.customers, addMaster: 'Customer' },
+      { key: 'customer', label: 'Party / Customer', type: 'select', options: [], addMaster: 'Customer' },
       { key: 'priceList', label: 'Price List', type: 'select', options: ['Retail Price List', 'Dealer Price List', 'Corporate Price List'], addMaster: 'Price List' },
       { key: 'currency', label: 'Currency', type: 'select', options: INVENTORY_OPTIONS.currencies },
       { key: 'enquiryRef', label: 'Enquiry Reference' },
@@ -1884,7 +1910,7 @@ export const salesOrderConfig = transaction(
     fields: [
       { key: 'soNo', label: 'SO Number' },
       { key: 'soDate', label: 'SO Date', type: 'date' },
-      { key: 'customer', label: 'Party / Customer', type: 'select', options: INVENTORY_OPTIONS.customers, addMaster: 'Customer' },
+      { key: 'customer', label: 'Party / Customer', type: 'select', options: [], addMaster: 'Customer' },
       { key: 'creditSale', label: 'Credit Sale', type: 'select', options: ['Yes', 'No'] },
       { key: 'paymentTerms', label: 'Payment Terms', type: 'select', options: INVENTORY_OPTIONS.paymentTerms },
       { key: 'dueDate', label: 'Due Date', type: 'date' },
@@ -1920,7 +1946,7 @@ export const deliveryChallanConfig = transaction(
       { key: 'dcNo', label: 'DC Number' },
       { key: 'dcDate', label: 'DC Date', type: 'date' },
       { key: 'soReference', label: 'Reference (SO / Invoice)', type: 'select', options: [] },
-      { key: 'customer', label: 'Party / Customer', type: 'select', options: INVENTORY_OPTIONS.customers, addMaster: 'Customer' },
+      { key: 'customer', label: 'Party / Customer', type: 'select', options: [], addMaster: 'Customer' },
       { key: 'fromWarehouse', label: 'From Warehouse / Branch', type: 'select', options: [], addMaster: 'Location' },
       { key: 'vehicle', label: 'Vehicle', type: 'select', options: ['TS09AB1234', 'KA03CD7788', 'TS10RF4421'], addMaster: 'Vehicle' },
       { key: 'transporter', label: 'Transporter', type: 'select', options: ['BuildWell Logistics', 'Fresh Cold Chain', 'Own Fleet'], addMaster: 'Transporter' },
@@ -1957,9 +1983,10 @@ export const salesReturnConfig = transaction(
     fields: [
       { key: 'returnNo', label: 'Return Number' },
       { key: 'returnDate', label: 'Return Date', type: 'date' },
-      { key: 'customer', label: 'Party / Customer', type: 'select', options: INVENTORY_OPTIONS.customers, addMaster: 'Customer' },
+      { key: 'customer', label: 'Party / Customer', type: 'select', options: [], addMaster: 'Customer' },
       { key: 'invoiceReference', label: 'Invoice Reference', type: 'select', options: [] },
-      { key: 'returnToWarehouse', label: 'Return To Warehouse', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
+      // Previous: { key: 'returnToWarehouse', label: 'Return To Warehouse', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
+      { key: 'returnToWarehouse', label: 'Return To Branch', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
       { key: 'returnReason', label: 'Return Reason', type: 'select', options: ['Wrong Product Delivered', 'Damaged in Delivery', 'Customer Cancelled', 'Quality Issue', 'Excess Quantity'] },
       { key: 'remarks', label: 'Remarks', type: 'textarea' }
     ],
@@ -2063,6 +2090,45 @@ export const cycleCountConfig = transaction(
 // MANUFACTURING TRANSACTIONS
 // ─────────────────────────────────────────────────────────────────────────────
 
+// export const productionPlanningConfig = transaction(
+//   'productionPlanning',
+//   'Production Planning',
+//   'Plan production runs with finished product, BOM version and raw material requirements',
+//   'pi pi-calendar-plus',
+//   [
+//     { name: 'BOM Master', status: 'Ready' },
+//     { name: 'Work Center Master', status: 'Ready' },
+//     { name: 'Raw Material Stock', status: 'Pending Setup' }
+//   ],
+//   'Production plan drives material issue, production entry and finished goods stock.',
+//   {
+//     screenMode: 'Production planning',
+//     fields: [
+//       { key: 'planNo', label: 'Plan Number' },
+//       { key: 'planDate', label: 'Plan Date', type: 'date' },
+//       { key: 'productionDate', label: 'Production Date', type: 'date' },
+//       { key: 'finishedProduct', label: 'Finished Product', type: 'select', options: INVENTORY_OPTIONS.products, addMaster: 'Product / Service' },
+//       { key: 'plannedQty', label: 'Planned Qty', type: 'number' },
+//       { key: 'bomVersion', label: 'BOM Version', type: 'select', options: ['V1', 'V2', 'V3', 'Latest'], addMaster: 'BOM' },
+//       { key: 'workCenter', label: 'Work Center', type: 'select', options: ['Assembly Line', 'Quality Check', 'Kitchen Station'], addMaster: 'Work Center' },
+//       { key: 'warehouse', label: 'Production Warehouse / Branch', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
+//       { key: 'remarks', label: 'Remarks', type: 'textarea' }
+//     ],
+//     lineTitle: 'Raw Material Requirement Grid',
+//     lineColumns: ['Raw Material', 'Variant', 'Attribute', 'UOM', 'Required Qty', 'Available Qty', 'Shortage', 'Batch Req'],
+//     lineRows: [
+//       ['Drone Motor', '', '', 'Nos', '48', '620', '0', 'Yes'],
+//       ['Flight Controller', '', '', 'Nos', '12', '86', '0', 'No'],
+//       ['Battery Pack', '', '', 'Nos', '12', '55', '0', 'Yes']
+//     ],
+//     columns: ['Plan No', 'Plan Date', 'Finished Product', 'Planned Qty', 'Work Center', 'Status'],
+//     rows: [
+//       ['PP-001', '08-May-2026', 'Drone Motor', '12 Sets', 'Assembly Line', 'In Progress'],
+//       ['PP-002', '07-May-2026', 'Paneer Tikka', '50 Plates', 'Kitchen Station', 'Completed']
+//     ]
+//   }
+// );
+
 export const productionPlanningConfig = transaction(
   'productionPlanning',
   'Production Planning',
@@ -2070,7 +2136,8 @@ export const productionPlanningConfig = transaction(
   'pi pi-calendar-plus',
   [
     { name: 'BOM Master', status: 'Ready' },
-    { name: 'Work Center Master', status: 'Ready' },
+    // Hidden: Work Center removed from Production Planning
+    // { name: 'Work Center Master', status: 'Ready' },
     { name: 'Raw Material Stock', status: 'Pending Setup' }
   ],
   'Production plan drives material issue, production entry and finished goods stock.',
@@ -2080,27 +2147,63 @@ export const productionPlanningConfig = transaction(
       { key: 'planNo', label: 'Plan Number' },
       { key: 'planDate', label: 'Plan Date', type: 'date' },
       { key: 'productionDate', label: 'Production Date', type: 'date' },
-      { key: 'finishedProduct', label: 'Finished Product', type: 'select', options: INVENTORY_OPTIONS.products, addMaster: 'Product / Service' },
+      // Options come from Product Master (Finished / Semi-Finished products only).
+      { key: 'finishedProduct', label: 'Finished Product', type: 'select', options: [], addMaster: 'Product / Service' },
       { key: 'plannedQty', label: 'Planned Qty', type: 'number' },
-      { key: 'bomVersion', label: 'BOM Version', type: 'select', options: ['V1', 'V2', 'V3', 'Latest'], addMaster: 'BOM' },
-      { key: 'workCenter', label: 'Work Center', type: 'select', options: ['Assembly Line', 'Quality Check', 'Kitchen Station'], addMaster: 'Work Center' },
+      // Options come from BOM Master (versions of the selected finished product).
+      { key: 'bomVersion', label: 'BOM Version', type: 'select', options: [], addMaster: 'BOM' },
+      // Options come from Work Center Master.
+      { key: 'workCenter', label: 'Work Center', type: 'select', options: [], addMaster: 'Work Center' },
       { key: 'warehouse', label: 'Production Warehouse / Branch', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
       { key: 'remarks', label: 'Remarks', type: 'textarea' }
     ],
     lineTitle: 'Raw Material Requirement Grid',
-    lineColumns: ['Raw Material', 'Variant', 'Attribute', 'UOM', 'Required Qty', 'Available Qty', 'Shortage', 'Batch Req'],
-    lineRows: [
-      ['Drone Motor', '', '', 'Nos', '48', '620', '0', 'Yes'],
-      ['Flight Controller', '', '', 'Nos', '12', '86', '0', 'No'],
-      ['Battery Pack', '', '', 'Nos', '12', '55', '0', 'Yes']
-    ],
+    lineColumns: ['Raw Material', 'Variant', 'Attribute', 'UOM', 'Required Qty'],
+    // Rows come from the BOM (Required Qty = BOM qty per 1 unit x Planned Qty).
+    lineRows: [],
     columns: ['Plan No', 'Plan Date', 'Finished Product', 'Planned Qty', 'Work Center', 'Status'],
-    rows: [
-      ['PP-001', '08-May-2026', 'Drone Motor', '12 Sets', 'Assembly Line', 'In Progress'],
-      ['PP-002', '07-May-2026', 'Paneer Tikka', '50 Plates', 'Kitchen Station', 'Completed']
-    ]
+    // Saved plans come from the API.
+    rows: []
   }
 );
+
+// export const materialIssueProductionConfig = transaction(
+//   'materialIssueProduction',
+//   'Material Issue for Production',
+//   'Issue raw materials from warehouse to production work center against a production plan',
+//   'pi pi-arrow-up-right',
+//   [
+//     { name: 'Production Plan reference', status: 'Required' },
+//     { name: 'Raw Material Stock', status: 'Ready' },
+//     { name: 'Warehouse / Work Center', status: 'Ready' }
+//   ],
+//   'Stock decreases from raw material store. Production WIP is updated.',
+//   {
+//     screenMode: 'Material issue for production',
+//     fields: [
+//       { key: 'issueNo', label: 'Issue Number' },
+//       { key: 'issueDate', label: 'Issue Date', type: 'date' },
+//       { key: 'productionRef', label: 'Production Plan Ref' },
+//       { key: 'forFinishedProduct', label: 'For Finished Product', type: 'select', options: INVENTORY_OPTIONS.products, addMaster: 'Product / Service' },
+//       { key: 'fromWarehouse', label: 'Production Warehouse / Branch', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
+//       { key: 'toWorkCenter', label: 'To Work Center', type: 'select', options: ['Assembly Line', 'Quality Check', 'Kitchen Station'], addMaster: 'Work Center' },
+//       { key: 'issuedBy', label: 'Issued By', type: 'select', options: INVENTORY_OPTIONS.contactPersons },
+//       { key: 'remarks', label: 'Remarks', type: 'textarea' }
+//     ],
+//     lineTitle: 'Issued Materials',
+//     lineColumns: ['Raw Material', 'Variant', 'Attribute', 'UOM', 'Required Qty', 'Issued Qty', 'Batch / Lot No', 'Serial No'],
+//     lineRows: [
+//       ['Drone Motor', '', '', 'Nos', '48', '48', 'LOT-DRN-001', ''],
+//       ['Flight Controller', '', '', 'Nos', '12', '12', '', ''],
+//       ['Basmati Rice', '', '', 'KG', '20', '20', 'LOT-7781', '']
+//     ],
+//     columns: ['Issue No', 'Issue Date', 'Production Ref', 'From WH', 'Items', 'Status'],
+//     rows: [
+//       ['MI-001', '09-May-2026', 'PP-001', 'Manufacturing Store', '3', 'Posted'],
+//       ['MI-002', '08-May-2026', 'PP-002', 'Main Kitchen Store', '4', 'Posted']
+//     ]
+//   }
+// );
 
 export const materialIssueProductionConfig = transaction(
   'materialIssueProduction',
@@ -2119,48 +2222,86 @@ export const materialIssueProductionConfig = transaction(
       { key: 'issueNo', label: 'Issue Number' },
       { key: 'issueDate', label: 'Issue Date', type: 'date' },
       { key: 'productionRef', label: 'Production Plan Ref' },
-      { key: 'forFinishedProduct', label: 'For Finished Product', type: 'select', options: INVENTORY_OPTIONS.products, addMaster: 'Product / Service' },
+      // Both come from the picked Production Plan (read-only on screen).
+      { key: 'forFinishedProduct', label: 'For Finished Product', type: 'select', options: [] },
+      { key: 'bomVersion', label: 'BOM Version' },
       { key: 'fromWarehouse', label: 'Production Warehouse / Branch', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
-      { key: 'toWorkCenter', label: 'To Work Center', type: 'select', options: ['Assembly Line', 'Quality Check', 'Kitchen Station'], addMaster: 'Work Center' },
+      // Options come from Work Center Master.
+      { key: 'toWorkCenter', label: 'To Work Center', type: 'select', options: [], addMaster: 'Work Center' },
       { key: 'issuedBy', label: 'Issued By', type: 'select', options: INVENTORY_OPTIONS.contactPersons },
       { key: 'remarks', label: 'Remarks', type: 'textarea' }
     ],
     lineTitle: 'Issued Materials',
-    lineColumns: ['Raw Material', 'Variant', 'Attribute', 'UOM', 'Required Qty', 'Issued Qty', 'Batch / Lot No', 'Serial No'],
-    lineRows: [
-      ['Drone Motor', '', '', 'Nos', '48', '48', 'LOT-DRN-001', ''],
-      ['Flight Controller', '', '', 'Nos', '12', '12', '', ''],
-      ['Basmati Rice', '', '', 'KG', '20', '20', 'LOT-7781', '']
-    ],
-    columns: ['Issue No', 'Issue Date', 'Production Ref', 'From WH', 'Items', 'Status'],
-    rows: [
-      ['MI-001', '09-May-2026', 'PP-001', 'Manufacturing Store', '3', 'Posted'],
-      ['MI-002', '08-May-2026', 'PP-002', 'Main Kitchen Store', '4', 'Posted']
-    ]
+    lineColumns: ['Raw Material', 'Variant', 'Attribute', 'UOM', 'Required Qty', 'Available Qty', 'Issued Qty', 'Batch / Lot No', 'Serial No'],
+    columns: ['Issue No', 'Issue Date', 'Production Ref', 'From WH','Materials Issued', 'Items', 'Status']
   }
 );
+
+// export const productionEntryConfig = transaction(
+//   'productionEntry',
+//   'Production Entry',
+//   'Record production output with produced, rejected quantities and tentative cost',
+//   'pi pi-cog',
+//   [
+//     { name: 'Production Plan', status: 'Required' },
+//     { name: 'Material Issue reference', status: 'Ready' },
+//     { name: 'Finished Goods Warehouse', status: 'Ready' }
+//   ],
+//   'Finished goods stock increases. Production cost is captured. Rejected qty goes to QC hold.',
+//   {
+//     screenMode: 'Production output entry',
+//     fields: [
+//       { key: 'productionNo', label: 'Production Number' },
+//       { key: 'productionDate', label: 'Production Date', type: 'date' },
+//       { key: 'planRef', label: 'Production Plan Ref' },
+//       { key: 'finishedProduct', label: 'Finished Product', type: 'select', options: INVENTORY_OPTIONS.products, addMaster: 'Product / Service' },
+//       { key: 'producedQty', label: 'Produced Qty', type: 'number' },
+//       { key: 'rejectedQty', label: 'Rejected Qty', type: 'number' },
+//       { key: 'productionCost', label: 'Production Cost (Tentative)', type: 'number' },
+//       { key: 'toWarehouse', label: 'Production Warehouse / Branch', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
+//       { key: 'batchNo', label: 'Batch / Lot No' },
+//       { key: 'expiryDate', label: 'Expiry Date', type: 'date' },
+//       { key: 'remarks', label: 'Remarks', type: 'textarea' }
+//     ],
+//     lineTitle: 'Production Output Summary',
+//     lineColumns: ['Finished Product', 'Variant', 'Attribute', 'UOM', 'Planned Qty', 'Produced Qty', 'Rejected Qty', 'Production Cost (Tentative)', 'Batch / Lot No', 'Expiry Date', 'Serial No'],
+//     lineRows: [
+//       ['Drone Motor', '', '', 'Nos', '12 Sets', '11 Sets', '1 Set', 'Rs. 1,10,000', '', '', ''],
+//       ['Paneer Tikka', '', '', 'Plate', '50 Plates', '50 Plates', '0', 'Rs. 7,250', '', '', '']
+//     ],
+//     columns: ['Production No', 'Date', 'Finished Product', 'Produced', 'Rejected', 'Cost', 'Status'],
+//     rows: [
+//       ['PRD-001', '09-May-2026', 'Drone Motor', '11 Sets', '1 Set', 'Rs. 1,10,000', 'Posted'],
+//       ['PRD-002', '08-May-2026', 'Paneer Tikka', '50 Plates', '0', 'Rs. 7,250', 'Posted']
+//     ]
+//   }
+// );
 
 export const productionEntryConfig = transaction(
   'productionEntry',
   'Production Entry',
-  'Record production output with produced, rejected quantities and tentative cost',
+  'Record production output with produced and rejected quantities; cost comes from the material issued',
   'pi pi-cog',
   [
     { name: 'Production Plan', status: 'Required' },
     { name: 'Material Issue reference', status: 'Ready' },
     { name: 'Finished Goods Warehouse', status: 'Ready' }
   ],
-  'Finished goods stock increases. Production cost is captured. Rejected qty goes to QC hold.',
+  'Finished goods stock increases at the cost of the material used. WIP is cleared.',
   {
     screenMode: 'Production output entry',
     fields: [
       { key: 'productionNo', label: 'Production Number' },
       { key: 'productionDate', label: 'Production Date', type: 'date' },
       { key: 'planRef', label: 'Production Plan Ref' },
-      { key: 'finishedProduct', label: 'Finished Product', type: 'select', options: INVENTORY_OPTIONS.products, addMaster: 'Product / Service' },
+      // From the picked Production Plan (read-only).
+      { key: 'finishedProduct', label: 'Finished Product', type: 'select', options: [] },
+      // How many the issued material can make (read-only).
+      { key: 'producibleQty', label: 'Can Produce (from issued material)' },
       { key: 'producedQty', label: 'Produced Qty', type: 'number' },
       { key: 'rejectedQty', label: 'Rejected Qty', type: 'number' },
-      { key: 'productionCost', label: 'Production Cost (Tentative)', type: 'number' },
+      // (Produced + Rejected) x cost per set. Calculated, read-only.
+      { key: 'productionCost', label: 'Production Cost', type: 'number' },
       { key: 'toWarehouse', label: 'Production Warehouse / Branch', type: 'select', options: INVENTORY_OPTIONS.locations, addMaster: 'Location' },
       { key: 'batchNo', label: 'Batch / Lot No' },
       { key: 'expiryDate', label: 'Expiry Date', type: 'date' },
@@ -2168,15 +2309,24 @@ export const productionEntryConfig = transaction(
     ],
     lineTitle: 'Production Output Summary',
     lineColumns: ['Finished Product', 'Variant', 'Attribute', 'UOM', 'Planned Qty', 'Produced Qty', 'Rejected Qty', 'Production Cost (Tentative)', 'Batch / Lot No', 'Expiry Date', 'Serial No'],
-    lineRows: [
-      ['Drone Motor', '', '', 'Nos', '12 Sets', '11 Sets', '1 Set', 'Rs. 1,10,000', '', '', ''],
-      ['Paneer Tikka', '', '', 'Plate', '50 Plates', '50 Plates', '0', 'Rs. 7,250', '', '', '']
-    ],
-    columns: ['Production No', 'Date', 'Finished Product', 'Produced', 'Rejected', 'Cost', 'Status'],
-    rows: [
-      ['PRD-001', '09-May-2026', 'Drone Motor', '11 Sets', '1 Set', 'Rs. 1,10,000', 'Posted'],
-      ['PRD-002', '08-May-2026', 'Paneer Tikka', '50 Plates', '0', 'Rs. 7,250', 'Posted']
-    ]
+    columns: ['Production No', 'Date', 'Finished Product', 'Produced', 'Rejected', 'Cost', 'Status']
+  }
+);
+
+export const uinRegistrationConfig = transaction(
+  'uinRegistration',
+  'Identifier Registration',
+  'Register the per-unit values a category needs before sale (UIN, RTO No, ...). A unit with a mandatory registration missing cannot be sold.',
+  'pi pi-id-card',
+  [
+    { name: 'Category policy with stage "Registration before Sale"', status: 'Required' },
+    { name: 'Units with a Unique Identifier (Production Entry / GRN / PI)', status: 'Ready' }
+  ],
+  'A unit can be sold only after its mandatory registration values are saved.',
+  {
+    screenMode: 'Identifier registration',
+    fields: [],
+    columns: []
   }
 );
 
@@ -2394,7 +2544,7 @@ export const debitNoteConfig = transaction(
     fields: [
       { key: 'debitNoteNo', label: 'Debit Note Number' },
       { key: 'debitNoteDate', label: 'Debit Note Date', type: 'date' },
-      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: INVENTORY_OPTIONS.suppliers, addMaster: 'Vendor' },
+      { key: 'vendor', label: 'Party / Vendor', type: 'select', options: [], addMaster: 'Vendor' },
       { key: 'reference', label: 'Settlement Reference', type: 'select', options: ['Direct Debit Note'] },
       { key: 'reason', label: 'Reason', type: 'select', options: ['Purchase Return Settlement', 'Price Difference', 'Short Supply', 'Quality Deduction', 'Freight Overcharge', 'Direct Vendor Adjustment'] },
       { key: 'gstAdjustment', label: 'GST Adjustment', type: 'select', options: ['Yes', 'No'] },

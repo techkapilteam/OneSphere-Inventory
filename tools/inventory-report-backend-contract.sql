@@ -42,6 +42,64 @@
   /api/reports/hsn-summary
   /api/reports/batch-serial-expiry
   /api/reports/product-profitability
+  /api/reports/dues-list
+  /api/reports/collection-report
+*/
+
+/*
+  /api/reports/dues-list  (Dues List Report, customer-wise)
+
+  Params: toDate (= "As on" date; default today), customerId, branchId.
+  One row per POSTED, non-cancelled Sales Invoice with invoiceDate <= toDate
+  whose due is > 0. Use the same outstanding logic as the Customer Receipt
+  outstanding-invoices API, but count only receipts / credit notes dated
+  <= toDate, so a back-dated "As on" shows what was due on that day.
+
+  Row fields:
+    invoiceDate     sales invoice date
+    invoiceNo       sales invoice number
+    customer        customer name
+    totalAmount     invoice grand total
+    receivedAmount  receipts + credit notes allocated to it up to toDate
+    dueAmount       totalAmount - receivedAmount
+    ageDays         toDate - invoiceDate (days)
+
+  Order by customer, invoiceDate, invoiceNo.
+  summary: { totalAmount, receivedAmount, dueAmount }
+
+  Later (after Sales Invoice saves the group-company branch): add
+  customerBranch and region (GLOBAL.tbl_mst_global_branch_configuration
+  .branch_name / .region_name) to each row.
+*/
+
+/*
+  /api/reports/collection-report  (Collection Report, customer-wise)
+
+  Params: fromDate, toDate, customerId, branchId.
+  Money received in POSTED Customer Receipts dated fromDate..toDate, one row
+  per customer. Mode 'cash' -> Cash; 'cheque', 'online', 'debit_card',
+  'credit_card', 'bank' -> Cheque. Each sales invoice allocation is split
+  across the receipt's modes in proportion to the mode amounts; Credit Note
+  allocations and TDS are not money received and are left out. The
+  unallocated (advance) part of a receipt counts as current.
+
+  Row fields:
+    customer          customer name
+    noOfInvoices      distinct sales invoices that got money in the period
+    cashAmount        cash against invoices dated >= fromDate (+ advance)
+    preCashAmount     cash against invoices dated <  fromDate
+    chequeAmount      cheque/online/card/bank against invoices dated >= fromDate (+ advance)
+    preChequeAmount   cheque/online/card/bank against invoices dated <  fromDate
+    jvAmount          0 for now ("Company Adjustment" receipt mode later)
+    preJvAmount       0 for now
+    grandTotal        sum of the 6 amounts
+
+  Order by customer.
+  summary: { noOfInvoices, cashAmount, preCashAmount, chequeAmount,
+             preChequeAmount, jvAmount, preJvAmount, grandTotal }
+
+  Later: Zone -> Region -> Branch grouping (after Sales Invoice saves the
+  group-company branch).
 */
 
 /*

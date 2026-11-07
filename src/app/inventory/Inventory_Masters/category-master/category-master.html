@@ -95,8 +95,6 @@
             <button type="button" class="erp-btn btn-white btn-sm" title="Print"><i class="pi pi-print"></i></button>
             <button type="button" class="erp-btn btn-white btn-sm" title="Export PDF"><i class="pi pi-file-pdf"></i></button>
             <button type="button" class="erp-btn btn-white btn-sm" title="Export Excel"><i class="pi pi-file-excel"></i></button>
-            <button type="button" class="erp-btn btn-white btn-sm" title="Mail"><i class="pi pi-envelope"></i></button>
-            <button type="button" class="erp-btn btn-white btn-sm" title="WhatsApp"><i class="pi pi-whatsapp"></i></button>
           </div>
         </div>
             <div class="tbl-wrap">
@@ -402,29 +400,106 @@
               </div>
             </div>
 
+                        <!-- Policies (migration 265): any number per category, each with its own
+                 capture stage and mandatory flag; at most one Unique Identifier. -->
             <div class="inventory-fieldset">
-              <div class="inventory-fieldset-title">Category Default Policies</div>
-              <div class="inventory-form-grid inventory-config-grid">
-                <div class="erp-form-group">
-                  <label class="erp-label">Serial No. Policy Applicable</label>
-                  <label class="inventory-labeled-switch yes-no">
-                    <input type="checkbox" [checked]="categorySerialApplicable()" (change)="setCategorySerialApplicable($any($event.target).checked)" />
-                    <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
-                  </label>
-                  @if (categorySerialApplicable()) {
-                    <div class="inventory-switch-reveal">
-                      <label class="erp-label">Default Serial Number Policy</label>
-                      <div class="inventory-field-with-add">
-                        <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
-                          [items]="serialPolicyOptions" [searchable]="true" [clearable]="true"
-                          [ngModel]="formFieldValue({key:'serialPolicyName', label:'Default Serial Number Policy', type:'select', options:serialPolicyOptions})"
-                          (ngModelChange)="collectFormField('serialPolicyName', $event)"
-                          placeholder="Select Serial Policy"></ng-select>
-                        <button type="button" class="erp-btn btn-white btn-icon" title="Add Serial Number Policy" (click)="openAddMaster('Serial Number Policy', 'serialPolicyName')"><i class="pi pi-plus"></i></button>
-                      </div>
-                    </div>
+              <div class="inventory-fieldset-title inventory-fieldset-title-row">
+                <span>Policies</span>
+                <label class="inventory-labeled-switch yes-no">
+                  <input type="checkbox" [checked]="categoryPolicyApplicable()" (change)="setCategoryPolicyApplicable($any($event.target).checked)" />
+                  <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
+                </label>
+              </div>
+              <div class="inventory-optional-hint">
+                Identifiers to capture for each unit of this category (Serial No, IMEI, Chassis No, UIN ...). Leave at No when the category needs none.
+              </div>
+
+              @if (categoryPolicyApplicable()) {
+                <div class="tbl-wrap">
+                  <table class="erp-table compact">
+                    <thead>
+                      <tr>
+                        <th style="width:40px">#</th>
+                        <th>Policy</th>
+                        <th style="width:220px">Capture Stage</th>
+                        <th class="text-center" style="width:110px">Mandatory</th>
+                        <th class="text-center" style="width:130px">Unique Identifier</th>
+                        <th class="text-center" style="width:60px"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (row of categoryPolicyRows(); track $index; let i = $index) {
+                        <tr>
+                          <td>{{ i + 1 }}</td>
+                          <td>
+                            <ng-select class="erp-ng-select inventory-ng-select inventory-grid-select" appendTo="body"
+                              [items]="categoryPolicyRowOptions()[i] || []" [searchable]="true" [clearable]="true"                              [ngModel]="row.policyName || null"
+                              (ngModelChange)="setCategoryPolicyRowPolicy(i, $event)"
+                              placeholder="Select Policy">
+                            </ng-select>
+                          </td>
+                          <td>
+                            @if (row.isUniqueIdentifier) {
+                              <span class="inventory-grid-static-value" title="The Unique Identifier is always captured when stock comes in">Stock Inward</span>
+                            } @else {
+                              <ng-select class="erp-ng-select inventory-ng-select inventory-grid-select" appendTo="body"
+                                [items]="policyStageLabels" [searchable]="false" [clearable]="false"
+                                [ngModel]="policyStageLabel(row.captureStage) || null"
+                                (ngModelChange)="setCategoryPolicyRowStage(i, $event)"
+                                placeholder="Select Stage">
+                              </ng-select>
+                            }
+                          </td>
+                          <td class="text-center">
+                            <label class="inventory-labeled-switch yes-no" [title]="row.isUniqueIdentifier ? 'The Unique Identifier is always mandatory' : ''">
+                              <input type="checkbox"
+                                [checked]="row.isMandatory"
+                                [disabled]="row.isUniqueIdentifier"
+                                (change)="setCategoryPolicyRowMandatory(i, $any($event.target).checked)" />
+                              <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
+                            </label>
+                          </td>
+                          <td class="text-center">
+                            <input type="radio" name="categoryUniqueIdentifier"
+                              [checked]="row.isUniqueIdentifier"
+                              (click)="row.isUniqueIdentifier ? clearCategoryPolicyUniqueIdentifier() : null"
+                              (change)="setCategoryPolicyUniqueIdentifier(i)"
+                              title="The value that identifies each unit in stock. Click again to clear." />
+                          </td>
+                          <td class="text-center">
+                            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove policy" (click)="removeCategoryPolicyRow(i)">
+                              <i class="pi pi-trash"></i>
+                            </button>
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+
+                <div style="display:flex; gap:8px; margin-top:8px;">
+                  <button type="button" class="erp-btn btn-white btn-sm" (click)="addCategoryPolicyRow()">
+                    <i class="pi pi-plus"></i> Add Policy
+                  </button>
+                  <button type="button" class="erp-btn btn-white btn-sm" title="Create a new policy in Policy Master" (click)="openAddMaster('Serial Number Policy', '')">
+                    <i class="pi pi-plus-circle"></i> New Policy
+                  </button>
+                </div>
+
+                <div class="inventory-optional-hint" style="margin-top:8px;">
+                  @if (categoryHasUniqueIdentifier()) {
+                    Stock of this category is kept <strong>per unit</strong>, identified by the Unique Identifier. Mandatory policies must be entered at their stage and are never duplicated; optional ones may be left empty.
+                  } @else {
+                    No Unique Identifier: stock is kept <strong>by quantity</strong>; the policy values are recorded on the documents only.
                   }
                 </div>
+              }
+            </div>
+
+            <!-- Batch / Lot (unchanged; separate feature) -->
+            <div class="inventory-fieldset">
+              <div class="inventory-fieldset-title">Batch / Lot Policy</div>
+              <div class="inventory-form-grid inventory-config-grid">
                 <div class="erp-form-group">
                   <label class="erp-label">Batch / Lot Policy Applicable</label>
                   <label class="inventory-labeled-switch yes-no">
@@ -1247,6 +1322,12 @@
 
         @if (config.key !== 'warehouseMaster' || warehouseRequired()) {
         <div class="inventory-form-actions">
+          @if (saveMsg()) {
+            <span class="inventory-save-tooltip save-ok"><i class="pi pi-check-circle"></i> {{ saveMsg() }}</span>
+          }
+          @if (saveError()) {
+            <span class="inventory-save-tooltip save-err"><i class="pi pi-times-circle"></i> {{ saveError() }}</span>
+          }
           <button type="button" class="erp-btn btn-white"><i class="pi pi-times"></i> Clear</button>
           @if (isPosView()) {
             <button type="button" class="erp-btn btn-white"><i class="pi pi-pause-circle"></i> Hold Bill</button>
@@ -1325,8 +1406,6 @@
             <button type="button" class="erp-btn btn-white btn-sm" title="Print"><i class="pi pi-print"></i></button>
             <button type="button" class="erp-btn btn-white btn-sm" title="Export PDF"><i class="pi pi-file-pdf"></i></button>
             <button type="button" class="erp-btn btn-white btn-sm" title="Export Excel"><i class="pi pi-file-excel"></i></button>
-            <button type="button" class="erp-btn btn-white btn-sm" title="Mail"><i class="pi pi-envelope"></i></button>
-            <button type="button" class="erp-btn btn-white btn-sm" title="WhatsApp"><i class="pi pi-whatsapp"></i></button>
             <span class="inventory-grid-divider"></span>
             <div class="inventory-grid-pager">
               <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Previous page" [disabled]="!canGoPrevGridPage('records')" (click)="goPrevGridPage('records')"><i class="pi pi-chevron-left"></i></button>
@@ -1361,8 +1440,11 @@
                   <td class="text-center">
                     <div class="inventory-row-actions">
                       @if (isAdmin()) {
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit"><i class="pi pi-pencil"></i></button>
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete"><i class="pi pi-trash"></i></button>
+                        <!-- Previous: <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit"><i class="pi pi-pencil"></i></button> -->
+                        <!-- Previous: <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete"><i class="pi pi-trash"></i></button> -->
+                        <!-- Saved master records are locked: Edit/Delete always disabled. -->
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" disabled><i class="pi pi-pencil"></i></button>
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" disabled><i class="pi pi-trash"></i></button>
                       }
                     </div>
                   </td>
