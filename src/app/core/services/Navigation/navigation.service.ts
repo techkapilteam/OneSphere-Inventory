@@ -110,9 +110,9 @@ export class NavigationService {
                 { id: 'vendor-payment', name: 'Vendor Payment', route: '/dashboard/inventory/transactions/vendor-payment', group: 'Payments & Receipts' },
                 { id: 'customer-receipt', name: 'Customer Receipt', route: '/dashboard/inventory/transactions/customer-receipt', group: 'Payments & Receipts' },
                 // Procurement
-                { id: 'purchase-requisition', name: 'Purchase Requisition', route: '/dashboard/inventory/transactions/purchase-requisition', group: 'Procurement', disabled: true },
-                { id: 'request-for-quotation', name: 'Request for Quotation', route: '/dashboard/inventory/transactions/request-for-quotation', group: 'Procurement', disabled: true },
-                { id: 'purchase-order', name: 'Purchase Order', route: '/dashboard/inventory/transactions/purchase-order', group: 'Procurement', disabled: true },
+                { id: 'purchase-requisition', name: 'Purchase Requisition', route: '/dashboard/inventory/transactions/purchase-requisition', group: 'Procurement' },
+                { id: 'request-for-quotation', name: 'Request for Quotation', route: '/dashboard/inventory/transactions/request-for-quotation', group: 'Procurement' },
+                { id: 'purchase-order', name: 'Purchase Order', route: '/dashboard/inventory/transactions/purchase-order', group: 'Procurement' },
                 { id: 'goods-receipt', name: 'Goods Receipt Note (GRN)', route: '/dashboard/inventory/transactions/goods-receipt', group: 'Procurement' },
                 { id: 'purchase-invoice', name: 'Purchase Invoice', route: '/dashboard/inventory/transactions/purchase-invoice', group: 'Procurement' },
                 { id: 'purchase-return', name: 'Purchase Return', route: '/dashboard/inventory/transactions/purchase-return', group: 'Procurement' },
