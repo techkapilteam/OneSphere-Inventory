@@ -76,6 +76,10 @@ export interface InventoryExportDocument {
   groupRowIndexes?: number[];
   /** PDF only: print every body row of the main table in bold. */
   boldRows?: boolean;
+  /** PDF only: body cells of these column indexes in bold 9pt (Vendor Payment Particulars). */
+  boldColumns?: number[];
+  /** PDF only: signature captions, e.g. (Approved By), in bold (Vendor Payment). */
+  boldSignatures?: boolean;
 }
 
 const HEADER_COLOR = '#0b4093';
@@ -659,6 +663,11 @@ export class InventoryExportService {
           data.cell.styles.fontStyle = 'bold';
           data.cell.styles.fontSize = 9 * s;
         }
+        // Same bold 9pt as the header labels, for the listed columns only.
+        if (data.section === 'body' && (document.boldColumns || []).includes(data.column.index)) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fontSize = 9 * s;
+        }
         if (document.totalRow && data.section === 'body' && data.row.index === bodyRows.length - 1) {
           data.cell.styles.fontStyle = 'bold';
           data.cell.styles.fontSize = 8.5 * s;
@@ -821,9 +830,13 @@ export class InventoryExportService {
       signatures.forEach((caption, index) => {
         const x = L_MARGIN + slot * index + slot / 2;
         if (index === signatures.length - 1 && document.signedBy) {
+          doc.setFont('helvetica', 'normal');
           doc.text(document.signedBy, x, signY - 6, { align: 'center' });
         }
+        // Previous: doc.text(caption, x, signY, { align: 'center' });  (always normal weight)
+        doc.setFont('helvetica', document.boldSignatures ? 'bold' : 'normal');
         doc.text(caption, x, signY, { align: 'center' });
+        doc.setFont('helvetica', 'normal');
         if (index === 0 && document.firstSignatureBoxed) {
           const boxWidth = Math.min(slot - 4, 50);
           doc.setDrawColor(0, 0, 0);
