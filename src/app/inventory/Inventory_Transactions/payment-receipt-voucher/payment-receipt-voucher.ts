@@ -1066,7 +1066,9 @@ export class PaymentReceiptVoucherComponent {
       boldRows: !isPay,
       // Vendor Payment: Particulars (e.g. Purchase Invoice PI00002/26-27) and the
       // signature captions in bold, same as the Accounts Payment Voucher print.
-      ...(isPay ? { boldColumns: [1], boldSignatures: true } : {}),
+      // fitOnePage: many invoice lines shrink the text so the voucher stays on one page.
+      // Previous: ...(isPay ? { boldColumns: [1], boldSignatures: true } : {}),
+      ...(isPay ? { boldColumns: [1], boldSignatures: true, fitOnePage: true } : {}),
       summary,
       amountInWords: this.exportService.amountInWords(v.net_amount),
       amountInWordsPosition: 'below',

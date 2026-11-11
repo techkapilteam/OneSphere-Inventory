@@ -814,8 +814,13 @@ export class InventoryExportService {
       // the page bottom (footer line is at pageHeight - 10); on a new page only
       // if the content already reaches that area.
       const bottomSignY = pageHeight - 70;
+      // Keep it on one page: when the content runs past the bottom position the
+      // row moves up to just below the content (room for the receiver box) and
+      // only goes to a new page if it would reach the footer line.
+      // Previous: ? (Math.max(lastY, y) + 20 > bottomSignY ? -1 : bottomSignY)
+      const pulledUpY = Math.max(bottomSignY, Math.max(lastY, y) + 28);
       let signY = document.signaturesAtBottom
-        ? (Math.max(lastY, y) + 20 > bottomSignY ? -1 : bottomSignY)
+        ? (pulledUpY > pageHeight - 16 ? -1 : pulledUpY)
         : Math.max(lastY, y) + 25;
       if (signY === -1) {
         doc.addPage();
