@@ -7,6 +7,7 @@ import {
   Screen,
   SubModule
 } from '../../core/services/Navigation/navigation.service';
+import { INVENTORY_SCREEN_ALIASES, INVENTORY_SCREEN_EXPLANATIONS } from './inventory-screen-explanations';
 
 type SpeechRecognitionCtor = new () => any;
 
@@ -1115,6 +1116,16 @@ export class VoiceAssistantComponent implements OnInit, OnDestroy {
       return;
     }
 
+    // Inventory screen name alone ("goods receipt", "bom master") → explain it.
+    // "open <screen>" / "go to <screen>" still falls through to navigation.
+    const inventoryKey = this.isNavigationRequest(command) ? null : this.findInventoryScreenByName(command);
+    if (inventoryKey) {
+      this.status.set('Explaining');
+      this.matchedLabel.set(this.titleCase(inventoryKey));
+      this.speak(INVENTORY_SCREEN_EXPLANATIONS[inventoryKey]);
+      return;
+    }
+
     // Navigation mode
     const target = this.findBestTarget(command);
 
@@ -1281,9 +1292,51 @@ export class VoiceAssistantComponent implements OnInit, OnDestroy {
     }
   }
 
+  // ── Inventory screen names ──────────────────────────────────────────────────
+
+  private isNavigationRequest(command: string): boolean {
+    const verbs = ['open', 'go to', 'goto', 'show', 'navigate to', 'take me to', 'తెరువు', 'ఓపెన్', 'చూపించు', 'వెళ్ళు'];
+    return verbs.some(verb => command === verb || command.startsWith(`${this.normalizeText(verb)} `));
+  }
+
+  /** Canonical inventory key when the command is an inventory screen name. */
+  private findInventoryScreenByName(command: string): string | null {
+    const topic = this.normalizeCommand(command)
+      .replace(/^(the|a|an)\s+/, '')
+      .replace(/\b(screen|module|component)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!topic) return null;
+
+    const exact = this.resolveInventoryKey(topic);
+    if (exact) return exact;
+
+    // Full canonical name spoken inside a longer phrase ("goods receipt note entry").
+    // Longest name wins so "customer receipt" beats "customer master".
+    const padded = ` ${topic} `;
+    let best: string | null = null;
+    for (const key of Object.keys(INVENTORY_SCREEN_EXPLANATIONS)) {
+      if (key.includes(' ') && padded.includes(` ${key} `) && (!best || key.length > best.length)) best = key;
+    }
+    return best;
+  }
+
+  private resolveInventoryKey(topic: string): string | null {
+    if (INVENTORY_SCREEN_EXPLANATIONS[topic]) return topic;
+    const alias = INVENTORY_SCREEN_ALIASES[topic];
+    return alias && INVENTORY_SCREEN_EXPLANATIONS[alias] ? alias : null;
+  }
+
+  private titleCase(value: string): string {
+    return value.replace(/\b\w/g, ch => ch.toUpperCase());
+  }
+
   private findExplanation(topic: string): string | null {
     if (!topic) return null;
     if (this.explanations[topic]) return this.explanations[topic];
+
+    const inventoryKey = this.findInventoryScreenByName(topic);
+    if (inventoryKey) return INVENTORY_SCREEN_EXPLANATIONS[inventoryKey];
 
     let bestKey: string | null = null;
     let bestScore = 0;

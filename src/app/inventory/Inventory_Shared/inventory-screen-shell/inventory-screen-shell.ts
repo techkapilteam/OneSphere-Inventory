@@ -5859,8 +5859,58 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
   }
 
+  // Guide explains every visible field on the screen (no cap).
   guideFields(): InventoryField[] {
-    return this.displayFields().slice(0, 6);
+    return this.displayFields();
+  }
+
+  // Line-grid columns for transaction screens, explained below the fields.
+  guideLineColumns(): string[] {
+    if (this.config?.kind !== 'transaction') return [];
+    return (this.config.lineColumns || []).filter(column => !!String(column || '').trim());
+  }
+
+  lineColumnAdvice(column: string): string {
+    return `${this.fieldPurpose({ key: column, label: column })} Enter it on each row of the ${this.config?.lineTitle || 'item lines'} grid.`;
+  }
+
+  // Plain-language "what is this / what to enter" for a field, by its key/label.
+  private fieldPurpose(field: InventoryField): string {
+    const key = `${field.key} ${field.label}`.toLowerCase();
+
+    if (key.includes('segment')) return 'The business segment this record belongs to (e.g. Electronics, Agro Product).';
+    if (key.includes('gstin')) return 'The 15-character GST Identification Number of the party/branch.';
+    if (key.includes('pan')) return 'The 10-character PAN of the party/branch.';
+    if (key.includes('mobile') || key.includes('phone')) return 'The contact mobile number.';
+    if (key.includes('email') || key.includes('mail')) return 'The contact e-mail address.';
+    if (key.includes('address')) return 'The full postal address.';
+    if (key.includes('branch')) return 'The branch/store where this activity happens.';
+    if (key.includes('warehouse') || key.includes('location') || key.includes('counter') || key.includes('store')) return 'The warehouse/location where stock is received, issued or stored.';
+    if (key.includes('vendor') || key.includes('supplier')) return 'The vendor/supplier for this document.';
+    if (key.includes('customer') || key.includes('party')) return 'The customer/party for this document.';
+    if (key.includes('hsn') || key.includes('sac')) return 'The HSN (goods) or SAC (services) tax code.';
+    if (key.includes('cgst') || key.includes('sgst') || key.includes('igst') || key.includes('cess') || key.includes('gst') || key.includes('tax')) return 'The tax percentage applied on the value.';
+    if (key.includes('disc')) return 'The discount percentage or amount given.';
+    if (key.includes('uom') || key.includes('unit of')) return 'The unit of measure (Nos, KG, Bag, Box…).';
+    if (key.includes('qty') || key.includes('quantity')) return 'The quantity being transacted.';
+    if (key.includes('rate') || key.includes('price')) return 'The per-unit rate/price.';
+    if (key.includes('amount') || key.includes('total') || key.includes('value') || key.includes('cost')) return 'The money value (usually calculated automatically).';
+    if (key.includes('batch') || key.includes('lot')) return 'The batch/lot number for traceability.';
+    if (key.includes('serial') || key.includes('imei')) return 'The serial/IMEI number of the individual item.';
+    if (key.includes('expiry')) return 'The expiry date of the item/batch.';
+    if (key.includes('date')) return 'The date of this record/document.';
+    if (key.includes('category')) return 'The product category used for grouping and tax defaults.';
+    if (key.includes('group')) return 'The product group used for grouping and reports.';
+    if (key.includes('product') || key.includes('item') || key.includes('sku') || key.includes('service')) return 'The product/service/item being transacted.';
+    if (key.includes('code')) return 'A short unique code to identify this record.';
+    if (key.includes('name')) return 'The name used to identify this record.';
+    if (key.includes('reference') || key.includes(' no')) return 'The reference/document number.';
+    if (key.includes('status')) return 'Whether the record is active/usable or its current stage.';
+    if (key.includes('remark') || key.includes('note') || key.includes('description')) return 'Any extra notes or description.';
+    if (key.includes('approv') || key.includes('workflow')) return 'The approval rule/approver for this record.';
+    if (key.includes('payment')) return 'How or when payment is made.';
+
+    return `The ${field.label || field.key} value for this record.`;
   }
 
   hiddenGuideFieldCount(): number {
@@ -5883,7 +5933,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const optionText = field.options?.length ? ` Select from ${field.options.slice(0, 4).join(', ')}${field.options.length > 4 ? ', etc.' : ''}.` : '';
     const addText = field.addMaster ? ` If the value is missing, add it from ${field.addMaster}.` : '';
 
-    return `${label} is a ${typeText} field.${optionText}${addText}`;
+    return `${this.fieldPurpose(field)} ${label} is a ${typeText} field.${optionText}${addText}`;
   }
 
   fieldEffect(field: InventoryField): string {
