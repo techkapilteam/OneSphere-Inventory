@@ -8,7 +8,7 @@ import { DatePickerModule } from 'primeng/datepicker';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Observable, Subject, catchError, concatMap, debounceTime, distinctUntilChanged, forkJoin, from, map, of, switchMap, tap } from 'rxjs';
 import { ApiResponse, AttributeItem, BomItem, BomLineItem, PriceListItem, WorkCenterItem, AttributeValueItem, BranchInvItem, CategoryItem, ChannelPartnerItem, ContactItem, CustomerItem, GstRateGuide, HsnSacItem, InventoryConfigService, PaymentTermItem, ProductApplicableVariant, ProductBundleItem, ProductItem, ProductTypeItem, ProductUomConversion, ProductVariantStockAttribute, ProductVariantStockControl, SegmentItem, SerialPolicyItem, TaxCodeSuggestion, UomItem, VariantCombinationRow, VariantItem, VendorItem, WarehouseItem } from '../inventory-config.service';
-import { AvailableStock, InventoryTransactionsService, PurchaseRefDoc, ServiceBundleConsumption, TransportDetails,UinRegistrationRow, UinRegistrationSaveItem, IdentifierRegistrationRow, IdentifierRegistrationSaveItem, RegistrationPolicyOption } from '../inventory-transactions.service';
+import { AvailableStock, InventoryTransactionsService, PurchaseRefDoc, ServiceBundleConsumption, TransportDetails, UinRegistrationRow, UinRegistrationSaveItem, IdentifierRegistrationRow, IdentifierRegistrationSaveItem, RegistrationPolicyOption } from '../inventory-transactions.service';
 import { applyInventoryTextCase, inventoryTextCaseForField, inventoryTextCaseForLineColumn, toInventoryTitleCase } from '../inventory-text-case.util';
 import { InventoryExportService } from '../inventory-export.service';
 import { rupeesInWords } from '../inventory-amount-in-words';
@@ -166,11 +166,11 @@ type LineSerialIdentifiers = Record<number, Record<string, Record<number, string
 type LineIdentifierValues = Record<number, Record<number, string>>;
 
 const POLICY_CAPTURE_STAGES: { code: string; label: string }[] = [
-  { code: 'stock_inward',             label: 'Stock Inward' },
-  { code: 'sales_invoice',            label: 'Sales Invoice' },
-  { code: 'both_inward_sale',         label: 'Both Inward and Sale' },
+  { code: 'stock_inward', label: 'Stock Inward' },
+  { code: 'sales_invoice', label: 'Sales Invoice' },
+  { code: 'both_inward_sale', label: 'Both Inward and Sale' },
   { code: 'registration_before_sale', label: 'Registration before Sale' },
-  { code: 'warranty_registration',    label: 'Warranty Registration' }
+  { code: 'warranty_registration', label: 'Warranty Registration' }
 ];
 
 
@@ -470,7 +470,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // ── API form-capture state ────────────────────────────────────────────────
   readonly genericNameValue = signal('');
 
-     readonly existingRowMatches = computed(() => {
+  readonly existingRowMatches = computed(() => {
     const q = this.genericNameValue().trim().toLowerCase();
     if (q.length < 2) return [];
 
@@ -642,7 +642,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // the DC/SI cross-reference flow with its own "reserved via ..." copy).
   // readonly activeSerialPicker = signal<{ rowIndex: number; mode: 'capture' | 'select' | 'inherited' | 'view'; qtyNeeded: number; productId: number | null; productName: string; warrantyApplicable: boolean; saleWarrantyApplicable?: boolean } | null>(null);
 
-    readonly activeSerialPicker = signal<{ rowIndex: number; mode: 'capture' | 'select' | 'inherited' | 'view' | 'lineValues'; qtyNeeded: number; productId: number | null; productName: string; warrantyApplicable: boolean; saleWarrantyApplicable?: boolean; inwardPolicies?: InwardPolicy[] } | null>(null);
+  readonly activeSerialPicker = signal<{ rowIndex: number; mode: 'capture' | 'select' | 'inherited' | 'view' | 'lineValues'; qtyNeeded: number; productId: number | null; productName: string; warrantyApplicable: boolean; saleWarrantyApplicable?: boolean; inwardPolicies?: InwardPolicy[] } | null>(null);
   // Sales Invoice serial popup: warranty dates added with "+" for units of a
   // Warranty Applicable product that got no warranty at purchase, keyed by
   // serial no. Saved on the SI line as serial_warranty (same shape as GRN/PI)
@@ -654,14 +654,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // screens that actually create new serial units). Populated by the shared
   // default below unless a specific serial has been individually overridden.
   readonly lineSerialWarrantyMap = signal<Record<number, Record<string, SerialWarrantyEntry>>>({});
-    // Phase 2: policy values per unit / per line, saved from the serial popup
+  // Phase 2: policy values per unit / per line, saved from the serial popup
   readonly lineSerialIdentifiersMap = signal<LineSerialIdentifiers>({});
   readonly lineIdentifierValuesMap = signal<LineIdentifierValues>({});
   // The popup's working copy: serial -> policyId -> value
   readonly serialPickerIdentifierDraft = signal<Record<string, Record<number, string>>>({});
-    // Phase 2 (2.6g): quantity products, the popup's working copy: policyId -> value
+  // Phase 2 (2.6g): quantity products, the popup's working copy: policyId -> value
   readonly serialPickerLineValuesDraft = signal<Record<number, string>>({});
-    // Phase 2: live warnings per cell, key "serial|policyId"
+  // Phase 2: live warnings per cell, key "serial|policyId"
   readonly serialPickerIdentifierWarnings = signal<Record<string, string>>({});
   // The picker's own working state while open: one shared default applied to
   // every serial that hasn't been overridden, plus the set of per-serial
@@ -1743,7 +1743,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.loadGstGuide();
     }
     // UIN Registration: load the units waiting for a UIN when the screen opens
-        if (this.config?.key === 'uinRegistration') {
+    if (this.config?.key === 'uinRegistration') {
       this.loadRegistrationPolicies();
     }
   }
@@ -2996,7 +2996,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return serialMap;
   }
 
-   // Phase 2: a line's policy values in the format the API expects (lists, fixed keys)
+  // Phase 2: a line's policy values in the format the API expects (lists, fixed keys)
   protected lineIdentifierPayload(index: number): { serial_identifiers: any[] | null; line_identifiers: any[] | null } {
     const toValues = (values: Record<number, string> | undefined) =>
       Object.entries(values || {})
@@ -3017,7 +3017,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     };
   }
 
-    // Phase 2: rebuild the policy-value maps from saved items (reopened draft / record)
+  // Phase 2: rebuild the policy-value maps from saved items (reopened draft / record)
   protected lineIdentifierMapsFromItems(items: any[] | null | undefined, startIndex = 0): { serial: LineSerialIdentifiers; line: LineIdentifierValues } {
     const serial: LineSerialIdentifiers = {};
     const line: LineIdentifierValues = {};
@@ -3960,7 +3960,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return null;
   }
 
-    // Our GSTIN / state for a document: the branch's own (inventory branch config),
+  // Our GSTIN / state for a document: the branch's own (inventory branch config),
   // else the company's GSTIN from the login company (as on the PDF letterhead),
   // same fallback as inventory.fn_branch_gstin_state (migration 278).
   // A GSTIN belongs to one state, so the company's GSTIN is used only for a
@@ -3978,7 +3978,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return { gstin, state };
   }
 
-   // State code from a GSTIN's first two digits (e.g. 37ABC… -> 37); '' when not a GSTIN.
+  // State code from a GSTIN's first two digits (e.g. 37ABC… -> 37); '' when not a GSTIN.
   private gstStateCodeFromGstin(gstin: string | null | undefined): string {
     const text = String(gstin || '').trim();
     return /^[0-9]{2}/.test(text) ? text.slice(0, 2) : '';
@@ -4014,7 +4014,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return code ? (this.gstStateNames()[code] || '') : '';
   }
 
-    // Official GST state codes, used when gstStateCodes() has no entry for a state name
+  // Official GST state codes, used when gstStateCodes() has no entry for a state name
   // (e.g. the print's State Code for a delivery state). Same list as
   // inventory.fn_gst_state_code (migration 278).
   private static readonly GST_STATE_CODE_BY_NAME: Record<string, string> = {
@@ -4030,7 +4030,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     'telangana': '36', 'andhra pradesh': '37', 'ladakh': '38'
   };
 
-    private gstStateCode(gstin: string | null | undefined, stateName: string | null | undefined): string {
+  private gstStateCode(gstin: string | null | undefined, stateName: string | null | undefined): string {
     // 1. GSTIN: its first two digits are the state code (e.g. 37ABC… -> 37)
     const gstinText = String(gstin || '').trim();
     if (/^[0-9]{2}/.test(gstinText)) return gstinText.slice(0, 2);
@@ -4047,9 +4047,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       || InventoryScreenShell.GST_STATE_CODE_BY_NAME[builtInKey]
       || '';
   }
-  
 
-    private isInterstateTransaction(
+
+  private isInterstateTransaction(
     ourGstin: string | null | undefined, ourState: string | null | undefined,
     theirGstin: string | null | undefined, theirState: string | null | undefined,
     placeOfSupply?: string | null
@@ -4718,7 +4718,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   categoryRequiresSerialPolicy(): boolean {
     return !!this.selectedProductCategoryObject()?.serial_applicable;
   }
-    // Product Master (migration 265): unit identification comes from the category.
+  // Product Master (migration 265): unit identification comes from the category.
   productCategoryPolicies(): any[] {
     const category: any = this.selectedProductCategoryObject();
     return [...(category?.policies || [])]
@@ -4728,7 +4728,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   productCategoryIdentifier(): any | null {
     return this.productCategoryPolicies().find((p: any) => p.is_unique_identifier) || null;
   }
-    // The product's policies captured at Stock Inward: its category's rows with
+  // The product's policies captured at Stock Inward: its category's rows with
   // stage Stock Inward or Both Inward and Sale, except the Unique Identifier
   // (that one is the serial itself).
   productInwardPolicies(product: any): InwardPolicy[] {
@@ -5200,7 +5200,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     );
   }
 
-    // ── Material Issue for Production ───────────────────────────────────────
+  // ── Material Issue for Production ───────────────────────────────────────
 
   // What is still to be issued for one plan line: Required - already issued.
   private planItemRemainingQty(item: any): number {
@@ -5268,7 +5268,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return '';
   }
 
-    // ── Identifier Registration (Phase 3, migration 267) ─────────────────
+  // ── Identifier Registration (Phase 3, migration 267) ─────────────────
   // Units whose category has a Registration before Sale policy (UIN, RTO
   // No, ...). The user picks the policy, types the value per unit; only
   // changed rows are saved. Editable until the unit is sold; the server
@@ -6173,6 +6173,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
     if (master === 'Customer') {
       this.quickCustomerLinkedContact.set(null);
+      // Start every new quick-add Customer with an empty form, like after a
+      // page refresh: remove all quickCustomer* values (GSTIN rows, mobile,
+      // state, PAN, bank ...) left over from the previous customer.
+      this.formValues.update(fv => {
+        const next = { ...fv };
+        Object.keys(next)
+          .filter(key => key.startsWith('quickCustomer'))
+          .forEach(key => delete next[key]);
+        return next;
+      });
     }
 
     if (master === 'Channel Partner') {
@@ -6294,8 +6304,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const normalizedName = toInventoryTitleCase(name ?? '');
     this.quickAddName.set(normalizedName);
     if (InventoryScreenShell.QUICK_ADD_MASTERS_WITH_AUTO_CODE.has(this.activeAddMaster()) && !this._quickAddCodeManuallySet) {
-      this.quickAddCode.set(normalizedName ? this.generateCodeFromName(normalizedName) : '');
-    }
+  this.quickAddCode.set(
+    !normalizedName ? ''
+      : this.activeAddMaster() === 'Customer' ? this.nextCustomerCode(normalizedName)
+      : this.generateCodeFromName(normalizedName)
+  );
+}
   }
 
   onQuickAddCodeChange(code: string): void {
@@ -7028,8 +7042,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!String(this.formValues()['quickCustomerState'] ?? '').trim()) { this.quickAddError.set('State is required.'); return; }
     if (this.isSavingQuickAdd()) return;
     const v = this.formValues();
-    const code = this.quickAddCode().trim() || this.generateCodeFromName(name) || null;
-    const linkedContact = this.quickCustomerLinkedContact();
+  const code = this.quickAddCode().trim() || this.nextCustomerCode(name) || null; 
+   const linkedContact = this.quickCustomerLinkedContact();
     this.isSavingQuickAdd.set(true);
     this.quickAddError.set('');
     this.saveCustomerWithContactWriteback({
@@ -7203,7 +7217,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     });
   }
 
-   saveQuickSerialPolicy(): void {
+  saveQuickSerialPolicy(): void {
     const name = this.quickAddName().trim();
     if (!name) { this.quickAddError.set('Policy name is required.'); return; }
     if (this.isSavingQuickAdd()) return;
@@ -7441,7 +7455,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.quickCustomerLinkedContact.set(contact);
     this.quickAddName.set(contact?.name || '');
     if (!this._quickAddCodeManuallySet) {
-      this.quickAddCode.set(contact?.name ? this.generateCodeFromName(contact.name) : '');
+      this.quickAddCode.set(contact?.name ? this.nextCustomerCode(contact.name) : '');
     }
     this.formValues.update(fv => ({
       ...fv,
@@ -7696,7 +7710,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.formValues.update(v => ({ ...v, uinRequired: false }));
     }
   }
-    // ── Category Master: policies (migration 265) ─────────────────────────
+  // ── Category Master: policies (migration 265) ─────────────────────────
   readonly categoryPolicyApplicable = signal(false);
   readonly categoryPolicyRows = signal<CategoryPolicyDraft[]>([]);
   readonly policyStageLabels = POLICY_CAPTURE_STAGES.map(s => s.label);
@@ -7720,7 +7734,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     };
   }
 
-    // Rows hidden by switching Policies to No, kept so that switching back to Yes
+  // Rows hidden by switching Policies to No, kept so that switching back to Yes
   // restores them (until the form is saved, cleared or another record is opened).
   private categoryPolicyRowsBackup: CategoryPolicyDraft[] = [];
 
@@ -7747,7 +7761,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!this.categoryPolicyRows().length) this.categoryPolicyApplicable.set(false);
   }
 
-    // For each row: the policies not used in another row (plus the row's own choice).
+  // For each row: the policies not used in another row (plus the row's own choice).
   // A computed signal, so ng-select gets the same array until the rows change
   // (a method returning a new array on every refresh breaks selection).
   readonly categoryPolicyRowOptions = computed((): string[][] => {
@@ -7777,7 +7791,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       i === index && !r.isUniqueIdentifier ? { ...r, isMandatory: mandatory } : r));
   }
 
-   // Radio: one row is the Unique Identifier. It is always mandatory and
+  // Radio: one row is the Unique Identifier. It is always mandatory and
   // captured at Stock Inward, so those two are fixed on that row while it is
   // the identifier; its own values come back when another row takes over.
   setCategoryPolicyUniqueIdentifier(index: number): void {
@@ -8401,7 +8415,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const exportColumns = rows.length ? columns : fallbackColumns;
     const exportRows = rows.length ? rows : fallbackRows;
     // Previous: const totals = this.purchaseInvoiceFinancials(record);
-       const fields: Array<[string, string]> = [
+    const fields: Array<[string, string]> = [
       ['PI No', docNo],
       // Point 5: full year (23-10-2026). Previous: this.gridDateDisplay(...)
       ['PI Date', this.invoiceDateDisplay(record.pi_date || record.piDate)],
@@ -8436,7 +8450,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['Transport charges', this.moneyValue(totals.transport)],
       ['Round off', this.moneyValue(totals.roundOff)]
     ];
-        // Point 4: amount in words in small letters: "Rupees three hundred and fifty four only".
+    // Point 4: amount in words in small letters: "Rupees three hundred and fifty four only".
     const totalInWords = rupeesInWords(totals.total).toLowerCase();
     // Previous: const amountInWordsText = totalInWords ? totalInWords.charAt(0).toUpperCase() + totalInWords.slice(1) : '';
     // Title Case, same as the Sales Invoice: "Rupees Three Hundred And Fifty Four Only".
@@ -8458,7 +8472,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // page printed on A4 portrait paper came out sideways with the right side cut.
       // Previous: (no orientation set -> landscape when more than 7 columns)
       orientation: 'portrait',
-            // Points 6 and 7: words + totals joined under the table, then the
+      // Points 6 and 7: words + totals joined under the table, then the
       // Common Seal / Authorised Signatory row (old printed invoice layout).
       gstInvoiceLayout: true,
       signatureBlock: true,
@@ -8466,7 +8480,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     };
   }
 
-    // Invoice prints show the full year: 2026-10-23 -> 23-10-2026.
+  // Invoice prints show the full year: 2026-10-23 -> 23-10-2026.
   private invoiceDateDisplay(value: any): string {
     const text = String(value ?? '').trim();
     const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -8591,7 +8605,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     //   || record.place_of_supply || record.placeOfSupply || '').trim();
     // const customerStateCode = this.gstStateCode(customerGstin, customerState);
 
-    
+
     const placeOfSupply = String(record.place_of_supply || record.placeOfSupply || '').trim();
     const customerState = placeOfSupply || String(customer?.state || this.partyPrimaryState(customer)
       || this.gstStateNameFromGstin(customerGstin) || '').trim();
@@ -9269,7 +9283,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   //   if (field.options?.length) return field.options;
   //   return this.config?.key === 'salesReturn' ? this.customerOptions : this.vendorOptions;
   // }
-    procurementVendorHeaderOptions(field: InventoryField): string[] {
+  procurementVendorHeaderOptions(field: InventoryField): string[] {
     // Previous: if (field.options?.length) return field.options;
     // The field's config options were the pre-backend demo list (INVENTORY_OPTIONS.suppliers:
     // 'ElectroMart Supplies', 'Aero Labs', …). They won whenever no real vendor existed yet,
@@ -10011,7 +10025,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       purchaseReturn: { dateKey: 'returnDate', numberKey: 'return_number' },
       // Display only: sp_save_stock_transfer assigns the real number (migration 250).
       stockTransfer: { dateKey: 'transferDate', numberKey: 'transfer_number' },
-       // Display only: the server assigns MI00001/26-27 and PRD00001/26-27 (261 / 262).
+      // Display only: the server assigns MI00001/26-27 and PRD00001/26-27 (261 / 262).
       materialIssueProduction: { dateKey: 'issueDate', numberKey: 'issue_number' },
       productionEntry: { dateKey: 'productionDate', numberKey: 'production_number' }
     };
@@ -10223,7 +10237,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   //     .map(record => record.version)
   //     .filter(Boolean);
   // }
-    private bomVersionOptionsFromMaster(finishedProduct?: any): string[] {
+  private bomVersionOptionsFromMaster(finishedProduct?: any): string[] {
     // Versions of the BOMs of one finished product. Uses the product passed in
     // (e.g. from collectFormField, before formValues is updated), else the one on the form.
     const finished = this.normalizeKey(finishedProduct ?? this.formValues()['finishedProduct']);
@@ -11049,7 +11063,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return this.lineColumnIndex(column);
   }
 
-   lineGridColumnHeader(column: string): string {
+  lineGridColumnHeader(column: string): string {
     // The header stays generic — one header can only ever name one policy, but
     // a grid holds rows for different products, each with its own policy (IMEI
     // Number, Chassis No, ...). The policy is per-row information, so it belongs
@@ -13473,7 +13487,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // screen not in that set, is always visible — this only ever hides
   // columns that are structurally irrelevant right now, never one the user
   // could otherwise type into (Rate/GST/Qty/etc. are untouched).
-    isLineColumnVisible(column: string): boolean {
+  isLineColumnVisible(column: string): boolean {
     if (!this.isPolicyColumnHidingScreen()) return true;
     // Phase 2 (2.6g): the Policy column is also needed for quantity products
     // that capture policy values at Stock Inward
@@ -14256,7 +14270,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return source
       .filter(record => this.normalizeKey(record?.status || 'posted') === 'posted')
       .filter(record => type !== 'PRODUCTIONPLAN' || this.config?.key !== 'materialIssueProduction' || this.planHasRemainingToIssue(record))
-       .filter(record => type !== 'PRODUCTIONPLAN' || this.config?.key !== 'productionEntry'
+      .filter(record => type !== 'PRODUCTIONPLAN' || this.config?.key !== 'productionEntry'
         || Number(record?.producible_qty ?? record?.producibleQty ?? 0) > 0)
       .map(record => type === 'PRODUCTIONPLAN'
         ? this.productionPlanReferenceDoc(record)
@@ -15146,7 +15160,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       && ['finishedProduct', 'plannedQty', 'bomVersion'].includes(fieldKey);
   }
 
-   private selectedProductionPlanningBom(values = this.formValues()): ManufacturingBomRecord | null {
+  private selectedProductionPlanningBom(values = this.formValues()): ManufacturingBomRecord | null {
     const finishedProduct = String(values['finishedProduct'] || '').trim();
     if (!finishedProduct) return null;
     const finishedKey = this.normalizeKey(finishedProduct);
@@ -15248,7 +15262,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   //   this.setManufacturingLineCell(row, ['Serial No'], item.serial_no || item.serialNo || '');
   //   return this.normalizeLineRow(row);
   // }
-    private productionPlanMaterialToIssueLineRow(item: any): string[] {
+  private productionPlanMaterialToIssueLineRow(item: any): string[] {
     const row = this.blankLineRow();
     this.setManufacturingLineCell(row, ['Raw Material', 'Material'], item.product_name || item.productName || '');
     this.setManufacturingLineCell(row, ['Variant'], item.variant_name || item.variantName || '');
@@ -15391,7 +15405,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       refMap = this.manufacturingLineRefMapFromItems(openItems, 'productionPlanItemId');
       patch['bomVersion'] = anyDoc.bom_version || anyDoc.bomVersion || '';
     } else if (key === 'productionEntry') {
-       // Can Produce and cost per set come from the issued material (262).
+      // Can Produce and cost per set come from the issued material (262).
       // The user enters Produced / Rejected; cost and grid follow (Step 4).
       const producible = Number(anyDoc.producible_qty ?? anyDoc.producibleQty ?? 0) || 0;
       const perSet = Number(anyDoc.material_cost_per_unit ?? anyDoc.materialCostPerUnit ?? 0) || 0;
@@ -15438,10 +15452,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.lineSerialWarrantyMap.set({}); this.lineSalesWarrantyBoundMap.set({});
     this.boundReferenceLabels.set([doc.doc_number]);
     this.boundReferenceFields.set(patch);
-   
+
   }
 
-    // Production Entry: Produced / Rejected typed in the header drive the
+  // Production Entry: Produced / Rejected typed in the header drive the
   // cost and the output grid.  Cost = (Produced + Rejected) x cost per set,
   // where cost per set is the real issued cost from the server (262).
   private syncProductionEntryOutput(): void {
@@ -15468,7 +15482,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.trimLineSerialUnitsToCurrentQty(0);
   }
 
-    // Production Entry: message shown under Produced Qty while typing,
+  // Production Entry: message shown under Produced Qty while typing,
   // when Produced + Rejected is more than Can Produce. Empty = no message.
   productionEntryQtyLimitText(): string {
     if (this.config?.key !== 'productionEntry') return '';
@@ -15477,7 +15491,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const used = (Number(values['producedQty']) || 0) + (Number(values['rejectedQty']) || 0);
     if (producible > 0 && used > producible) {
       return `Produced + Rejected (${used}) is more than Can Produce (${producible}). ` +
-             `Reduce the quantity, or issue more material against this plan first.`;
+        `Reduce the quantity, or issue more material against this plan first.`;
     }
     return '';
   }
@@ -16599,7 +16613,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.lineSerialUnitsMap.update(map => ({ ...map, [rowIndex]: serials.slice(0, qtyNeeded) }));
   }
 
-   serialPickerSummaryForRow(rowIndex: number, row: string[]): string {
+  serialPickerSummaryForRow(rowIndex: number, row: string[]): string {
     const count = (this.lineSerialUnitsMap()[rowIndex] || []).length;
     const productName = this.lineValue(row, ['product', 'item', 'sku', 'material']);
     const product = this.findProductBySelection(productName);
@@ -16632,14 +16646,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return `${label} (${count}/${qty || 0})`;
   }
 
-    // Phase 2 (2.6g): a quantity product whose category captures policies at Stock Inward
+  // Phase 2 (2.6g): a quantity product whose category captures policies at Stock Inward
   rowHasLinePolicies(row: string[]): boolean {
     if (this.serialPickerModeForKey() !== 'capture') return false;
     const product = this.findProductBySelection(this.lineValue(row, ['product', 'item', 'sku', 'material']));
     return !!product && !product.serial_applicable && this.productInwardPolicies(product).length > 0;
   }
 
-    // Phase 2 (2.6g): at least one line is a quantity product with Stock Inward policies
+  // Phase 2 (2.6g): at least one line is a quantity product with Stock Inward policies
   anyRowHasLinePolicies(): boolean {
     return this.entryLineRows().some(row => this.rowHasLinePolicies(row));
   }
@@ -16714,7 +16728,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // still reads 'in_stock'/'sold' until this document is actually saved, so
   // nothing server-side stops the same physical unit being picked twice
   // across two rows in one draft. This is the client-side backstop for that.
-   private serialUnitsUsedInOtherRows(excludeRowIndex: number, productId: number | null = null): Set<string> {
+  private serialUnitsUsedInOtherRows(excludeRowIndex: number, productId: number | null = null): Set<string> {
     // Serials picked in OTHER rows of this same document, for the SAME product only.
     // Serial "1" of a motor and serial "1" of a frame are different physical units.
     const used = new Set<string>();
@@ -16737,7 +16751,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const product = this.findProductBySelection(productName);
     if (!product) return;
 
-     // Phase 2 (2.6g): a quantity product (no Unique Identifier) whose category
+    // Phase 2 (2.6g): a quantity product (no Unique Identifier) whose category
     // captures policies at Stock Inward: one value per policy for the whole line.
     if (!product.serial_applicable) {
       if (this.serialPickerModeForKey() !== 'capture') return;
@@ -16789,7 +16803,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const warrantyApplicable = mode === 'capture' && !!product.warranty_applicable;
     // Sales Invoice: a unit with no purchase warranty can get one added here.
     const saleWarrantyApplicable = mode === 'select' && this.config?.key === 'salesInvoice' && !!product.warranty_applicable;
-    
+
     // Phase 2: other Stock Inward policies are entered where units are created (capture mode)
     const inwardPolicies = mode === 'capture' ? this.productInwardPolicies(product) : [];
     this.activeSerialPicker.set({ rowIndex, mode, qtyNeeded, productId: product.id, productName: product.product_name || productName, warrantyApplicable, saleWarrantyApplicable, inwardPolicies });
@@ -16869,7 +16883,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         : this.config?.key === 'salesReturn'
           ? this.txService.getSoldSerialsForReturn({ productId: product.id, invoiceId: salesReturnInvoiceId, variantId, attributeId, attributeValue })
           : this.txService.getAvailableSerials({ productId: product.id, variantId, attributeId, attributeValue, ...this.resolveHeaderLocationForSerialPicker() });
-      const usedElsewhere = this.serialUnitsUsedInOtherRows(rowIndex, product.id);      const previouslySaved = [...this.serialPickerDraftValues()];
+      const usedElsewhere = this.serialUnitsUsedInOtherRows(rowIndex, product.id); const previouslySaved = [...this.serialPickerDraftValues()];
       obs.pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: res => {
@@ -17051,16 +17065,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.serialPickerMessageTimer = setTimeout(() => this.serialPickerMessage.set(''), 1800);
   }
 
-    removeSerialPickerCaptureValue(value: string): void {
+  removeSerialPickerCaptureValue(value: string): void {
     this.serialPickerDraftValues.set(this.serialPickerDraftValues().filter(s => s !== value));
     this.clearSerialPickerWarrantyOverride(value);
     this.serialPickerIdentifierWarnings.update(w => {
-        const next: Record<string, string> = {};
-        for (const [key, msg] of Object.entries(w)) if (!key.startsWith(`${value}|`)) next[key] = msg;
-        return next;
-      });
+      const next: Record<string, string> = {};
+      for (const [key, msg] of Object.entries(w)) if (!key.startsWith(`${value}|`)) next[key] = msg;
+      return next;
+    });
   }
-    serialPickerIdentifierValue(serial: string, policyId: number): string {
+  serialPickerIdentifierValue(serial: string, policyId: number): string {
     return this.serialPickerIdentifierDraft()[serial]?.[policyId] ?? '';
   }
 
@@ -17080,7 +17094,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       policies.some(p => !String(this.serialPickerIdentifierValue(serial, p.policyId)).trim())).length;
   }
 
-    serialPickerIdentifierWarning(serial: string, policyId: number): string {
+  serialPickerIdentifierWarning(serial: string, policyId: number): string {
     return this.serialPickerIdentifierWarnings()[`${serial}|${policyId}`] || '';
   }
 
@@ -17137,7 +17151,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return Object.keys(this.serialPickerIdentifierWarnings()).length;
   }
 
-    serialPickerLineValue(policyId: number): string {
+  serialPickerLineValue(policyId: number): string {
     return this.serialPickerLineValuesDraft()[policyId] ?? '';
   }
 
@@ -17202,7 +17216,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return toAdd.length;
   }
 
-    // Phase 2 (2.6h): paste rows from Excel into the capture popup.
+  // Phase 2 (2.6h): paste rows from Excel into the capture popup.
   // With a header row: columns are matched by NAME (Unique Identifier and each
   // Stock Inward policy, any order; unknown columns are ignored).
   // Without a header: by POSITION (identifier first, then the policies in order).
@@ -17301,14 +17315,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return result;
   }
 
-    // The column order shown as a hint in the paste box, e.g. "IMEI ⇥ IMEI 1"
+  // The column order shown as a hint in the paste box, e.g. "IMEI ⇥ IMEI 1"
   serialPickerPasteColumnHint(): string {
     const picker = this.activeSerialPicker();
     if (!picker) return '';
     return [this.unitIdentifierLabel(picker.productId), ...(picker.inwardPolicies || []).map(p => p.policyName)].join('  ⇥  ');
   }
 
-   closeSerialPicker(save: boolean): void {
+  closeSerialPicker(save: boolean): void {
     const picker = this.activeSerialPicker();
     // Phase 2 (2.6g): quantity products keep one value per policy for the line
     if (picker && save && picker.mode === 'lineValues') {
@@ -17739,7 +17753,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (this.shouldSyncProductionPlanningBomRows(key)) {
       this.syncProductionPlanningBomRequirementRows(true);
     }
-   
+
     // Production Entry: Produced / Rejected -> cost (from issued material) and output grid
     if (this.config?.key === 'productionEntry' && (key === 'producedQty' || key === 'rejectedQty')) {
       this.syncProductionEntryOutput();
@@ -18466,7 +18480,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   //   return this.config?.kind === 'transaction' ? [] : (this.config?.rows || []);
   // });
 
-   private readonly _stableLiveRows = computed((): string[][] => {
+  private readonly _stableLiveRows = computed((): string[][] => {
     if (this.isApiWired()) {
       const records = this.savedRecordObjects();
       // Policies are a company-wide library (migration 265): Policy Master lists
@@ -19284,7 +19298,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             this.clearConfigForm();
             this.loadApiRecords();
             this.loadLookupOptions();
-            if (['purchaseInvoice', 'purchaseReturn', 'debitNote', 'creditNote', 'salesInvoice', 'deliveryChallan', 'salesReturn','materialIssueProduction'].includes(this.config?.key || '')) {
+            if (['purchaseInvoice', 'purchaseReturn', 'debitNote', 'creditNote', 'salesInvoice', 'deliveryChallan', 'salesReturn', 'materialIssueProduction'].includes(this.config?.key || '')) {
               // Refresh the reference-doc list (the just-saved doc must drop
               // out of it — see the duplicate-reference exclusion below) but
               // don't auto-reopen the picker tray right after a save; that
@@ -20046,6 +20060,32 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const yy = new Date().getFullYear().toString().slice(-2);
     const seq = String(this.savedRecordObjects().length + this.pendingRows().length + 1).padStart(5, '0');
     return `${prefix}-${yy}-${seq}`;
+  }
+
+  /**
+  * Next free customer code: <first 3 letters>-<yy>-<00001>, based on the
+  * customer codes actually in use (loaded customers of the selected segment,
+  * active only), like the database rule uq_inv_customers_scope_code.
+  */
+  private nextCustomerCode(name: string): string {
+    const prefix = String(name || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3);
+    if (!prefix) return '';
+    const yy = new Date().getFullYear().toString().slice(-2);
+    const head = `${prefix}-${yy}-`;
+    const segmentId = this.selectedSegmentId() ?? null;
+
+    let max = 0;
+    for (const c of (this.loadedCustomerObjects() || []) as any[]) {
+      const status = String(c?.status ?? 'active').toLowerCase();
+      if (status !== 'active') continue;
+      const custSegment = c?.segment_id ?? c?.segmentId ?? null;
+      if (segmentId != null && custSegment != null && Number(custSegment) !== Number(segmentId)) continue;
+      const code = String(c?.customer_code ?? c?.customerCode ?? '').toUpperCase();
+      if (!code.startsWith(head)) continue;
+      const n = Number(code.slice(head.length));
+      if (Number.isInteger(n) && n > max) max = n;
+    }
+    return `${head}${String(max + 1).padStart(5, '0')}`;
   }
 
   generateSku(name: string, category?: string, brand?: string, variant?: string): string {
@@ -21204,7 +21244,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       return;
     }
     // const record = this.findRecordByRow(row);
-        // Policies are a company-wide library (migration 265): look the record up
+    // Policies are a company-wide library (migration 265): look the record up
     // among ALL of the company's policies by its code (column 1 of the grid),
     // not only the selected segment's. Other masters keep findRecordByRow.
     const record = this.config?.key === 'serialNumberPolicy'
@@ -21221,7 +21261,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       return;
     }
     this.genericNameValue.set('');
-        // ...and an error from the previous record no longer applies.
+    // ...and an error from the previous record no longer applies.
     this.saveError.set('');
     this.saveMsg.set('');
     this.editingId.set(record.id ?? null);
@@ -21377,7 +21417,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       case 'uomMaster':
         this.applyUomRecordToForm(record, true);
         break;
-        case 'categoryMaster': {
+      case 'categoryMaster': {
         this.categorySerialApplicable.set(!!record.serial_applicable);
         this.categoryBatchApplicable.set(!!record.batch_applicable);
         // Policies (migration 265)
@@ -21486,7 +21526,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           this.entryLineRows.set(rows.length ? rows : [this.blankLineRow()]);
         }
         break;
-        case 'serialNumberPolicy':
+      case 'serialNumberPolicy':
         this.formValues.set({
           policyCode: record.policy_code || '',
           policyName: record.policy_name || '',
@@ -22682,21 +22722,21 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           status: lc(v['status'])
         };
       }
-           case 'categoryMaster': {
+      case 'categoryMaster': {
         // Policies (migration 265): serial applicable, serial policy and UIN are
         // derived from these rows on the server.
         const policyApplicable = this.categoryPolicyApplicable();
         const policies = policyApplicable
           ? this.categoryPolicyRows()
-              .filter(r => String(r.policyName || '').trim())
-              .map((r, index) => ({
-                policy_id: r.policyId,
-                policy_name: r.policyName,
-                capture_stage: r.isUniqueIdentifier ? 'stock_inward' : r.captureStage,
-                is_mandatory: r.isUniqueIdentifier ? true : r.isMandatory,
-                is_unique_identifier: r.isUniqueIdentifier,
-                display_order: index + 1
-              }))
+            .filter(r => String(r.policyName || '').trim())
+            .map((r, index) => ({
+              policy_id: r.policyId,
+              policy_name: r.policyName,
+              capture_stage: r.isUniqueIdentifier ? 'stock_inward' : r.captureStage,
+              is_mandatory: r.isUniqueIdentifier ? true : r.isMandatory,
+              is_unique_identifier: r.isUniqueIdentifier,
+              display_order: index + 1
+            }))
           : [];
         return {
           segment_id: selectedSegmentId,
@@ -22824,7 +22864,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             status: lc(v['status'] || 'active')
           };
         }
-        case 'serialNumberPolicy':
+      case 'serialNumberPolicy':
         // Library fields only: stage / mandatory / Unique Identifier are set per category (migration 265)
         return {
           segment_id: selectedSegmentId,
@@ -24989,7 +25029,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       return this.validateManufacturingMaterialItems(payload['items'], 'plan');
     }
 
-       if (key === 'materialIssueProduction') {
+    if (key === 'materialIssueProduction') {
       if (!this.payloadHasValue(payload['production_plan_id']) && !this.payloadHasValue(payload['production_plan_number'])) {
         return 'Select the Production Plan this material is issued for.';
       }
@@ -25166,7 +25206,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (!hasValue(payload['uom_name'])) return 'UOM name is required.';
     }
 
-      if (this.config?.key === 'categoryMaster') {
+    if (this.config?.key === 'categoryMaster') {
       if (!hasValue(payload['category_name'])) return 'Category name is required.';
       // Policies (migration 265): optional; when switched on, every row needs a policy and a stage.
       if (this.categoryPolicyApplicable()) {
@@ -25484,7 +25524,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           r.decimal_allowed ? 'Yes' : 'No',
           cap(r.status || 'active')
         ]);
-        case 'categoryMaster':
+      case 'categoryMaster':
         return records.map(r => [
           r.category_code || '',
           r.category_name || '',
@@ -25534,7 +25574,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             : [r.attribute_name, r.attribute_value].filter(Boolean).join(': '),
           cap(r.status || 'active')
         ]);
-        case 'serialNumberPolicy':
+      case 'serialNumberPolicy':
         return records.map(r => {
           const usedCount = Number(r.used_in_categories ?? r.usedInCategories ?? 0) || 0;
           const usedNames = r.used_in || r.usedIn || '';
@@ -25832,7 +25872,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           String(r.planned_qty ?? r.plannedQty ?? 0),
           cap(r.status || 'draft')
         ]);
-        case 'materialIssueProduction':
+      case 'materialIssueProduction':
         return records.map(r => [
           r.issue_number || r.issueNumber || '',
           r.issue_date || r.issueDate || '',
@@ -25866,7 +25906,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         return [];
     }
   }
-    // "Brushless Motor × 2 Numbers, Electronic Speed Controller × 2 Numbers"
+  // "Brushless Motor × 2 Numbers, Electronic Speed Controller × 2 Numbers"
   // Quantity = what THIS issue gave out (issued qty), not the plan's requirement.
   private materialIssueItemsSummary(items: any[]): string {
     return (items || [])
