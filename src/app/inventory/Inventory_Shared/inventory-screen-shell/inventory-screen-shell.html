@@ -186,7 +186,7 @@
       @if (guideFields().length) {
         <div class="inventory-field-advice inventory-field-advice--short">
           <div class="inventory-field-advice-title">
-            <strong>Key fields</strong>
+            <strong>Field explanations</strong>
           </div>
 
           <div class="inventory-field-advice-list">
@@ -194,9 +194,29 @@
               <article class="inventory-field-advice-item">
                 <div>
                   <strong>{{ field.label }}</strong>
-                  <span>{{ shortText(fieldAdvice(field), 100) }}</span>
+                  <span>{{ fieldAdvice(field) }}</span>
                 </div>
-                <p>{{ shortText(fieldEffect(field), 120) }}</p>
+                <p>{{ fieldEffect(field) }}</p>
+              </article>
+            }
+          </div>
+        </div>
+      }
+
+      @if (guideLineColumns().length) {
+        <div class="inventory-field-advice inventory-field-advice--short">
+          <div class="inventory-field-advice-title">
+            <strong>{{ config.lineTitle || 'Item Lines' }} – grid columns</strong>
+          </div>
+
+          <div class="inventory-field-advice-list">
+            @for (column of guideLineColumns(); track column) {
+              <article class="inventory-field-advice-item">
+                <div>
+                  <strong>{{ column }}</strong>
+                  <span>{{ lineColumnAdvice(column) }}</span>
+                </div>
+                <p>{{ fieldEffect({ key: column, label: column }) }}</p>
               </article>
             }
           </div>
