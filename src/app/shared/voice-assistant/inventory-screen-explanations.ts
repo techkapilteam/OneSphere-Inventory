@@ -258,19 +258,77 @@ export const INVENTORY_SCREEN_EXPLANATIONS: Record<string, string> = {
   'production return':
     'Production Return sends unused raw materials from production back to the warehouse, increasing their stock again.',
 
-  // ── Reports ────────────────────────────────────────────────────────────────
-  'stock availability report':
-    'Stock or Availability Report shows the current available stock, seats, services or units by segment, warehouse, category and product as on a date.',
+  // ── Reports (names exactly as in the Inventory → Reports menu) ─────────────
+  'stock summary report':
+    'Stock Summary Report shows, product by product, the opening stock, inward quantity, outward quantity, closing stock and stock value for the selected period. ' +
+    'Use it to see the overall stock position at a glance.',
 
-  'stock ledger':
-    'Stock Ledger shows every inward and outward movement of a product, such as GRN, sales, transfers and adjustments, with the opening balance, running balance and value, ' +
-    'including the vendor or customer of each movement.',
+  'stock ledger report':
+    'Stock Ledger Report shows every inward and outward movement of a product, such as GRN, sales, transfers, returns and adjustments, in date order, ' +
+    'with the brought forward opening balance, the running balance and value, and the vendor or customer of each movement. Use it to trace how stock reached its current balance.',
 
-  'segment wise summary':
-    'Segment-wise Summary compares inventory value and availability across business segments.',
+  'warehouse wise stock report':
+    'Warehouse-wise Stock Report shows stock quantity and value for each warehouse or location, so you can see how much of each product is held where.',
 
-  'hsn sac mapping report':
-    'HSN SAC Mapping Report lists products and services with their HSN or SAC code and GST rate, to check tax mapping before filing GST.'
+  'low stock alert report':
+    'Low Stock Alert Report lists products whose stock has fallen below the reorder level set in Product Master, with the shortage quantity. ' +
+    'Use it to plan purchase requisitions and purchase orders before items run out.',
+
+  'purchase order register':
+    'Purchase Order Register lists all purchase orders for the period with vendor, gross amount, tax, net amount and approval status. ' +
+    'Use it to review what has been ordered and which orders are still pending approval.',
+
+  'grn register':
+    'GRN Register lists all goods receipts for the period with accepted, rejected and pending quantities, so you can see what was received against each purchase order.',
+
+  'purchase invoice register':
+    'Purchase Invoice Register lists all vendor purchase invoices with taxable value, GST and net amount. ' +
+    'It is used by accounts for tax review and for reconciling with supplier statements.',
+
+  'sales order register':
+    'Sales Order Register lists all sales orders with customer, order value, tax and fulfilment status, so you can track which orders are delivered and which are pending.',
+
+  'delivery challan register':
+    'Delivery Challan Register lists all delivery challans with dispatch and logistics details such as vehicle and transporter, so you can track what was dispatched to whom.',
+
+  'sales invoice register':
+    'Sale Invoice Register lists all sales invoices for the period with taxable amount, GST split into CGST, SGST and IGST, and net value. ' +
+    'It is used for sales review and GST reconciliation.',
+
+  'dues list report':
+    'Dues List Report shows, customer by customer, every unpaid or part-paid sales invoice with the invoice total, amount received and amount still due as on a date. ' +
+    'Use it to follow up on outstanding receivables.',
+
+  'collection report':
+    'Collection Report shows the money received from each customer in a period, split into cash, cheque and journal voucher, ' +
+    'separately for current period invoices and previous period invoices.',
+
+  'pending document report':
+    'Pending Document Report shows pending quantity and amount across purchase orders, GRNs, delivery challans, invoices and approvals, ' +
+    'so you can see which documents still need action.',
+
+  'hsn sac summary report':
+    'HSN SAC Summary Report gives the GST summary by HSN or SAC code: quantity, taxable value, tax and net value. It is needed for the HSN section of GST returns.',
+
+  'batch serial expiry report':
+    'Batch, Serial and Expiry Report tracks stock by batch number, serial number and expiry date in one report. ' +
+    'Use it to find items nearing expiry and to trace a particular batch or serial.',
+
+  'product profitability report':
+    'Product Profitability Report shows, for each product, the sales value, purchase cost, gross profit and margin percentage, so you can see which products earn the most.',
+
+  'loss sales report':
+    'Loss Sales Report lists sales invoice lines where the selling rate was below the product cost price, flagging items sold at a loss.',
+
+  'stock valuation comparison report':
+    'Stock Valuation Comparison Report compares what FIFO, LIFO and Weighted Average valuation would charge for a chosen product and quantity, using the real cost layers of that product.',
+
+  'mis report':
+    'MIS Report is an admin executive snapshot of the whole company: sales, purchases, stock value, payables and receivables with ageing, and top products, ' +
+    'also broken down by business segment.',
+
+  'inventory audit trail report':
+    'Inventory Audit Trail Report is a date-wise trail of who created, updated, approved or deleted records across inventory masters and transactions. It is used for compliance and audit review.'
 };
 
 // Spoken short forms → canonical key above.
@@ -331,17 +389,63 @@ export const INVENTORY_SCREEN_ALIASES: Record<string, string> = {
   'opening stock': 'opening stock entry',
   'opening inventory': 'opening inventory balance',
   'opening balance inventory': 'opening inventory balance',
-  'stock availability': 'stock availability report',
-  'availability report': 'stock availability report',
+  'inventory summary dashboard': 'inventory dashboard',
+  'inventory summary': 'inventory dashboard',
+  'product category': 'category master',
+  'batch lot policy': 'batch lot policy master',
   'availability adjustment': 'stock adjustment',
+  // Reports — menu names with/without the word "report", and common spoken forms
+  'stock summary': 'stock summary report',
+  'stock ledger': 'stock ledger report',
+  'warehouse wise stock': 'warehouse wise stock report',
+  'warehouse stock': 'warehouse wise stock report',
+  'warehouse stock report': 'warehouse wise stock report',
+  'low stock alert': 'low stock alert report',
+  'low stock': 'low stock alert report',
+  'low stock report': 'low stock alert report',
+  'po register': 'purchase order register',
+  'goods receipt register': 'grn register',
+  'pi register': 'purchase invoice register',
+  'purchase register': 'purchase invoice register',
+  'so register': 'sales order register',
+  'dc register': 'delivery challan register',
+  'challan register': 'delivery challan register',
+  'sale invoice register': 'sales invoice register',
+  'sales register': 'sales invoice register',
+  'invoice register': 'sales invoice register',
+  'dues list': 'dues list report',
+  'dues report': 'dues list report',
+  'due list': 'dues list report',
+  'collection': 'collection report',
+  'pending document': 'pending document report',
+  'pending documents': 'pending document report',
+  'pending documents report': 'pending document report',
+  'hsn sac summary': 'hsn sac summary report',
+  'hsn summary': 'hsn sac summary report',
+  'hsn summary report': 'hsn sac summary report',
+  'batch serial expiry': 'batch serial expiry report',
+  'batch serial expiry closed report': 'batch serial expiry report',
+  'expiry report': 'batch serial expiry report',
+  'batch report': 'batch serial expiry report',
+  'serial report': 'batch serial expiry report',
+  'product profitability': 'product profitability report',
+  'profitability report': 'product profitability report',
+  'loss sales': 'loss sales report',
+  'loss sale report': 'loss sales report',
+  'stock valuation comparison': 'stock valuation comparison report',
+  'stock valuation': 'stock valuation comparison report',
+  'valuation comparison': 'stock valuation comparison report',
+  'mis': 'mis report',
+  'inventory audit trail': 'inventory audit trail report',
+  'audit trail': 'inventory audit trail report',
+  'audit trail report': 'inventory audit trail report',
   'physical verification': 'cycle count',
   'issue slip': 'internal issue slip',
   'material consumption': 'material consumption entry',
   'shipment': 'shipment entry',
   'material issue': 'material issue for production',
-  'segment summary': 'segment wise summary',
-  'hsn report': 'hsn sac mapping report',
-  'hsn sac report': 'hsn sac mapping report',
+  'hsn report': 'hsn sac summary report',
+  'hsn sac report': 'hsn sac summary report',
   'uin registration': 'identifier registration',
   'quotation': 'sales quotation',
   'enquiry': 'sales enquiry'

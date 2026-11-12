@@ -1304,6 +1304,10 @@ export class VoiceAssistantComponent implements OnInit, OnDestroy {
     const topic = this.normalizeCommand(command)
       .replace(/^(the|a|an)\s+/, '')
       .replace(/\b(screen|module|component)\b/g, ' ')
+      // Speech often spells short forms letter by letter: "g r n" → "grn", "h s n" → "hsn"
+      .replace(/\b([a-z])\s+(?=[a-z]\b)/g, '$1')
+      // "warehouse-wise" is often heard as "warehouse vice"
+      .replace(/\bvice\b/g, 'wise')
       .replace(/\s+/g, ' ')
       .trim();
     if (!topic) return null;
@@ -1311,14 +1315,19 @@ export class VoiceAssistantComponent implements OnInit, OnDestroy {
     const exact = this.resolveInventoryKey(topic);
     if (exact) return exact;
 
-    // Full canonical name spoken inside a longer phrase ("goods receipt note entry").
-    // Longest name wins so "customer receipt" beats "customer master".
+    // A multi-word screen name or alias spoken inside a longer phrase
+    // ("kap stock ledger report please"). Longest name wins, so
+    // "purchase order register" beats "purchase order".
     const padded = ` ${topic} `;
-    let best: string | null = null;
-    for (const key of Object.keys(INVENTORY_SCREEN_EXPLANATIONS)) {
-      if (key.includes(' ') && padded.includes(` ${key} `) && (!best || key.length > best.length)) best = key;
+    let bestName = '';
+    let bestKey: string | null = null;
+    const names = [...Object.keys(INVENTORY_SCREEN_EXPLANATIONS), ...Object.keys(INVENTORY_SCREEN_ALIASES)];
+    for (const name of names) {
+      if (!name.includes(' ') || name.length <= bestName.length || !padded.includes(` ${name} `)) continue;
+      const key = this.resolveInventoryKey(name);
+      if (key) { bestName = name; bestKey = key; }
     }
-    return best;
+    return bestKey;
   }
 
   private resolveInventoryKey(topic: string): string | null {
