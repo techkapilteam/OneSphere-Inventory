@@ -11704,7 +11704,17 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             // New rows now start with Qty empty (blankLineRow), so give it the
             // old default of 1 once an item is picked. Purchase screens keep
             // their own blank-Qty behavior.
-            if (!this.isPurchaseTransactionKey(this.config?.key || '')) {
+            // if (!this.isPurchaseTransactionKey(this.config?.key || '')) {
+            //   (this.config?.lineColumns || []).forEach((qtyCol, qtyIdx) => {
+            //     if (qtyCol.toLowerCase().includes('qty') && !nextRow[qtyIdx]) nextRow[qtyIdx] = '1';
+            //   });
+            // }
+            // New rows now start with Qty empty (blankLineRow), so give it the
+            // old default of 1 once an item is picked. Purchase screens and the
+            // Sales Invoice keep Qty blank: the user must enter the quantity.
+            const keepQtyBlank = this.isPurchaseTransactionKey(this.config?.key || '')
+              || this.config?.key === 'salesInvoice';
+            if (!keepQtyBlank) {
               (this.config?.lineColumns || []).forEach((qtyCol, qtyIdx) => {
                 if (qtyCol.toLowerCase().includes('qty') && !nextRow[qtyIdx]) nextRow[qtyIdx] = '1';
               });
