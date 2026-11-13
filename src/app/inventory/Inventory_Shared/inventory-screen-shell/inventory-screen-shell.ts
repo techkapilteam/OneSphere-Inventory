@@ -420,6 +420,73 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // is disabled; the backend enforces the same rule on the save endpoint
   // regardless, so this is UX only, never the sole guard.
   readonly isCurrentProductLocked = signal(false);
+
+    /** Margin information of the product being edited (migration 283), for the hint. */
+  readonly productMarginInfo = signal<{
+    categoryPct: number | null; effectivePct: number | null;
+    suggestedRate: number | null; cost: number | null; categoryName: string;
+  } | null>(null);
+  readonly isSavingProductMargin = signal(false);
+
+  /** Hint under the margin field, e.g. "Effective 15% (from category CARTRIDGE) · Suggested rate Rs. 628.60 (cost Rs. 546.61)". */
+  productMarginHint(): string {
+    const info = this.productMarginInfo();
+    if (!info) return 'Leave empty to use the category margin.';
+    const fmt = (n: number) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+    const parts: string[] = [];
+    const own = String(this.formValues()['salesMarginPct'] ?? '').trim();
+    if (info.effectivePct !== null && info.effectivePct !== undefined) {
+      parts.push(`Effective ${fmt(info.effectivePct)}% (${own ? 'this product' : `from category ${info.categoryName || ''}`.trim()})`);
+    } else {
+      parts.push('No margin (category has none)');
+    }
+    if (info.suggestedRate) parts.push(`Suggested rate Rs. ${fmt(info.suggestedRate)}${info.cost ? ` (cost Rs. ${fmt(info.cost)})` : ''}`);
+    return parts.join(' · ');
+  }
+
+  /** Saves only the margin of the product being edited; works for locked products too. */
+  saveCurrentProductSalesMargin(): void {
+    const id = this.editingId();
+    if (!id || this.isSavingProductMargin()) return;
+    const raw = String(this.formValues()['salesMarginPct'] ?? '').trim();
+    if (raw !== '' && (!Number.isFinite(Number(raw)) || Number(raw) < 0 || Number(raw) > 1000)) {
+      this.saveError.set('Sales margin must be a number between 0 and 1000.');
+      return;
+    }
+    this.isSavingProductMargin.set(true);
+    this.inventoryConfigService.saveProductSalesMargin(Number(id), raw)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: res => {
+          this.isSavingProductMargin.set(false);
+          if (!res?.success) { this.saveError.set(res?.message || 'Failed to save the sales margin.'); return; }
+          const d: any = res.data || {};
+          const pick = (snake: string, camel: string) => d[snake] ?? d[camel] ?? null;
+          this.productMarginInfo.update(info => ({
+            categoryPct: pick('category_sales_margin_pct', 'categorySalesMarginPct'),
+            effectivePct: pick('effective_sales_margin_pct', 'effectiveSalesMarginPct'),
+            suggestedRate: pick('suggested_sales_rate', 'suggestedSalesRate'),
+            cost: pick('suggested_rate_cost', 'suggestedRateCost'),
+            categoryName: info?.categoryName || ''
+          }));
+          this.saveMsg.set('Sales margin updated.');
+        },
+        error: (err: any) => {
+          this.isSavingProductMargin.set(false);
+          this.saveError.set(this.apiErrorMessage(err, 'Failed to save the sales margin.'));
+        }
+      });
+  }
+
+    /** Opens a saved product read-only so only its Sales Margin can be changed
+   *  (migration 283). Saved master records stay locked for normal edits. */
+  openProductForMargin(row: string[]): void {
+    this.editRecordByRow(row);
+    // Always read-only here, whether or not the product has stock movement:
+    // the locked fieldset disables the form and the normal Save.
+    this.isCurrentProductLocked.set(true);
+  }
+
   readonly productTaxUomRequired = signal(false);
   readonly productBrandRequired = signal(false);
   readonly productVariantRequired = signal(false);
@@ -12272,10 +12339,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (this.config?.key === 'salesInvoice') {
       const mrp = this.productSalesPriceForLineUom(product, row, this.productMrp(product));
       const selling = this.productSalesPriceForLineUom(product, row, this.productSellingPrice(product, row));
+      // Cost + category / product margin (migration 283), converted to the line's UOM.
+      const suggested = this.productSalesPriceForLineUom(product, row, this.productSuggestedSalesRate(product));
       this.setLineColumnDefault(row, ['mrp'], mrp, true);
       this.setLineColumnDefault(row, ['selling'], selling, true);
-      this.setLineColumnDefault(row, ['rate'], mrp > 0 ? mrp : selling, true);
-    } else if (this.config?.key === 'salesOrder' || this.config?.key === 'purchaseInvoice') {
+      // Rate: the margin rate when the product has one, otherwise as before (MRP, else selling price).
+      this.setLineColumnDefault(row, ['rate'], suggested > 0 ? suggested : (mrp > 0 ? mrp : selling), true);
+    }
+    else if (this.config?.key === 'salesOrder' || this.config?.key === 'purchaseInvoice') {
       const mrp = this.productSalesPriceForLineUom(product, row, this.productMrp(product));
       const selling = this.productSalesPriceForLineUom(product, row, this.productSellingPrice(product, row));
       // Previous: MRP / Selling Price were always defaulted from the product,
@@ -12289,6 +12360,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (this.config?.key === 'salesOrder') {
       this.setLineColumnDefault(row, ['rate'], this.productSalesPriceForLineUom(product, row, this.productSellingPrice(product, row)), true);
     }
+  }
+
+    /** Suggested selling rate (cost + margin) from the product list; 0 = none. */
+  private productSuggestedSalesRate(product: any): number {
+    const value = Number(product?.suggested_sales_rate ?? product?.suggestedSalesRate ?? 0);
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  }
+
+  /** Cost behind the suggested rate (for the below-cost warning); 0 = unknown. */
+  private productSuggestedRateCost(product: any): number {
+    const value = Number(product?.suggested_rate_cost ?? product?.suggestedRateCost ?? 0);
+    return Number.isFinite(value) && value > 0 ? value : 0;
   }
 
   private syncPurchaseInvoiceSellingPrice(row: string[], mrpValue: string, previousMrpValue: string): void {
@@ -12529,6 +12612,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const reference: string[] = [];
     if (productMrpForLineUom > 0) reference.push(`MRP Rs. ${fmt(productMrpForLineUom)}`);
     if (sellingPrice > 0) reference.push(`Selling Rs. ${fmt(sellingPrice)}`);
+    // Margin rate (cost + category / product margin, migration 283)
+    const marginRate = this.productSalesPriceForLineUom(product, row, this.productSuggestedSalesRate(product));
+    const marginPct = Number((product as any)?.effective_sales_margin_pct ?? 0);
+    if (marginRate > 0) reference.push(`Margin rate Rs. ${fmt(marginRate)}${marginPct > 0 ? ` (${fmt(marginPct)}%)` : ''}`);
     const withReference = (message: string) =>
       reference.length ? `${message} (${reference.join(' · ')})` : message;
 
@@ -21447,6 +21534,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           categoryCode: record.category_code || '',
           categoryName: record.category_name || '',
           description: record.description || '',
+          salesMarginPct: record.sales_margin_pct ?? '',
           batchPolicyName: record.batch_policy_name || '',
           applicableUoms: (record.uoms || []).map((u: any) => u.uom_symbol || u.uom_name || u.uom_code).filter(Boolean),
           status: cap(record.status || 'active')
@@ -21666,6 +21754,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         break;
       case 'productServiceMaster':
         this.isCurrentProductLocked.set(!!record.locked_for_edit);
+        this.productMarginInfo.set({
+          categoryPct: record.category_sales_margin_pct ?? null,
+          effectivePct: record.effective_sales_margin_pct ?? null,
+          suggestedRate: record.suggested_sales_rate ?? null,
+          cost: record.suggested_rate_cost ?? null,
+          categoryName: record.category_name || ''
+        });
         this.genericNameValue.set(record.product_name || '');
         this.productName.set(record.product_name || '');
         this.selectedProductCategory.set(record.category_name || '');
@@ -21717,6 +21812,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           reorderLevel: record.reorder_level ?? 0,
           reorderQty: record.reorder_qty ?? 0,
           description: record.description || '',
+          salesMarginPct: record.sales_margin_pct ?? '',
           status: cap(record.item_status || record.status || 'active')
         });
         {
@@ -22753,6 +22849,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           category_code: v['categoryCode'] || '',
           category_name: v['categoryName'] || '',
           description: v['description'] || '',
+           // Sales margin on cost (migration 283): "" clears it, "15" = 15 %
+          sales_margin_pct: v['salesMarginPct'] === null || v['salesMarginPct'] === undefined || String(v['salesMarginPct']).trim() === ''
+            ? ''
+            : String(v['salesMarginPct']).trim(),
           policy_applicable: policyApplicable,
           policies,
           batch_applicable: this.categoryBatchApplicable(),
@@ -22995,6 +23095,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           qc_required: this.productQcRequired() || bool(v['qcRequired']),
           warranty_applicable: this.productWarrantyApplicable() || bool(v['warrantyApplicable']),
           description: v['description'] || null,
+          // Sales margin override (migration 283): "" = use the category, "8" = 8 %
+          sales_margin_pct: v['salesMarginPct'] === null || v['salesMarginPct'] === undefined || String(v['salesMarginPct']).trim() === ''
+            ? ''
+            : String(v['salesMarginPct']).trim(),
           pricing_type: InventoryScreenShell.PRICING_TYPE_NATURES.has(v['productNatureName']) ? (v['pricingType'] || null) : null,
           rental_unit: v['pricingType'] === 'Rental' ? (v['rentalUnit'] || null) : null,
           uom_conversions: productUomConversions,
@@ -25544,6 +25648,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           r.description || '',
           (r.uoms || []).map((u: any) => u.uom_symbol || u.uom_name || u.uom_code).filter(Boolean).join(', ')
           || (Array.isArray(r.applicable_uom_names) ? r.applicable_uom_names.join(', ') : ''),
+          r.sales_margin_pct !== null && r.sales_margin_pct !== undefined ? `${Number(r.sales_margin_pct)}%` : '',
           cap(r.status || 'active')
         ]);
       case 'hsnSacMapping':

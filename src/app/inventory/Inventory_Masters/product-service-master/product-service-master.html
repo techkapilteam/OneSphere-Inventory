@@ -1317,6 +1317,30 @@
               </div>
             </div>
             </fieldset>
+            <!-- Sales margin override (migration 283). Outside the locked fieldset on
+     purpose: a margin does not touch cost or stock history, so it stays
+     editable on products already used in posted documents. -->
+<div class="inventory-form-grid">
+  <div class="erp-form-group">
+    <label class="erp-label">Sales Margin % (override)</label>
+    <div class="inventory-field-with-add">
+      <input class="erp-input" type="number" min="0" max="1000" step="0.01"
+        [ngModel]="formFieldValue({key:'salesMarginPct', label:'Sales Margin % (override)', type:'number'})"
+        (ngModelChange)="collectFormField('salesMarginPct', $event)"
+        placeholder="Empty = use the category margin" />
+      @if (editingId()) {
+        <button type="button" class="erp-btn btn-white btn-sm"
+          [disabled]="isSavingProductMargin()"
+          (click)="saveCurrentProductSalesMargin()"
+          title="Save only the margin (also works for locked products)">
+          <i [class]="isSavingProductMargin() ? 'pi pi-spin pi-spinner' : 'pi pi-save'"></i>
+          Save margin
+        </button>
+      }
+    </div>
+    <small class="inventory-field-hint">{{ productMarginHint() }}</small>
+  </div>
+</div>
           </div>
         } @else if (config.key === 'consumptionTypeMaster') {
           <div class="inventory-branch-form">
@@ -2021,11 +2045,11 @@
                 <tr>
                   <td class="text-center">
                     <div class="inventory-row-actions">
-                      @if (isAdmin()) {
-                        <!-- Previous: <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit"><i class="pi pi-pencil"></i></button> -->
-                        <!-- Previous: <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete"><i class="pi pi-trash"></i></button> -->
-                        <!-- Saved master records are locked: Edit/Delete always disabled. -->
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" disabled><i class="pi pi-pencil"></i></button>
+                          @if (isAdmin()) {
+                        <!-- Previous: <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" disabled><i class="pi pi-pencil"></i></button> -->
+                        <!-- Saved products stay locked; this only opens them read-only to change the Sales Margin (migration 283). -->
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="View / change sales margin"
+                          (click)="openProductForMargin(row)"><i class="pi pi-percentage"></i></button>
                         <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" disabled><i class="pi pi-trash"></i></button>
                       }
                     </div>

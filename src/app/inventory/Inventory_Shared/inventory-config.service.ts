@@ -119,6 +119,7 @@ export interface CategoryItem {
   batch_applicable?: boolean;
   batch_policy_id?: number | null;
   batch_policy_name?: string | null;
+  sales_margin_pct?: number | null;
   uoms?: CategoryUomItem[];
   status: string;
 }
@@ -714,6 +715,11 @@ export interface ProductItem {
   price?: number | null;
   cost_price?: number | null;
   costPrice?: number | null;
+  suggested_sales_rate?: number | null;
+  suggested_rate_cost?: number | null;
+  sales_margin_pct?: number | null;
+  category_sales_margin_pct?: number | null;
+  effective_sales_margin_pct?: number | null;
   reorder_level: number;
   reorder_qty: number;
   max_stock_level: number;
@@ -925,6 +931,7 @@ export class InventoryConfigService {
       batch_applicable: !!(this.value(item, 'batch_applicable', 'batchApplicable', false)),
       batch_policy_id: this.value(item, 'batch_policy_id', 'batchPolicyId', null),
       batch_policy_name: this.value(item, 'batch_policy_name', 'batchPolicyName', null),
+      sales_margin_pct: this.value(item, 'sales_margin_pct', 'salesMarginPct', null),
       uoms: (this.value<any[]>(item, 'uoms', 'uoms', []) ?? []).map(u => ({
         id: u?.id,
         uom_code: this.value(u, 'uom_code', 'uomCode', ''),
@@ -1791,6 +1798,11 @@ export class InventoryConfigService {
       price: this.value(item, 'price', 'price'),
       cost_price: this.value(item, 'cost_price', 'costPrice'),
       costPrice: this.value(item, 'cost_price', 'costPrice'),
+      suggested_sales_rate: this.value(item, 'suggested_sales_rate', 'suggestedSalesRate'),
+      suggested_rate_cost: this.value(item, 'suggested_rate_cost', 'suggestedRateCost'),
+      sales_margin_pct: this.value(item, 'sales_margin_pct', 'salesMarginPct'),
+      category_sales_margin_pct: this.value(item, 'category_sales_margin_pct', 'categorySalesMarginPct'),
+      effective_sales_margin_pct: this.value(item, 'effective_sales_margin_pct', 'effectiveSalesMarginPct'),
       reorder_level: this.value(item, 'reorder_level', 'reorderLevel', 0),
       reorder_qty: this.value(item, 'reorder_qty', 'reorderQty', 0),
       max_stock_level: this.value(item, 'max_stock_level', 'maxStockLevel', 0),
@@ -2240,6 +2252,15 @@ export class InventoryConfigService {
         ? this.http.put<ApiResponse<any>>(this.masterUrl(`products/${id}`), body, { headers: h })
         : this.http.post<ApiResponse<any>>(this.masterUrl('products'), body, { headers: h }),
       item => this.normalizeProduct(item)
+    );
+  }
+    /** Sets ONLY a product's sales margin override (migration 283); works for locked products.
+   *  value: "8" = 8 %, "" = remove the override (use the category margin). */
+  saveProductSalesMargin(id: number, value: string): Observable<ApiResponse<any>> {
+    return this.http.put<ApiResponse<any>>(
+      this.masterUrl(`products/${id}/sales-margin`),
+      { salesMarginPct: value },
+      { headers: this.headers() }
     );
   }
 
