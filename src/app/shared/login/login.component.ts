@@ -569,8 +569,7 @@ export class LoginComponent implements OnInit, OnDestroy {
         );
         this.loginOtpSent.set(true);
         this.loginOtpDeliveryFailed.set(true);
-        const fallbackOtp = (response.data as any)?.otp || '';
-        this.loginOtp.set(fallbackOtp);
+        this.loginOtp.set(this.getExposedOtp(response));
         this.loginOtpDeliveryMessage.set(msg);
         this.showToast('warn', 'Delivery not confirmed', msg);
         return;
@@ -1415,7 +1414,15 @@ export class LoginComponent implements OnInit, OnDestroy {
     return response?.message || fallback;
   }
 
+  // Live (production) host — the OTP must never be auto-filled here, even if the
+  // API returns it. localhost and onesuite-uat keep the auto-fill for testing.
+  private isLiveEnvironment(): boolean {
+    const host = (typeof window !== 'undefined' ? window.location.hostname : '').toLowerCase();
+    return host === 'onesuite.kapilit.com' || host === 'www.onesuite.kapilit.com';
+  }
+
   private getExposedOtp(response: OtpIssueResponse | undefined): string {
+    if (this.isLiveEnvironment()) return '';
     const data = response?.data as Record<string, unknown> | undefined;
     const otp = String(data?.['otp'] ?? data?.['Otp'] ?? '').trim();
     return /^\d{6}$/.test(otp) ? otp : '';
