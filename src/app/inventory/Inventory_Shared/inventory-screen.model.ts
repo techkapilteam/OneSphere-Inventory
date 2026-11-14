@@ -864,9 +864,10 @@ export const categoryMasterConfig: InventoryScreenConfig = {
     { key: 'categoryCode', label: 'Category Code' },
     { key: 'parentCategory', label: 'Parent Category', type: 'select', options: ['None / Main Category', 'Electronics', 'Agro Products', 'IT Services', 'Real Estate Units', 'Project Materials', 'Hotel / Restaurant', 'Food & Beverage'], addMaster: 'Business Segment' },
     { key: 'description', label: 'Description', type: 'textarea' },
+    { key: 'salesMarginPct', label: 'Sales Margin % (on cost)', type: 'number' },
     { key: 'status', label: 'Status', type: 'select', options: INVENTORY_OPTIONS.status }
   ],
-  columns: ['Category Code', 'Category Name', 'Parent Category', 'Policies', 'Batch / Lot Policy', 'Description', 'Applicable UOMs', 'Status'], 
+  columns: ['Category Code', 'Category Name', 'Parent Category', 'Policies', 'Batch / Lot Policy', 'Description', 'Applicable UOMs','Sales Margin %', 'Status'], 
 };
 
 export const brandMasterConfig: InventoryScreenConfig = {
