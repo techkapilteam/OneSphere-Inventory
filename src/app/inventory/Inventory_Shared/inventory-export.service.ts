@@ -105,6 +105,38 @@ const BANK_BOX_HEIGHT = 58;
 const SIGNATURE_ROW_HEIGHT = 45;
 const NUMERIC_CELL =/^-?(rs\.?\s*|₹\s*)?-?[\d,]+(\.\d+)?\s*%?$/i;
 
+// No "Rs." / ₹ in any Inventory PDF, Print or Excel (user request 2026-11-14);
+// screens keep it. Header suffixes like "Amount (Rs.)" / "(₹)" / "(in Rs.)"
+// go, and an "Rs." / "₹" directly in front of an amount goes. "Rupees … Only"
+// (amount in words) is left as is.
+const RUPEE_SUFFIX = /\s*\(\s*(?:in\s+)?(?:Rs\.?|₹|INR)\s*\)/gi;
+const RUPEE_SYMBOL = /₹\s*/g;
+const RUPEE_PREFIX = /\bRs\.?\s*(?=[-+(]?\s*\d)/gi;
+function stripRupee(value: string): string {
+  if (!value) return value;
+  return value.replace(RUPEE_SUFFIX, '').replace(RUPEE_SYMBOL, '').replace(RUPEE_PREFIX, '');
+}
+function stripRupeeDocument(doc: InventoryExportDocument): InventoryExportDocument {
+  const s = (v: any) => (typeof v === 'string' ? stripRupee(v) : v);
+  const pairs = (list?: Array<[string, string]>) => list?.map(([label, value]) => [s(label), s(value)] as [string, string]);
+  return {
+    ...doc,
+    title: s(doc.title),
+    columns: (doc.columns || []).map(s),
+    rows: (doc.rows || []).map(row => (row || []).map(s)),
+    fields: pairs(doc.fields),
+    summary: pairs(doc.summary),
+    notes: s(doc.notes),
+    totalRow: doc.totalRow?.map(s),
+    columnGroups: doc.columnGroups?.map(([title, span]) => [s(title), span] as [string, number]),
+    periodText: s(doc.periodText),
+    bankDetails: pairs(doc.bankDetails),
+    boldCellSegments: doc.boldCellSegments
+      ? { ...doc.boldCellSegments, byRow: doc.boldCellSegments.byRow.map(s) }
+      : undefined
+  };
+}
+
 @Injectable({ providedIn: 'root' })
 export class InventoryExportService {
 
@@ -115,6 +147,7 @@ export class InventoryExportService {
   // If the browser blocks the new tab, the PDF is downloaded instead.
   // Previous: pdf(document: InventoryExportDocument, mode: 'Pdf' | 'Print'): void {
   pdf(document: InventoryExportDocument, mode: 'Pdf' | 'Print' | 'Open'): void {
+    document = stripRupeeDocument(document);
     // Previous: const doc = this.buildPdf(document);
     const doc = this.buildPdfFitted(document);
     if (mode === 'Open') {
@@ -129,6 +162,7 @@ export class InventoryExportService {
   }
 
   excel(document: InventoryExportDocument): void {
+    document = stripRupeeDocument(document);
     // Single documents (invoice, challan, voucher …) get the same layout as
     // their PDF; plain grids keep the Accounts list-export layout below.
     if (this.filledFields(document).length || document.summary?.length) {
