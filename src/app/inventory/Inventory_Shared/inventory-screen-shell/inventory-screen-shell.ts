@@ -8641,11 +8641,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // once (printInvoiceWithCopyType) and the rows read them from here.
   private readonly printSoldSerialsByItemId = new Map<number, string[]>();
 
-  // "(SN1, SN2)" for a PI / SI print line, or '' when the line has no serials.
+  // "(S.No: SN1, SN2)" for a PI / SI print line, or '' when the line has no serials.
   private documentSerialText(item: any): string {
     let serials = this.serialNumbersFromRecordItem(item);
     if (!serials.length) serials = this.printSoldSerialsByItemId.get(Number(item?.id)) || [];
-    return serials.length ? `(${serials.join(', ')})` : '';
+    return serials.length ? `(S.No: ${serials.join(', ')})` : '';
   }
 
   // Per row, the serial line to print bold in the Product column (index 1).
