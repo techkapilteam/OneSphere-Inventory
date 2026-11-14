@@ -47,6 +47,8 @@ export interface BomLineItem {
   quantity: number;
   uom_id?: number | null;
   uom_name?: string | null;
+  wastage_percent?: number;
+
 }
 
 export interface BomItem {
@@ -86,6 +88,18 @@ export interface SegmentItem {
   uoms: { id: number; uom_code: string; uom_name: string; uom_symbol?: string }[];
 }
 
+// One policy row of a category (migration 265)
+export interface CategoryPolicyRow {
+  id?: number;
+  policy_id: number | null;
+  policy_code?: string;
+  policy_name: string;
+  capture_stage: string;          // stock_inward | sales_invoice | both_inward_sale | registration_before_sale | warranty_registration
+  is_mandatory: boolean;
+  is_unique_identifier: boolean;
+  display_order?: number;
+}
+
 export interface CategoryItem {
   id: number;
   segment_id?: number;
@@ -96,11 +110,16 @@ export interface CategoryItem {
   parent_name?: string;
   description?: string;
   serial_applicable?: boolean;
+  uin_required?: boolean; 
+  policy_applicable?: boolean;
+  policies?: CategoryPolicyRow[];
+  policies_text?: string | null;  // e.g. "Serial No. (ID), UIN" for the grid
   serial_policy_id?: number | null;
   serial_policy_name?: string | null;
   batch_applicable?: boolean;
   batch_policy_id?: number | null;
   batch_policy_name?: string | null;
+  sales_margin_pct?: number | null;
   uoms?: CategoryUomItem[];
   status: string;
 }
@@ -462,6 +481,8 @@ export interface SerialPolicyItem {
   policy_code: string;
   policy_name: string;
   serial_format?: string;
+  used_in_categories?: number;
+  used_in?: string;
   capture_stage?: string;
   allow_duplicate: boolean;
   warranty_applicable: boolean;
@@ -608,6 +629,7 @@ export interface ContactItem {
   is_supplier?: boolean;
   is_customer?: boolean;
   is_channel_partner?: boolean;
+  is_lead_by?: boolean;
   vendor_exists?: boolean;
   customer_exists?: boolean;
   channel_partner_exists?: boolean;
@@ -693,6 +715,11 @@ export interface ProductItem {
   price?: number | null;
   cost_price?: number | null;
   costPrice?: number | null;
+  suggested_sales_rate?: number | null;
+  suggested_rate_cost?: number | null;
+  sales_margin_pct?: number | null;
+  category_sales_margin_pct?: number | null;
+  effective_sales_margin_pct?: number | null;
   reorder_level: number;
   reorder_qty: number;
   max_stock_level: number;
@@ -886,11 +913,25 @@ export class InventoryConfigService {
       parent_name: this.value(item, 'parent_name', 'parentName'),
       description: this.value(item, 'description', 'description'),
       serial_applicable: !!(this.value(item, 'serial_applicable', 'serialApplicable', false)),
+      uin_required: !!this.value(item, 'uin_required', 'uinRequired', false),
+      policy_applicable: !!this.value(item, 'policy_applicable', 'policyApplicable', false),
+      policies: (this.value<any[]>(item, 'policies', 'policies', []) ?? []).map(p => ({
+        id: p?.id,
+        policy_id: this.value(p, 'policy_id', 'policyId'),
+        policy_code: this.value(p, 'policy_code', 'policyCode', ''),
+        policy_name: this.value(p, 'policy_name', 'policyName', ''),
+        capture_stage: this.value(p, 'capture_stage', 'captureStage', 'stock_inward'),
+        is_mandatory: !!this.value(p, 'is_mandatory', 'isMandatory', false),
+        is_unique_identifier: !!this.value(p, 'is_unique_identifier', 'isUniqueIdentifier', false),
+        display_order: this.value(p, 'display_order', 'displayOrder', 1)
+      })),
+      policies_text: this.value(item, 'policies_text', 'policiesText', null),
       serial_policy_id: this.value(item, 'serial_policy_id', 'serialPolicyId', null),
       serial_policy_name: this.value(item, 'serial_policy_name', 'serialPolicyName', null),
       batch_applicable: !!(this.value(item, 'batch_applicable', 'batchApplicable', false)),
       batch_policy_id: this.value(item, 'batch_policy_id', 'batchPolicyId', null),
       batch_policy_name: this.value(item, 'batch_policy_name', 'batchPolicyName', null),
+      sales_margin_pct: this.value(item, 'sales_margin_pct', 'salesMarginPct', null),
       uoms: (this.value<any[]>(item, 'uoms', 'uoms', []) ?? []).map(u => ({
         id: u?.id,
         uom_code: this.value(u, 'uom_code', 'uomCode', ''),
@@ -1516,6 +1557,8 @@ export class InventoryConfigService {
       policy_code: this.value(item, 'policy_code', 'policyCode', ''),
       policy_name: this.value(item, 'policy_name', 'policyName', ''),
       serial_format: this.value(item, 'serial_format', 'serialFormat'),
+      used_in_categories: Number(this.value(item, 'used_in_categories', 'usedInCategories', 0)) || 0,
+      used_in: this.value(item, 'used_in', 'usedIn', ''),
       capture_stage: this.value(item, 'capture_stage', 'captureStage'),
       allow_duplicate: this.value(item, 'allow_duplicate', 'allowDuplicate', false),
       warranty_applicable: this.value(item, 'warranty_applicable', 'warrantyApplicable', false),
@@ -1665,6 +1708,7 @@ export class InventoryConfigService {
       is_supplier: this.value(item, 'is_supplier', 'isSupplier', false),
       is_customer: this.value(item, 'is_customer', 'isCustomer', false),
       is_channel_partner: this.value(item, 'is_channel_partner', 'isChannelPartner', false),
+      is_lead_by: this.value(item, 'is_lead_by', 'isLeadBy', false),
       vendor_exists: this.value(item, 'vendor_exists', 'vendorExists', false),
       customer_exists: this.value(item, 'customer_exists', 'customerExists', false),
       channel_partner_exists: this.value(item, 'channel_partner_exists', 'channelPartnerExists', false),
@@ -1754,6 +1798,11 @@ export class InventoryConfigService {
       price: this.value(item, 'price', 'price'),
       cost_price: this.value(item, 'cost_price', 'costPrice'),
       costPrice: this.value(item, 'cost_price', 'costPrice'),
+      suggested_sales_rate: this.value(item, 'suggested_sales_rate', 'suggestedSalesRate'),
+      suggested_rate_cost: this.value(item, 'suggested_rate_cost', 'suggestedRateCost'),
+      sales_margin_pct: this.value(item, 'sales_margin_pct', 'salesMarginPct'),
+      category_sales_margin_pct: this.value(item, 'category_sales_margin_pct', 'categorySalesMarginPct'),
+      effective_sales_margin_pct: this.value(item, 'effective_sales_margin_pct', 'effectiveSalesMarginPct'),
       reorder_level: this.value(item, 'reorder_level', 'reorderLevel', 0),
       reorder_qty: this.value(item, 'reorder_qty', 'reorderQty', 0),
       max_stock_level: this.value(item, 'max_stock_level', 'maxStockLevel', 0),
@@ -2109,6 +2158,38 @@ export class InventoryConfigService {
     ), item => this.normalizeContact(item));
   }
 
+  // Global Contacts' "Supplier / Vendor" tab lists only contacts with an active
+  // global.tbl_mst_supplier row (per company/branch). Reuses the Accounts
+  // Contacts screen's own endpoint so an Inventory vendor shows up there too.
+  // The SP rejects a contact already registered for this company/branch --
+  // callers treat that as success.
+  markContactAsSupplier(contactId: number, pan?: string | null): Observable<unknown> {
+    const params = new HttpParams()
+      .set('globalSchema', 'global')
+      .set('companyCode', sessionStorage.getItem('companyCode') ?? '')
+      .set('branchCode', sessionStorage.getItem('branchCode') ?? '');
+    return this.http.post(
+      `${this.base()}/ContactMore/SaveContactSupplier`,
+      { pContactId: String(contactId), pIsSupplier: true, pPanNumber: pan || null },
+      { headers: this.headers(), params }
+    );
+  }
+
+  // Global Contacts' "Lead By" tab (after Freelancer) lists contacts with an
+  // active global.tbl_mst_lead_by row. Same endpoint shape as the Supplier
+  // role above; an already-registered contact is likewise treated as success.
+  markContactAsLeadBy(contactId: number, pan?: string | null): Observable<unknown> {
+    const params = new HttpParams()
+      .set('globalSchema', 'global')
+      .set('companyCode', sessionStorage.getItem('companyCode') ?? '')
+      .set('branchCode', sessionStorage.getItem('branchCode') ?? '');
+    return this.http.post(
+      `${this.base()}/ContactMore/SaveContactLeadBy`,
+      { pContactId: String(contactId), pIsLeadBy: true, pPanNumber: pan || null },
+      { headers: this.headers(), params }
+    );
+  }
+
   updateGlobalContact(payload: Record<string, any>, id: number): Observable<ApiResponse<ContactItem>> {
     const body = this.toApiValue(payload);
     return this.mapItem(
@@ -2171,6 +2252,15 @@ export class InventoryConfigService {
         ? this.http.put<ApiResponse<any>>(this.masterUrl(`products/${id}`), body, { headers: h })
         : this.http.post<ApiResponse<any>>(this.masterUrl('products'), body, { headers: h }),
       item => this.normalizeProduct(item)
+    );
+  }
+    /** Sets ONLY a product's sales margin override (migration 283); works for locked products.
+   *  value: "8" = 8 %, "" = remove the override (use the category margin). */
+  saveProductSalesMargin(id: number, value: string): Observable<ApiResponse<any>> {
+    return this.http.put<ApiResponse<any>>(
+      this.masterUrl(`products/${id}/sales-margin`),
+      { salesMarginPct: value },
+      { headers: this.headers() }
     );
   }
 
@@ -2351,6 +2441,7 @@ export class InventoryConfigService {
         product_id: this.value(row, 'product_id', 'productId'),
         product_name: this.value(row, 'product_name', 'productName', ''),
         quantity: Number(this.value(row, 'quantity', 'quantity', 1)) || 0,
+        wastage_percent: Number(this.value(row, 'wastage_percent', 'wastagePercent', 0)) || 0,
         uom_id: this.value(row, 'uom_id', 'uomId'),
         uom_name: this.value(row, 'uom_name', 'uomName')
       }))

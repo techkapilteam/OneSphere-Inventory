@@ -33,7 +33,7 @@
                 <i class="pi pi-file-plus"></i> {{ directReferenceActionLabel() }}
               </button>
             }
-            <button type="button" class="erp-btn btn-white btn-icon btn-sm" (click)="closePurchaseReferencePicker()">
+            <button title="Close" type="button" class="erp-btn btn-white btn-icon btn-sm" (click)="closePurchaseReferencePicker()">
               <i class="pi pi-times"></i>
             </button>
           </span>
@@ -82,7 +82,7 @@
       <div class="inventory-modal inventory-modal--wide" (click)="$event.stopPropagation()">
         <div class="inventory-modal-header">
           <h3>{{ secondaryReferenceButtonLabel() }}</h3>
-          <button type="button" class="erp-btn btn-white btn-icon btn-sm" (click)="closePurchaseReferencePicker()">
+          <button title="Close" type="button" class="erp-btn btn-white btn-icon btn-sm" (click)="closePurchaseReferencePicker()">
             <i class="pi pi-times"></i>
           </button>
         </div>
@@ -186,13 +186,7 @@
       @if (guideFields().length) {
         <div class="inventory-field-advice inventory-field-advice--short">
           <div class="inventory-field-advice-title">
-            <strong>Key fields</strong>
-            <span>
-              {{ guideFields().length }} shown
-              @if (hiddenGuideFieldCount() > 0) {
-                of {{ displayFields().length }}
-              }
-            </span>
+            <strong>Field explanations</strong>
           </div>
 
           <div class="inventory-field-advice-list">
@@ -200,9 +194,29 @@
               <article class="inventory-field-advice-item">
                 <div>
                   <strong>{{ field.label }}</strong>
-                  <span>{{ shortText(fieldAdvice(field), 100) }}</span>
+                  <span>{{ fieldAdvice(field) }}</span>
                 </div>
-                <p>{{ shortText(fieldEffect(field), 120) }}</p>
+                <p>{{ fieldEffect(field) }}</p>
+              </article>
+            }
+          </div>
+        </div>
+      }
+
+      @if (guideLineColumns().length) {
+        <div class="inventory-field-advice inventory-field-advice--short">
+          <div class="inventory-field-advice-title">
+            <strong>{{ config.lineTitle || 'Item Lines' }} – grid columns</strong>
+          </div>
+
+          <div class="inventory-field-advice-list">
+            @for (column of guideLineColumns(); track column) {
+              <article class="inventory-field-advice-item">
+                <div>
+                  <strong>{{ column }}</strong>
+                  <span>{{ lineColumnAdvice(column) }}</span>
+                </div>
+                <p>{{ fieldEffect({ key: column, label: column }) }}</p>
               </article>
             }
           </div>

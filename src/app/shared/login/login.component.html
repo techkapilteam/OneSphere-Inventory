@@ -735,10 +735,11 @@
             </div>
             <div class="erp-form-group">
               <label>PAN Number</label>
+              <!-- Previous: placeholder="Permanent Account Number" -->
               <input pInputText type="text" maxlength="10" class="w-100"
                 [ngModel]="companySetup().panNumber"
                 (ngModelChange)="updateCompanySetup('panNumber', $event)"
-                placeholder="Permanent Account Number" />
+                placeholder="ABCDE1234F (5 letters, 4 digits, 1 letter)" />
             </div>
             <div class="erp-form-group">
               <label>GST No</label>

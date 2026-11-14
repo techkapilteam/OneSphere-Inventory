@@ -38,6 +38,7 @@ describe('PaymentReceiptVoucherComponent — TDS auto-apply for Services (item 2
     const stub: Partial<PaymentsService> = {
       getPaymentVouchers: () => of({ success: true, data: [] }) as any,
       getOutstandingInvoices: () => of({ success: true, data: [SERVICE_INVOICE, GOODS_INVOICE] }) as any,
+      getPartyLedgerBalance: () => of({ success: true, data: 0 }) as any,
       getTdsCodes: () => of({ success: true, data: tdsCodes }) as any,
       getAvailableNotes: () => of({ success: true, data: [] }) as any,
       // The component loads the Accounts bank/cheque-book masters on construction.
@@ -55,7 +56,7 @@ describe('PaymentReceiptVoucherComponent — TDS auto-apply for Services (item 2
     fixture = TestBed.createComponent(PaymentReceiptVoucherComponent);
     component = fixture.componentInstance;
     fixture.detectChanges();
-    (component as any).selectedPartyId.set(1);
+    (component as any).selectedPartyIds.set([1]);
     (component as any).parties.set([{ id: 1, vendor_name: 'Acme Supplies' } as any]);
     (component as any).outstandingInvoices.set([SERVICE_INVOICE, GOODS_INVOICE]);
   }

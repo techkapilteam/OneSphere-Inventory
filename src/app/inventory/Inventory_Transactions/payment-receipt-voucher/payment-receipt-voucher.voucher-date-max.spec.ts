@@ -23,6 +23,7 @@ describe('PaymentReceiptVoucherComponent — Voucher Date max-date cap', () => {
     const paymentsServiceStub: Partial<PaymentsService> = {
       getPaymentVouchers: () => of({ success: true, data: [] }) as any,
       getOutstandingInvoices: () => of({ success: true, data: [] }) as any,
+      getPartyLedgerBalance: () => of({ success: true, data: 0 }) as any,
       getTdsCodes: () => of({ success: true, data: [] }) as any,
       getVendorFyPurchaseSummary: () => of({ success: true, data: null }) as any,
       getAvailableNotes: () => of({ success: true, data: [] }) as any,
@@ -45,8 +46,18 @@ describe('PaymentReceiptVoucherComponent — Voucher Date max-date cap', () => {
   });
 
   it('defaults Voucher Date to today for a fresh voucher', () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     expect(component.voucherDate()).toBe(today);
+  });
+
+  it('feeds the datepicker a real Date for today (a raw string rendered blank)', () => {
+    const value = component.voucherDateValue();
+    const now = new Date();
+    expect(value).toBeInstanceOf(Date);
+    expect(value!.getFullYear()).toBe(now.getFullYear());
+    expect(value!.getMonth()).toBe(now.getMonth());
+    expect(value!.getDate()).toBe(now.getDate());
   });
 
   it('exposes a today-pinned maxVoucherDate for the template\'s [maxDate] binding', () => {

@@ -347,6 +347,14 @@ export const inventoryRoutes: Routes = [
           .then(m => m.InventoryProductionEntryComponent)
       },
       {
+        path: 'uin-registration',
+        // Same permission as Production Entry for now: whoever records production
+        // can also register the UINs. A separate key can be added later.
+        canActivate: [screenPermissionGuard('INV_T_PROD_ENTRY')],
+        loadComponent: () => import('./Inventory_Transactions/uin-registration/uin-registration')
+          .then(m => m.InventoryUinRegistrationComponent)
+      },
+      {
         path: 'production-return',
         canActivate: [screenPermissionGuard('INV_T_PROD_RETURN')],
         loadComponent: () => import('./Inventory_Transactions/production-return/production-return')

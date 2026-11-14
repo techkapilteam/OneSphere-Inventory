@@ -16,6 +16,7 @@ import {
 import { applyInventoryTextCase, toInventoryTitleCase } from '../../Inventory_Shared/inventory-text-case.util';
 import { branchMasterConfig } from '../../Inventory_Shared/inventory-screen.model';
 import { InventoryScreenShell } from '../../Inventory_Shared/inventory-screen-shell/inventory-screen-shell';
+import { attachInventorySaveToast } from '../../Inventory_Shared/inventory-save-toast/inventory-save-toast.component';
 
 @Component({
   selector: 'app-inventory-branch-master',
@@ -91,6 +92,10 @@ export class InventoryBranchMasterComponent implements OnInit {
   saving    = signal(false);
   saveMsg   = signal('');
   saveError = signal('');
+
+  constructor() {
+    attachInventorySaveToast(this.saveMsg, this.saveError);
+  }
 
   readonly upgradeRoute    = '/dashboard/admin/subscription';
   readonly branchMasterConfig = branchMasterConfig;

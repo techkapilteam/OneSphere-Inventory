@@ -919,13 +919,14 @@ export class InventoryRequestForQuotationComponent extends InventoryScreenShell 
         item.product_name || '',
         item.qty || 0,
         item.uom_name || '',
-        this.money(item.rate || 0, po.currency || 'INR'),
+        // No ₹ on the PDF (user request 2026-11-14); screen keeps it.
+        this.money(item.rate || 0, po.currency || 'INR').replace(/₹\s*/g, ''),
         item.gst_rate || 0,
-        this.money(item.amount || 0, po.currency || 'INR')
+        this.money(item.amount || 0, po.currency || 'INR').replace(/₹\s*/g, '')
       ])
     });
     const finalY = (doc as any).lastAutoTable?.finalY || 55;
-    doc.text(`Total: ${this.money(po.total_amount || 0, po.currency || 'INR')}`, 14, finalY + 10);
+    doc.text(`Total: ${this.money(po.total_amount || 0, po.currency || 'INR').replace(/₹\s*/g, '')}`, 14, finalY + 10);
     doc.save(`${po.po_number || 'po-preview'}.pdf`);
   }
 

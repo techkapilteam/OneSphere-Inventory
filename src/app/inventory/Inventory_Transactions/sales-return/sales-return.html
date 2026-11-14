@@ -21,7 +21,7 @@
               <div [class.inventory-reference-picker-field]="transactionReferencePickerButtonVisible(refField)">
                 @if (config.key === 'salesReturn') {
                   <div class="erp-input inventory-readonly-label" [class.inventory-readonly-label--empty]="!formFieldValue(refField)">
-                    {{ formFieldValue(refField) || 'Not selected â€” use Pick Reference' }}
+                    {{ formFieldValue(refField) || 'Not selected  use Pick Reference' }}
                   </div>
                 } @else if (transactionReferenceUsesSelect(refField)) {
                   <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
@@ -44,12 +44,13 @@
                     <i [class]="transactionReferenceLoading() ? 'pi pi-spin pi-spinner' : 'pi pi-list'"></i>
                   </button>
                 }
+                <!-- Previous: eye (view referenced invoice items) button -- removed on Sales Return.
                 @if (formFieldValue(refField)) {
                   <button type="button" class="erp-btn btn-white btn-icon inventory-reference-picker-btn"
                     title="View referenced document's items" (click)="viewReferenceDetails(refField)">
                     <i class="pi pi-eye"></i>
                   </button>
-                }
+                } -->
               </div>
             </div>
           }
@@ -63,6 +64,7 @@
             <div class="erp-form-group">
               <label class="erp-label">{{ numField.label }}</label>
               <input class="erp-input" type="text"
+                readonly
                 [ngModel]="transactionNumberValue(numField)"
                 (ngModelChange)="collectFormField(numField.key, $event)"
                 [placeholder]="transactionNumberPlaceholder(numField)" />
@@ -77,6 +79,7 @@
                   (ngModelChange)="collectFormField(dateField.key, $event)"
                   [ngModelOptions]="{ standalone: true }"
                   [maxDate]="maxTransactionDate"
+                  [minDate]="minTransactionDate()"
                   dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY"
                   [readonlyInput]="true" [showIcon]="false" appendTo="body"
                   styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100">
@@ -89,14 +92,23 @@
             <div class="erp-form-group procurement-vendor-col">
               <label class="erp-label">{{ customerField.label }}</label>
               <div class="inventory-field-with-add">
-                <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
-                  [items]="procurementVendorHeaderOptions(customerField)"
-                  [searchable]="true" [clearable]="true"
-                  [ngModel]="formFieldValue(customerField)"
-                  (ngModelChange)="collectFormField(customerField.key, $event); maybeAutoCode(customerField.key, $event)"
-                  [placeholder]="fieldTypingHint(customerField)">
-                </ng-select>
-                @if (customerField.addMaster) {
+                <!-- Previous: editable ng-select dropdown with + Add Customer.
+                     Customer is bound from the picked Invoice Reference, so it is
+                     shown as a plain read-only box -- no dropdown. -->
+                @if (salesReturnCustomerLocked()) {
+                  <div class="erp-input inventory-readonly-label" [class.inventory-readonly-label--empty]="!formFieldValue(customerField)">
+                    {{ formFieldValue(customerField) || '' }}
+                  </div>
+                } @else {
+                  <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+                    [items]="procurementVendorHeaderOptions(customerField)"
+                    [searchable]="true" [clearable]="true"
+                    [ngModel]="formFieldValue(customerField)"
+                    (ngModelChange)="collectFormField(customerField.key, $event); maybeAutoCode(customerField.key, $event)"
+                    [placeholder]="fieldTypingHint(customerField)">
+                  </ng-select>
+                }
+                @if (customerField.addMaster && !salesReturnCustomerLocked()) {
                   <button type="button" class="erp-btn btn-white btn-icon"
                     [title]="'Add ' + customerField.addMaster"
                     (click)="openAddMaster(customerField.addMaster, customerField.key)">
@@ -109,6 +121,8 @@
           @if (transactionReferenceField(); as refField) {
             <div class="erp-form-group">
               <label class="erp-label">{{ refField.label }}</label>
+              <!-- Same as Purchase Return's PI Reference: list + Pick button for posted Sales Invoices. -->
+              <div class="inventory-reference-picker-field">
               @if (transactionReferenceUsesSelect(refField)) {
                 <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
                   [items]="transactionReferenceOptions(refField)"
@@ -123,6 +137,12 @@
                   (ngModelChange)="collectFormField(refField.key, $event)"
                   [placeholder]="fieldTypingHint(refField)" />
               }
+                <button type="button" class="erp-btn btn-white btn-icon inventory-reference-picker-btn"
+                  title="View posted sales invoices" [disabled]="transactionReferenceLoading()"
+                  (click)="openPurchaseReferencePicker()">
+                  <i [class]="transactionReferenceLoading() ? 'pi pi-spin pi-spinner' : 'pi pi-list'"></i>
+                </button>
+              </div>
             </div>
           }
         </div>
@@ -142,14 +162,16 @@
                   </span>
                 </label>
               } @else if (field.key === 'returnToWarehouse') {
+                <!-- Previous: [items]="grnReceivingLocationGroups()" ... placeholder="Select Warehouse or Branch" (warehouses + branches) -->
+                <!-- Return To Branch: branches only, no warehouses. -->
                 <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
                   [class.inventory-control-readonly]="salesReturnLocationLocked()"
-                  [items]="grnReceivingLocationGroups()" bindLabel="label" bindValue="label" groupBy="group"
+                  [items]="salesReturnBranchOptions()" bindLabel="label" bindValue="label" groupBy="group"
                   [searchable]="!salesReturnLocationLocked()" [clearable]="!salesReturnLocationLocked()"
                   [readonly]="salesReturnLocationLocked()"
                   [ngModel]="formFieldValue(field)"
                   (ngModelChange)="collectFormField(field.key, $event)"
-                  placeholder="Select Warehouse or Branch">
+                  placeholder="Select Branch">
                   <ng-template ng-option-tmp let-item="item">
                     {{ item.label }}
                     @if (item.type === 'warehouse') { <span class="inventory-location-badge">WH</span> }
@@ -216,9 +238,11 @@
           <div class="inventory-line-title">
             <div>
               <strong>{{ config.lineTitle || 'Line Items' }}</strong>
-              <span>Add, edit or remove rows directly here before saving this document.</span>
+              <!-- Previous: <span>Add, edit or remove rows directly here before saving this document.</span> -->
+              <span>Rows come from the selected Invoice Reference. Edit Return Qty, or remove items you are not returning.</span>
             </div>
-            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" aria-label="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button>
+            <!-- Previous (Sales Return is against a Sales Invoice only, so no manual rows):
+            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" aria-label="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button> -->
           </div>
           <div class="tbl-wrap">
             @let renderedColumns = lineGridRenderColumns();
@@ -240,8 +264,11 @@
                   <tr>
                     <td class="text-center">
                       <div class="inventory-row-actions">
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button>
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove row" (click)="removeEntryLineRow(rowIndex)"><i class="pi pi-trash"></i></button>
+                        <!-- Previous (Sales Return is against a Sales Invoice only, so no manual rows):
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button> -->
+                        @if (lineRefItemIdMap()[rowIndex]) {
+                          <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove row" (click)="removeEntryLineRow(rowIndex)"><i class="pi pi-trash"></i></button>
+                        }
                       </div>
                     </td>
                     @let rowView = rowViews[rowIndex];
@@ -253,7 +280,7 @@
                           @if (!cellApplies) {
                             <span class="inventory-grid-na">-</span>
                           } @else if (lineGridCellReadonly(rowIndex, row, column)) {
-                            <span class="inventory-grid-static-value">{{ lineGridReadonlyCellText(rowIndex, row, column, cellView, rowView) || 'â€”' }}</span>
+                            <span class="inventory-grid-static-value">{{ lineGridReadonlyCellText(rowIndex, row, column, cellView, rowView) || '' }}</span>
                           } @else if (lineGridColumnIsSerialPicker(column) && isSerialApplicableRow(row)) {
                             <button type="button" class="erp-btn btn-white btn-sm inventory-serial-trigger" (click)="openSerialPicker(rowIndex, row)">
                               {{ serialPickerSummaryForRow(rowIndex, row) }}
@@ -311,6 +338,20 @@
                   </tr>
                 }
               </tbody>
+              <tfoot>
+                <tr class="inventory-line-total-row">
+                  <td class="text-center"></td>
+                  @for (column of renderedColumns; track column; let first = $first) {
+                    <td>
+                      @if (first) {
+                        <strong>Total</strong>
+                      } @else {
+                        <strong>{{ lineFooterCellText(column) }}</strong>
+                      }
+                    </td>
+                  }
+                </tr>
+              </tfoot>
             </table>
           </div>
         </div>
@@ -409,7 +450,6 @@
             <button type="button" class="erp-btn btn-white btn-sm" title="Print"><i class="pi pi-print"></i></button>
             <button type="button" class="erp-btn btn-white btn-sm" title="Export PDF"><i class="pi pi-file-pdf"></i></button>
             <button type="button" class="erp-btn btn-white btn-sm" title="Export Excel"><i class="pi pi-file-excel"></i></button>
-            <button type="button" class="erp-btn btn-white btn-sm" title="Mail"><i class="pi pi-envelope"></i></button>
           }
           <span class="inventory-grid-divider"></span>
           <div class="inventory-grid-pager">
@@ -447,10 +487,14 @@
                     <button type="button" class="erp-btn btn-white btn-icon btn-sm pr-expand-btn" title="Toggle Items" (click)="toggleExpandGrn(row)">
                       <i class="pi" [class.pi-chevron-down]="isExpandedGrn(row)" [class.pi-chevron-right]="!isExpandedGrn(row)"></i>
                     </button>
+                    <!-- Previous (buttons hidden for Posted/Cancelled rows):
                     @if (canEditOrDeleteRow(row)) {
                       <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
                       <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" (click)="cancelRecordByRow(row)"><i class="pi pi-trash"></i></button>
-                    }
+                    } -->
+                    <!-- Saved transactions are read-only from this grid. -->
+                    <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" [disabled]="!canEditOrDeleteRow(row)" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
+                    <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" [disabled]="!canEditOrDeleteRow(row)" (click)="cancelRecordByRow(row)"><i class="pi pi-trash"></i></button>
                   </div>
                 </td>
                 @for (col of visibleRecordColumns(); track col.index) {
@@ -482,12 +526,12 @@
                                 @for (column of returnColumns; track column.key) {
                                   <td>
                                     @if (column.key === 'product') {
-                                      <strong>{{ grnExpandedCell(item, column, i) || 'ï¿½' }}</strong>
+                                      <strong>{{ grnExpandedCell(item, column, i) || '' }}</strong>
                                       @if (grnExpandedProductSubtitle(item); as subtitle) {
                                         <br><small class="inventory-grid-subtitle">{{ subtitle }}</small>
                                       }
                                     } @else {
-                                      {{ grnExpandedCell(item, column, i) || 'ï¿½' }}
+                                      {{ grnExpandedCell(item, column, i) || '' }}
                                     }
                                   </td>
                                 }
@@ -532,10 +576,11 @@
         <div class="inventory-modal-header">
           <h3>Posted Sales Invoices</h3>
           <span style="display:flex; align-items:center; gap:8px;">
+            <!-- Previous (Sales Return is against a Sales Invoice only, so no direct return):
             <button type="button" class="erp-btn btn-white btn-sm" (click)="useDirectReferenceEntry()">
               <i class="pi pi-file-plus"></i> {{ directReferenceActionLabel() || 'Direct Return' }}
-            </button>
-            <button type="button" class="erp-btn btn-white btn-icon btn-sm" (click)="closePurchaseReferencePicker()">
+            </button> -->
+            <button title="Close" type="button" class="erp-btn btn-white btn-icon btn-sm" (click)="closePurchaseReferencePicker()">
               <i class="pi pi-times"></i>
             </button>
           </span>

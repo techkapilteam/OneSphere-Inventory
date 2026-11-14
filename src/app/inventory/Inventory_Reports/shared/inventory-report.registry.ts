@@ -139,6 +139,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
     filters: [...baseFilters, ...productFilters],
     summaryCards: [
       { label: 'Closing stock value', valueKey: 'stockValue', fallback: 'Rs. 4.82 Cr', icon: 'pi pi-wallet', tone: 'blue' },
+      { label: 'GST on stock', valueKey: 'gstAmount', fallback: 'Rs. 0', icon: 'pi pi-percentage', tone: 'amber' },
       { label: 'Products covered', valueKey: 'productCount', fallback: '1,248', icon: 'pi pi-list', tone: 'green' },
       { label: 'Inward quantity', valueKey: 'inwardQty', fallback: '8,420', icon: 'pi pi-arrow-down', tone: 'green' },
       { label: 'Outward quantity', valueKey: 'outwardQty', fallback: '6,870', icon: 'pi pi-arrow-up', tone: 'amber' }
@@ -155,6 +156,8 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['closingStock', 'Closing Stock', 'number', true],
       ['averageRate', 'Average Rate', 'currency'],
       ['stockValue', 'Stock Value', 'currency', true],
+      ['gstRate', 'GST %', 'percent'],
+      ['gstAmount', 'GST Amount', 'currency', true],
       ['pendingInvoiceQty', 'Dispatched Without SI', 'number', true]
     ]),
     defaultGroupBy: 'category',
@@ -182,10 +185,8 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['referenceNo', 'Reference No'],
       ['productCode', 'Product Code'],
       ['productName', 'Product Name'],
-      // A stock location is a warehouse OR a branch from Round 1 onward — the
-      // column already carries whichever one the row belongs to, so the header
-      // says so. Label only; the row field stays 'warehouse'.
-      ['warehouse', 'Warehouse / Branch'],
+      // Previous: ['warehouse', 'Warehouse / Branch'],
+      // Warehouse / Branch column removed from Stock Ledger on user request.
       ['inwardQty', 'Inward Qty', 'number', true],
       ['outwardQty', 'Outward Qty', 'number', true],
       ['balanceQty', 'Balance Qty', 'number'],
@@ -193,7 +194,9 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['debitValue', 'Debit', 'currency', true],
       ['creditValue', 'Credit', 'currency', true],
       ['totalValue', 'Total', 'currency'],
-      ['remarks', 'Remarks']
+      // Previous: ['remarks', 'Remarks'],
+      // Renamed on user request; SP 279 now fills it with the vendor/customer name.
+      ['remarks', 'Purchase / Sale Details']
     ]),
     defaultGroupBy: 'productName',
     drillDown: true,
@@ -437,6 +440,73 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       { invoiceDate: '2026-05-11', invoiceNo: 'INV-4479', customer: 'Aero Labs', variant: 'Motor Kit', attribute: 'Power: 2KW', taxableAmount: 960000, cgst: 86400, sgst: 86400, igst: 0, netAmount: 1132800, status: 'Draft' }
     ]
   }),
+  // Dues List: posted Sales Invoices still unpaid or part-paid as on the
+  // "Date To" (shown as "As on" in the PDF header). Fully paid invoices
+  // (Due = 0) are left out. Grouped customer-wise for now; once Sales Invoice
+  // saves the group-company branch, add region/customerBranch columns and
+  // switch defaultGroupBy to 'region'.
+  phaseOneReport({
+    key: 'duesList',
+    slug: 'dues-list',
+    title: 'Dues List Report',
+    groupId: 'customerSupplier',
+    endpoint: 'dues-list',
+    icon: 'pi pi-wallet',
+    purpose: 'Customer-wise list of unpaid and part-paid sales invoices with total, received and due amount as on a date.',
+    audience: ['Accountant', 'Sales', 'Business Owner'],
+    filters: ['branchId', 'toDate', 'customerId'],
+    columns: cols([
+      // Segment is auto-added to every report; hidden here to match the Dues List layout.
+      ['segment', 'Segment', 'text', false, false],
+      ['invoiceDate', 'Invoice Date', 'date'],
+      ['invoiceNo', 'Invoice No'],
+      ['customer', 'Customer'],
+      ['totalAmount', 'Total Amount', 'currency', true],
+      ['receivedAmount', 'Received', 'currency', true],
+      ['dueAmount', 'Due Amount', 'currency', true],
+      ['ageDays', 'Age (Days)', 'number']
+    ]),
+    defaultGroupBy: 'customer',
+    sampleRows: [
+      { invoiceDate: '2026-09-05', invoiceNo: 'CPINV1358/26', customer: 'Dakshin Infrastructures Private Limited', totalAmount: 40717, receivedAmount: 40027, dueAmount: 690, ageDays: 48 },
+      { invoiceDate: '2026-09-22', invoiceNo: 'CPINV1481/26', customer: 'Dakshin Infrastructures Private Limited', totalAmount: 24321, receivedAmount: 0, dueAmount: 24321, ageDays: 31 },
+      { invoiceDate: '2026-10-13', invoiceNo: 'CPINV1621/26', customer: 'Kapil Chits (Kakatiya) Private Limited', totalAmount: 11772, receivedAmount: 0, dueAmount: 11772, ageDays: 10 }
+    ]
+  }),
+  // Collection Report: money received from customers between "Date From" and
+  // "Date To" (posted Customer Receipts), one row per customer. Cash = 'cash'
+  // mode; Cheque = cheque / online / card / bank. "Pre" = receipts against
+  // invoices dated before "Date From". JV columns stay 0 until the "Company
+  // Adjustment" receipt mode is added. Zone / Region / Branch grouping later.
+  phaseOneReport({
+    key: 'collectionReport',
+    slug: 'collection-report',
+    title: 'Collection Report',
+    groupId: 'customerSupplier',
+    endpoint: 'collection-report',
+    icon: 'pi pi-money-bill',
+    purpose: 'Customer-wise money received in a period, split into cash, cheque and JV for current and previous-period invoices.',
+    audience: ['Accountant', 'Sales', 'Business Owner'],
+    filters: ['branchId', 'fromDate', 'toDate', 'customerId'],
+    columns: cols([
+      // Segment is auto-added to every report; hidden here, same as Dues List.
+      ['segment', 'Segment', 'text', false, false],
+      ['customer', 'Customer'],
+      ['noOfInvoices', 'No. of Invoices', 'number', true],
+      ['cashAmount', 'Cash', 'currency', true],
+      ['preCashAmount', 'Pre Cash', 'currency', true],
+      ['chequeAmount', 'Cheque', 'currency', true],
+      ['preChequeAmount', 'Pre Cheque', 'currency', true],
+      ['jvAmount', 'JV', 'currency', true],
+      ['preJvAmount', 'Pre JV', 'currency', true],
+      ['grandTotal', 'Grand Total', 'currency', true]
+    ]),
+    sampleRows: [
+      { customer: 'Dakshin Infrastructures Private Limited', noOfInvoices: 3, cashAmount: 15000, preCashAmount: 0, chequeAmount: 40027, preChequeAmount: 24321, jvAmount: 0, preJvAmount: 0, grandTotal: 79348 },
+      { customer: 'Kapil Chits (Kakatiya) Private Limited', noOfInvoices: 1, cashAmount: 11772, preCashAmount: 0, chequeAmount: 0, preChequeAmount: 0, jvAmount: 0, preJvAmount: 0, grandTotal: 11772 },
+      { customer: 'Tenant Works Pvt Ltd', noOfInvoices: 2, cashAmount: 0, preCashAmount: 5000, chequeAmount: 120000, preChequeAmount: 0, jvAmount: 0, preJvAmount: 0, grandTotal: 125000 }
+    ]
+  }),
   phaseOneReport({
     key: 'pendingDocument',
     slug: 'pending-document',
@@ -495,7 +565,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
   phaseOneReport({
     key: 'batchSerialExpiry',
     slug: 'batch-serial-expiry',
-    title: 'Batch / Serial / Expiry Report',
+    title: 'Batch / Serial / Expiry Closed Report',
     groupId: 'batchSerialExpiry',
     endpoint: 'batch-serial-expiry',
     icon: 'pi pi-barcode',

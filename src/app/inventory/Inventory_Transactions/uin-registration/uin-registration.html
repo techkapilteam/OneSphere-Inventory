@@ -1,0 +1,162 @@
+<div class="module-page inventory-page">
+  <div class="inventory-shell">
+    <app-inventory-screen-shell [config]="config"></app-inventory-screen-shell>
+
+    <!-- Filters -->
+    <section class="inventory-section">
+      <div class="inventory-optional-hint">
+        Units whose category has a <strong>Registration before Sale</strong> policy.
+        @if (registrationPolicyMandatory()) {
+          A unit can be sold only after its <strong>{{ registrationPolicyName() }}</strong> is saved.
+        } @else {
+          <strong>{{ registrationPolicyName() }}</strong> is optional; it does not block the sale.
+        }
+        Values can be changed until the unit is sold.
+      </div>
+
+      <div class="inventory-form-grid inventory-config-grid">
+        <div class="erp-form-group">
+          <label class="erp-label">Policy</label>
+          <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+            [items]="registrationPolicies()" bindLabel="policy_name" bindValue="policy_id"
+            [searchable]="false" [clearable]="false"
+            [ngModel]="registrationPolicyId()" (ngModelChange)="setRegistrationPolicy($event)"
+            placeholder="No registration policies">
+          </ng-select>
+        </div>
+        <div class="erp-form-group">
+          <label class="erp-label">Show</label>
+          <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+            [items]="uinStatusOptions" bindLabel="label" bindValue="value"
+            [searchable]="false" [clearable]="false"
+            [ngModel]="uinStatus()" (ngModelChange)="setUinStatus($event)">
+          </ng-select>
+        </div>
+        <div class="erp-form-group">
+          <label class="erp-label">Product</label>
+          <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+            [items]="uinProductOptions()" [searchable]="true" [clearable]="true"
+            [ngModel]="uinProductFilter()" (ngModelChange)="uinProductFilter.set($event)"
+            placeholder="All products">
+          </ng-select>
+        </div>
+        <div class="erp-form-group">
+          <label class="erp-label">Search</label>
+          <input class="erp-input" type="text" [placeholder]="'Unit, ' + registrationPolicyName() + ' or document no'"
+            [ngModel]="uinSearchText()" (ngModelChange)="uinSearchText.set($event)" />
+        </div>
+      </div>
+
+      @if (!registrationPolicies().length && !uinLoading()) {
+        <div class="inventory-optional-hint" style="margin-top:8px;">
+          No category has a <strong>Registration before Sale</strong> policy yet. Add one in Category Master (e.g. UIN).
+        </div>
+      }
+    </section>
+
+    <!-- Units -->
+    <section class="inventory-section">
+      <div class="inventory-section-title">
+        <div>
+          <h3>Units</h3>
+          <p>{{ uinVisibleRows().length }} unit(s) shown
+            @if (uinChangedRows().length) { · <strong>{{ uinChangedRows().length }} changed, not saved yet</strong> }
+          </p>
+        </div>
+        <button type="button" class="erp-btn btn-white btn-sm" title="Reload" [disabled]="uinLoading()" (click)="loadRegistrationPolicies()">
+          <i [class]="uinLoading() ? 'pi pi-spin pi-spinner' : 'pi pi-refresh'"></i>
+        </button>
+      </div>
+
+      <div class="tbl-wrap">
+        <table class="erp-table compact">
+          <thead>
+            <tr>
+              <th style="width: 44px;">#</th>
+              <th>Unit</th>
+              <th>Product</th>
+              <th>From Document</th>
+              <th>Doc. Date</th>
+              <th>Branch / Warehouse</th>
+              <th style="min-width: 200px;">
+                {{ registrationPolicyName() }}
+                @if (registrationPolicyMandatory()) { <span class="text-danger">*</span> }
+              </th>
+              <th style="min-width: 150px;">Registration Date</th>
+              <th style="min-width: 180px;">Reference No</th>
+              <th>Status</th>
+              <th class="text-center" style="width: 60px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            @if (uinLoading()) {
+              <tr><td colspan="11" class="text-center" style="padding: 16px;">Loading…</td></tr>
+            } @else {
+              @for (row of uinVisibleRows(); track row.serial_unit_id; let i = $index) {
+                <tr [style.background]="uinIsChanged(row) ? '#eef4ff' : null">
+                  <td>{{ i + 1 }}</td>
+                  <td>
+                    <strong>{{ row.serial_no }}</strong>
+                    @if (row.identifier_label) {
+                      <div class="inventory-optional-hint" style="margin:0; font-size:11px;">{{ row.identifier_label }}</div>
+                    }
+                  </td>
+                  <td>{{ row.product_name }}</td>
+                  <td>{{ row.source_doc_no || '-' }}</td>
+                  <td>{{ uinDateText(row.source_doc_date) }}</td>
+                  <td>{{ row.warehouse_name || row.branch_name || '-' }}</td>
+                  <td>
+                    <input class="erp-input inventory-grid-input" type="text" maxlength="200"
+                      [placeholder]="row.is_mandatory ? 'Required before sale' : 'Optional'"
+                      [readonly]="!row.can_edit"
+                      [ngModel]="uinValue(row, 'value')"
+                      (ngModelChange)="setUinValue(row, 'value', $event)" />
+                  </td>
+                  <td>
+                    <input class="erp-input inventory-grid-input" type="date"
+                      [readonly]="!row.can_edit"
+                      [ngModel]="uinValue(row, 'registration_date')"
+                      (ngModelChange)="setUinValue(row, 'registration_date', $event)" />
+                  </td>
+                  <td>
+                    <input class="erp-input inventory-grid-input" type="text" maxlength="100"
+                      placeholder="Optional (certificate, receipt ...)"
+                      [readonly]="!row.can_edit"
+                      [ngModel]="uinValue(row, 'reference_no')"
+                      (ngModelChange)="setUinValue(row, 'reference_no', $event)" />
+                  </td>
+                  <td><span [class]="uinStatusClass(row)">{{ uinStatusLabel(row) }}</span></td>
+                  <td class="text-center">
+                    @if (uinIsChanged(row)) {
+                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Undo changes on this row" (click)="undoUinRow(row)">
+                        <i class="pi pi-undo"></i>
+                      </button>
+                    }
+                  </td>
+                </tr>
+              } @empty {
+                <tr>
+                  <td colspan="11" class="text-center" style="padding: 16px;">
+                    {{ uinStatus() === 'pending' ? 'No units are waiting for a ' + registrationPolicyName() + '.' : 'No units found.' }}
+                  </td>
+                </tr>
+              }
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <div class="inventory-form-actions">
+        <button type="button" class="erp-btn btn-white" [disabled]="uinSaving() || !uinChangedRows().length" (click)="clearUinChanges()">
+          <i class="pi pi-times"></i> Clear Changes
+        </button>
+        <button type="button" class="erp-btn btn-primary" [disabled]="uinSaving() || !uinChangedRows().length || !registrationPolicyId()" (click)="saveUinRegistrations()">
+          <i [class]="uinSaving() ? 'pi pi-spin pi-spinner' : 'pi pi-save'"></i>
+          {{ uinSaving() ? 'Saving…' : 'Save ' + registrationPolicyName() + (uinChangedRows().length ? ' (' + uinChangedRows().length + ')' : '') }}
+        </button>
+      </div>
+    </section>
+  </div>
+
+  <app-inventory-quick-add-modal [host]="quickAddHost"></app-inventory-quick-add-modal>
+</div>

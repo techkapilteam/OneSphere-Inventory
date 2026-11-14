@@ -21,7 +21,7 @@
               <div [class.inventory-reference-picker-field]="transactionReferencePickerButtonVisible(refField)">
                 @if (config.key === 'purchaseReturn') {
                   <div class="erp-input inventory-readonly-label" [class.inventory-readonly-label--empty]="!formFieldValue(refField)">
-                    {{ formFieldValue(refField) || 'Not selected â€” use Pick Reference' }}
+                    {{ formFieldValue(refField) || 'Not selected  use Pick Reference' }}
                   </div>
                 } @else if (transactionReferenceUsesSelect(refField)) {
                   <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
@@ -57,6 +57,7 @@
             <div class="erp-form-group">
               <label class="erp-label">{{ numField.label }}</label>
               <input class="erp-input" type="text"
+                readonly
                 [ngModel]="transactionNumberValue(numField)"
                 (ngModelChange)="collectFormField(numField.key, $event)"
                 [placeholder]="transactionNumberPlaceholder(numField)" />
@@ -71,6 +72,7 @@
                   (ngModelChange)="collectFormField(dateField.key, $event)"
                   [ngModelOptions]="{ standalone: true }"
                   [maxDate]="maxTransactionDate"
+                  [minDate]="minTransactionDate()"
                   dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY"
                   [readonlyInput]="true" [showIcon]="false" appendTo="body"
                   styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100">
@@ -84,13 +86,15 @@
               <label class="erp-label">{{ vendorField.label }}</label>
               <div class="inventory-field-with-add">
                 <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+                  [class.inventory-control-readonly]="purchaseReturnVendorLocked()"
                   [items]="procurementVendorHeaderOptions(vendorField)"
-                  [searchable]="true" [clearable]="true"
+                  [searchable]="!purchaseReturnVendorLocked()" [clearable]="!purchaseReturnVendorLocked()"
+                  [readonly]="purchaseReturnVendorLocked()"
                   [ngModel]="formFieldValue(vendorField)"
                   (ngModelChange)="collectFormField(vendorField.key, $event); maybeAutoCode(vendorField.key, $event)"
                   [placeholder]="fieldTypingHint(vendorField)">
                 </ng-select>
-                @if (vendorField.addMaster) {
+                @if (vendorField.addMaster && !purchaseReturnVendorLocked()) {
                   <button type="button" class="erp-btn btn-white btn-icon"
                     [title]="'Add ' + vendorField.addMaster"
                     (click)="openAddMaster(vendorField.addMaster, vendorField.key)">
@@ -162,7 +166,7 @@
                 </ng-select>
               } @else if (field.key === 'piReference') {
                 <div class="erp-input inventory-readonly-label" [class.inventory-readonly-label--empty]="!formFieldValue(field)">
-                  {{ formFieldValue(field) || 'Not selected â€” use Pick Reference' }}
+                  {{ formFieldValue(field) || 'Not selected  use Pick Reference' }}
                 </div>
               } @else if (field.type === 'select' || field.type === 'multiselect') {
                 <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
@@ -221,9 +225,13 @@
           <div class="inventory-line-title">
             <div>
               <strong>{{ config.lineTitle || 'Line Items' }}</strong>
-              <span>Add, edit or remove rows directly here before saving this document.</span>
+              <!-- Previous: <span>Add, edit or remove rows directly here before saving this document.</span> -->
+              <!-- <span>Rows come from the selected PI Reference. Edit Return Qty, or remove items you are not returning.</span> -->
+              <!-- Previous: <span>Rows come from the selected PI Reference. Edit Return Qty, or remove items you are not returning.</span> -->
+              <span>Return any quantity up to the invoice quantity. For serial-tracked items choose the serial numbers being returned.</span>
             </div>
-            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" aria-label="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button>
+            <!-- Previous (Purchase Return is against a PI only, so no manual rows):
+            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" aria-label="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button> -->
           </div>
           <div class="tbl-wrap">
             @let renderedColumns = lineGridRenderColumns();
@@ -245,7 +253,9 @@
                   <tr>
                     <td class="text-center">
                       <div class="inventory-row-actions">
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button>
+                        <!-- Previous (Purchase Return is against a PI only, so no manual rows):
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button> -->
+                        <!-- 259: partial return - an item can be left out of the return. -->
                         <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove row" (click)="removeEntryLineRow(rowIndex)"><i class="pi pi-trash"></i></button>
                       </div>
                     </td>
@@ -258,9 +268,14 @@
                           @if (!cellApplies) {
                             <span class="inventory-grid-na">-</span>
                           } @else if (lineGridCellReadonly(rowIndex, row, column)) {
-                            <span class="inventory-grid-static-value">{{ lineGridReadonlyCellText(rowIndex, row, column, cellView, rowView) || 'â€”' }}</span>
-                          } @else if (lineGridColumnIsSerialPicker(column) && isSerialApplicableRow(row)) {
+                            <span class="inventory-grid-static-value">{{ lineGridReadonlyCellText(rowIndex, row, column, cellView, rowView) || '' }}</span>
+                          <!-- } @else if (lineGridColumnIsSerialPicker(column) && isSerialApplicableRow(row)) {
                             <button type="button" class="erp-btn btn-white btn-sm inventory-serial-trigger" (click)="openSerialPicker(rowIndex, row)">
+                              {{ serialPickerSummaryForRow(rowIndex, row) }}
+                            </button> -->
+                            } @else if (lineGridColumnIsSerialPicker(column) && isSerialApplicableRow(row)) {
+                            <!-- 259: partial return - the user chooses which serials go back. -->
+                            <button type="button" class="erp-btn btn-white btn-sm inventory-serial-trigger" [title]="purchaseReturnRowSerialsText(rowIndex)" (click)="openSerialPicker(rowIndex, row)">
                               {{ serialPickerSummaryForRow(rowIndex, row) }}
                             </button>
                           } @else if (lineGridColumnIsGstValue(column)) {
@@ -316,6 +331,20 @@
                   </tr>
                 }
               </tbody>
+              <tfoot>
+                <tr class="inventory-line-total-row">
+                  <td class="text-center"></td>
+                  @for (column of renderedColumns; track column; let first = $first) {
+                    <td>
+                      @if (first) {
+                        <strong>Total</strong>
+                      } @else {
+                        <strong>{{ lineFooterCellText(column) }}</strong>
+                      }
+                    </td>
+                  }
+                </tr>
+              </tfoot>
             </table>
           </div>
         </div>
@@ -415,7 +444,6 @@
             <button type="button" class="erp-btn btn-white btn-sm" title="Print"><i class="pi pi-print"></i></button>
             <button type="button" class="erp-btn btn-white btn-sm" title="Export PDF"><i class="pi pi-file-pdf"></i></button>
             <button type="button" class="erp-btn btn-white btn-sm" title="Export Excel"><i class="pi pi-file-excel"></i></button>
-            <button type="button" class="erp-btn btn-white btn-sm" title="Mail"><i class="pi pi-envelope"></i></button>
           }
           <span class="inventory-grid-divider"></span>
           <div class="inventory-grid-pager">
@@ -453,10 +481,14 @@
                     <button type="button" class="erp-btn btn-white btn-icon btn-sm pr-expand-btn" title="Toggle Items" (click)="toggleExpandGrn(row)">
                       <i class="pi" [class.pi-chevron-down]="isExpandedGrn(row)" [class.pi-chevron-right]="!isExpandedGrn(row)"></i>
                     </button>
+                    <!-- Previous (buttons hidden for Posted/Cancelled rows):
                     @if (canEditOrDeleteRow(row)) {
                       <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
                       <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" (click)="cancelRecordByRow(row)"><i class="pi pi-trash"></i></button>
-                    }
+                    } -->
+                    <!-- Saved transactions are read-only from this grid. -->
+                    <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" [disabled]="!canEditOrDeleteRow(row)" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
+                    <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" [disabled]="!canEditOrDeleteRow(row)" (click)="cancelRecordByRow(row)"><i class="pi pi-trash"></i></button>
                   </div>
                 </td>
                 @for (col of visibleRecordColumns(); track col.index) {
@@ -488,12 +520,12 @@
                                 @for (column of returnColumns; track column.key) {
                                   <td>
                                     @if (column.key === 'product') {
-                                      <strong>{{ grnExpandedCell(item, column, i) || 'ï¿½' }}</strong>
+                                      <strong>{{ grnExpandedCell(item, column, i) || '' }}</strong>
                                       @if (grnExpandedProductSubtitle(item); as subtitle) {
                                         <br><small class="inventory-grid-subtitle">{{ subtitle }}</small>
                                       }
                                     } @else {
-                                      {{ grnExpandedCell(item, column, i) || 'ï¿½' }}
+                                      {{ grnExpandedCell(item, column, i) || '' }}
                                     }
                                   </td>
                                 }
@@ -538,10 +570,11 @@
         <div class="inventory-modal-header">
           <h3>Posted Purchase Invoices</h3>
           <span style="display:flex; align-items:center; gap:8px;">
+            <!-- Previous (Purchase Return is against a PI only, so no direct return):
             <button type="button" class="erp-btn btn-white btn-sm" (click)="useDirectPurchaseReturn()">
               <i class="pi pi-file-plus"></i> Direct Return
-            </button>
-            <button type="button" class="erp-btn btn-white btn-icon btn-sm" (click)="closePurchaseReferencePicker()">
+            </button> -->
+            <button title="Close" type="button" class="erp-btn btn-white btn-icon btn-sm" (click)="closePurchaseReferencePicker()">
               <i class="pi pi-times"></i>
             </button>
           </span>
@@ -550,7 +583,8 @@
           @if (refPickerLoading()) {
             <p>Loading posted purchase invoices...</p>
           } @else if (!refPickerAvailableDocs().length) {
-            <p>No posted purchase invoices found. Close this tray to continue with a direct return.</p>
+            <!-- <p>No posted purchase invoices found. Close this tray to continue with a direct return.</p> -->
+            <p>No invoices can be returned. Only unpaid invoices with nothing sold and all items back at this branch are listed.</p>
           } @else {
             <div class="erp-form-group" style="margin-bottom:10px;">
               <input class="erp-input" type="text" placeholder="Search PI no, vendor or date"
@@ -558,9 +592,12 @@
             </div>
             <div class="tbl-wrap">
               <table class="erp-table compact">
-                <thead>
+                <!-- <thead>
                   <tr><th class="text-center">Items</th><th>PI No</th><th>Date</th><th>Vendor</th><th>Status</th><th></th></tr>
-                </thead>
+                </thead> -->
+                  <thead>
+                    <tr><th class="text-center">Items</th><th>PI No</th><th>Date</th><th>Vendor</th><th>Invoice Total</th><th>Status</th><th></th></tr>
+                  </thead>
                 <tbody>
                   @for (doc of refPickerDisplayDocs(); track doc.id) {
                     <tr>
@@ -571,7 +608,10 @@
                       </td>
                       <td>{{ doc.doc_number }}</td>
                       <td>{{ gridDateDisplay(doc.doc_date) }}</td>
+                      <!-- <td>{{ doc.party_name }}</td>
+                      <td>{{ doc.status }}</td> -->
                       <td>{{ doc.party_name }}</td>
+                      <td>Rs. {{ refPickerDocTotal(doc) | number:'1.2-2' }}</td>
                       <td>{{ doc.status }}</td>
                       <td>
                         <button type="button" class="erp-btn btn-white btn-sm" (click)="selectPrimaryReference(doc)">
@@ -581,10 +621,10 @@
                     </tr>
                     @if (isRefPickerExpanded(doc.id)) {
                       <tr class="pr-expand-tr">
-                        <td colspan="6">
+                        <td colspan="7">
                           <div class="pr-expand-content">
                             @if ((doc.items || []).length) {
-                              <table class="pr-expand-items-table">
+                              <!-- <table class="pr-expand-items-table">
                                 <thead>
                                   <tr>
                                     <th>Product</th>
@@ -610,6 +650,31 @@
                                           <strong>{{ refPickerItemAvailableQty(item) }}</strong>
                                         }
                                       </td>
+                                    </tr>
+                                  }
+                                </tbody>
+                              </table> -->
+                              
+                                                            <table class="pr-expand-items-table">
+                                <thead>
+                                  <tr>
+                                    <th>Product</th>
+                                    <th>Variant / Attribute</th>
+                                    <th>UOM</th>
+                                    <th>Qty to Return</th>
+                                    <th>Amount</th>
+                                    <th>Serial Numbers</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  @for (item of doc.items; track $index) {
+                                    <tr>
+                                      <td>{{ item.product_name }}</td>
+                                      <td>{{ refPickerItemVariantText(item) }}</td>
+                                      <td>{{ item.uom_name || '-' }}</td>
+                                      <td><strong>{{ item.qty }}</strong></td>
+                                      <td>Rs. {{ item.amount | number:'1.2-2' }}</td>
+                                      <td>{{ refPickerItemSerialsText(item) }}</td>
                                     </tr>
                                   }
                                 </tbody>

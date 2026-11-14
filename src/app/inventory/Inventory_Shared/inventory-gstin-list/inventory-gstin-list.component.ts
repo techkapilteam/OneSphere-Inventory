@@ -46,6 +46,9 @@ export class InventoryGstinListComponent {
   // '' on Vendor/Customer Master (unprefixed 'gstins' key, unchanged from
   // before); 'quickVendor'/'quickCustomer' inside the quick-add modal.
   @Input() keyPrefix = '';
+  // Quick-add Vendor: at least one GSTIN / State row is mandatory (enforced
+  // in host.saveQuickVendor()); this only drives the asterisk.
+  @Input() required = false;
 
   private key(): string {
     return this.keyPrefix ? this.keyPrefix + 'Gstins' : 'gstins';
