@@ -503,14 +503,18 @@
                         @for (row of existingRowMatches(); track $index) {
                           <button type="button" class="erp-exist-item" (click)="editRecordByRow(row)">
                             <span class="erp-exist-code">{{ row[0] }}</span>
-                            <span class="erp-exist-name">{{ row[1] }}</span>
-                            <!-- Previous: <span class="erp-exist-hint">Already exists · click to edit</span> -->
-                            <span class="erp-exist-hint">{{ isExactExistingMatch(row) ? 'Already exists · click to edit' : 'Similar name · click to edit' }}</span>
+                            <!-- Previous: <span class="erp-exist-name">{{ row[1] }}</span> (row[1] is SKU; name is row[2]) -->
+                            <span class="erp-exist-name">{{ row[2] || row[1] }}@if (row[3]) { <small class="text-muted"> · {{ row[3] }}</small> }</span>
+                            <!-- Previous: <span class="erp-exist-hint">{{ isExactExistingMatch(row) ? 'Already exists · click to edit' : 'Similar name · click to edit' }}</span> -->
+                            <span class="erp-exist-hint">{{ productExistingHint(row) }}</span>
                           </button>
                         }
                       </div>
                     }
                   </div>
+                  @if (productNameDuplicate()) {
+                    <small class="text-danger d-block mt-1">Product / Service Name already exists. Enter a different name.</small>
+                  }
                 </div>
 
                 <!-- Product / Service Code -->
@@ -521,6 +525,9 @@
                     [ngModel]="formValues()['productCode'] || ''"
                     (ngModelChange)="onProductCodeManualEdit($event)"
                     placeholder="Auto / manual code" />
+                  @if (productCodeDuplicate()) {
+                    <small class="text-danger d-block mt-1">Product / Service Code already exists. Enter a different code.</small>
+                  }
                 </div>
 
                 <!-- Category -->

@@ -549,6 +549,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       : null;
     const editingRow = editingRecord ? this.mapToGridRows([editingRecord])[0] : null;
 
+    // Product / Service Master rows are [code, sku, name, category, ...]: match
+    // code, SKU, name and Product Category so typing a category name lists the
+    // products already under it.
+    if (this.config?.key === 'productServiceMaster') {
+      return this.liveRows()
+        .filter(row => !(editingRow && row[0] === editingRow[0]))
+        .filter(row => [row[0], row[1], row[2], row[3]].some(cell => String(cell ?? '').toLowerCase().includes(q)))
+        .slice(0, 6);
+    }
+
     // Match on what the hint shows (code and name), not on every column:
     // text like "Not used yet" in other columns would match almost anything.
     return this.liveRows()
@@ -564,6 +574,58 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const q = this.genericNameValue().trim().toLowerCase();
     return !!q && row.some(cell => String(cell ?? '').trim().toLowerCase() === q);
   }
+
+  // Product / Service Master hint text: name/code/SKU exact → "Already exists",
+  // Product Category exact → "Category already exists", otherwise similar.
+  productExistingHint(row: string[]): string {
+    const norm = (s: any) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const q = norm(this.genericNameValue());
+    if (q && [row[0], row[1], row[2]].some(c => norm(c) === q)) return 'Already exists · click to edit';
+    if (q && norm(row[3]) === q) return 'Category already exists · click to edit';
+    return 'Similar name · click to edit';
+  }
+
+  // Product / Service Master: a product whose name exactly matches (ignoring
+  // case and extra spaces) another saved product in this segment, or another
+  // row already in the pending list, is a duplicate and must not be saved.
+  // The record currently open for edit is left out of the comparison.
+  productNameDuplicateOf(name: string): string {
+    if (this.config?.key !== 'productServiceMaster') return '';
+    const norm = (s: any) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const q = norm(name);
+    if (!q) return '';
+    const editingId = this.editingId();
+    const saved = this.savedRecordObjects().find((r: any) =>
+      norm(r?.product_name ?? r?.productName) === q
+      && !(editingId !== null && Number(r?.id) === Number(editingId)));
+    if (saved) return String(saved?.product_name ?? saved?.productName ?? name).trim();
+    const editingPending = this.editingPendingIndex();
+    const pending = this.pendingRows().find((r, i) =>
+      i !== editingPending && norm(r?.payload?.['product_name']) === q);
+    return pending ? String(pending.payload['product_name']).trim() : '';
+  }
+
+  readonly productNameDuplicate = computed(() => this.productNameDuplicateOf(this.productName()));
+
+  // Same rule for Product / Service Code: an exact match (ignoring case and
+  // spaces) against another saved product or a pending row blocks the save.
+  productCodeDuplicateOf(code: string): string {
+    if (this.config?.key !== 'productServiceMaster') return '';
+    const norm = (s: any) => String(s ?? '').replace(/\s+/g, '').toLowerCase();
+    const q = norm(code);
+    if (!q) return '';
+    const editingId = this.editingId();
+    const saved = this.savedRecordObjects().find((r: any) =>
+      norm(r?.product_code ?? r?.productCode) === q
+      && !(editingId !== null && Number(r?.id) === Number(editingId)));
+    if (saved) return String(saved?.product_code ?? saved?.productCode ?? code).trim();
+    const editingPending = this.editingPendingIndex();
+    const pending = this.pendingRows().find((r, i) =>
+      i !== editingPending && norm(r?.payload?.['product_code']) === q);
+    return pending ? String(pending.payload['product_code']).trim() : '';
+  }
+
+  readonly productCodeDuplicate = computed(() => this.productCodeDuplicateOf(this.formValues()['productCode']));
 
   readonly formValues = signal<Record<string, any>>({});
   readonly savedRecordObjects = signal<any[]>([]);
@@ -25589,6 +25651,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
 
     if (!hasValue(payload['product_name'])) return 'Product / Service Name is required.';
+    const duplicateName = this.productNameDuplicateOf(payload['product_name']);
+    if (duplicateName) return `Product / Service Name "${duplicateName}" already exists. Please enter a different name.`;
+    const duplicateCode = this.productCodeDuplicateOf(payload['product_code']);
+    if (duplicateCode) return `Product / Service Code "${duplicateCode}" already exists. Please enter a different code.`;
     if (!hasValue(payload['category_name']) && !hasValue(payload['category_id'])) return 'Product Category is mandatory.';
     if (!hasValue(payload['base_uom_name']) && !hasValue(payload['base_uom_id'])) return 'Base UOM is mandatory.';
     if (!hasValue(payload['hsn_sac_code']) && !hasValue(payload['hsn_sac_id'])) return 'HSN/SAC tax classification is mandatory.';
