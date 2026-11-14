@@ -821,7 +821,28 @@
           } @else if (expandedAttachmentPreviewError()) {
             <p class="inventory-error-msg">{{ expandedAttachmentPreviewError() }}</p>
           } @else if (expandedAttachmentPreviewKind() === 'image' && expandedAttachmentPreviewImgUrl()) {
-            <img class="purchase-invoice-expanded-attachment-img" [src]="expandedAttachmentPreviewImgUrl()" [alt]="expandedAttachmentPreviewName()" />
+            <div class="purchase-invoice-image-viewer">
+              <div class="purchase-invoice-image-toolbar">
+                <span class="purchase-invoice-image-toolbar-name" [title]="expandedAttachmentPreviewName()">{{ expandedAttachmentPreviewName() }}</span>
+                <div class="purchase-invoice-image-toolbar-group">
+                  <button type="button" title="Zoom out" (click)="zoomExpandedAttachmentImage(-0.25)" [disabled]="expandedAttachmentImageZoom() <= 0.25"><i class="pi pi-minus"></i></button>
+                  <span class="purchase-invoice-image-toolbar-zoom">{{ (expandedAttachmentImageZoom() * 100) | number:'1.0-0' }}%</span>
+                  <button type="button" title="Zoom in" (click)="zoomExpandedAttachmentImage(0.25)" [disabled]="expandedAttachmentImageZoom() >= 4"><i class="pi pi-plus"></i></button>
+                  <span class="purchase-invoice-image-toolbar-sep"></span>
+                  <button type="button" title="Rotate" (click)="rotateExpandedAttachmentImage()"><i class="pi pi-replay"></i></button>
+                </div>
+                <div class="purchase-invoice-image-toolbar-group">
+                  <button type="button" title="Download" (click)="downloadExpandedAttachment()"><i class="pi pi-download"></i></button>
+                  <button type="button" title="Print" (click)="printExpandedAttachmentImage()"><i class="pi pi-print"></i></button>
+                </div>
+              </div>
+              <div class="purchase-invoice-image-stage">
+                <img class="purchase-invoice-expanded-attachment-img"
+                  [src]="expandedAttachmentPreviewImgUrl()"
+                  [alt]="expandedAttachmentPreviewName()"
+                  [style.transform]="'scale(' + expandedAttachmentImageZoom() + ') rotate(' + expandedAttachmentImageRotation() + 'deg)'" />
+              </div>
+            </div>
           } @else if (expandedAttachmentPreviewKind() === 'pdf' && expandedAttachmentPreviewFrameUrl()) {
             <iframe class="purchase-invoice-expanded-attachment-frame" [src]="expandedAttachmentPreviewFrameUrl()" [title]="expandedAttachmentPreviewName()"></iframe>
           } @else {

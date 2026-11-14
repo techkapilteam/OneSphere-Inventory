@@ -148,11 +148,96 @@ type PendingPurchaseInvoiceAttachmentSaveContext = { existingId: number | null; 
       width: min(960px, calc(100vw - 32px));
     }
 
+    :host .purchase-invoice-image-viewer {
+      display: flex;
+      flex-direction: column;
+      height: 70vh;
+      background: #525659;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    :host .purchase-invoice-image-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 46px;
+      padding: 0 12px;
+      background: #323639;
+      color: #f1f1f1;
+      flex-shrink: 0;
+    }
+
+    :host .purchase-invoice-image-toolbar-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    :host .purchase-invoice-image-toolbar-group {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    :host .purchase-invoice-image-toolbar button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: #f1f1f1;
+      cursor: pointer;
+    }
+
+    :host .purchase-invoice-image-toolbar button:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    :host .purchase-invoice-image-toolbar button:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+
+    :host .purchase-invoice-image-toolbar-zoom {
+      min-width: 46px;
+      text-align: center;
+      font-size: 12px;
+    }
+
+    :host .purchase-invoice-image-toolbar-sep {
+      width: 1px;
+      height: 20px;
+      margin: 0 6px;
+      background: rgba(255, 255, 255, 0.25);
+    }
+
+    :host .purchase-invoice-image-stage {
+      flex: 1;
+      overflow: auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
     :host .purchase-invoice-expanded-attachment-img {
       display: block;
       max-width: 100%;
-      max-height: 70vh;
+      max-height: 100%;
       margin: 0 auto;
+      background: #fff;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+      transform-origin: center center;
+      transition: transform 0.15s ease;
     }
 
     :host .purchase-invoice-expanded-attachment-frame {
@@ -189,6 +274,8 @@ export class InventoryPurchaseInvoiceComponent extends InventoryScreenShell impl
   readonly expandedAttachmentPreviewImgUrl = signal<SafeUrl | null>(null);
   readonly expandedAttachmentPreviewFrameUrl = signal<SafeResourceUrl | null>(null);
   private expandedAttachmentPreviewObjectUrl: string | null = null;
+  readonly expandedAttachmentImageZoom = signal(1);
+  readonly expandedAttachmentImageRotation = signal(0);
 
   // Auto-opens the Posted GRNs tray once, as soon as the segment is known.
   // This used to fire on fixed 0/350/900ms timers; the 0ms one ran before the
@@ -380,7 +467,67 @@ export class InventoryPurchaseInvoiceComponent extends InventoryScreenShell impl
     this.expandedAttachmentPreviewKind.set(null);
     this.expandedAttachmentPreviewImgUrl.set(null);
     this.expandedAttachmentPreviewFrameUrl.set(null);
+    this.expandedAttachmentImageZoom.set(1);
+    this.expandedAttachmentImageRotation.set(0);
     this.revokeExpandedAttachmentPreviewUrl();
+  }
+
+  zoomExpandedAttachmentImage(step: number): void {
+    const next = Math.round((this.expandedAttachmentImageZoom() + step) * 100) / 100;
+    this.expandedAttachmentImageZoom.set(Math.min(4, Math.max(0.25, next)));
+  }
+
+  rotateExpandedAttachmentImage(): void {
+    this.expandedAttachmentImageRotation.set((this.expandedAttachmentImageRotation() + 90) % 360);
+  }
+
+  downloadExpandedAttachment(): void {
+    const url = this.expandedAttachmentPreviewObjectUrl;
+    if (!url) return;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = this.expandedAttachmentPreviewName() || 'attachment';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  printExpandedAttachmentImage(): void {
+    const url = this.expandedAttachmentPreviewObjectUrl;
+    if (!url) return;
+    const frame = document.createElement('iframe');
+    frame.style.position = 'fixed';
+    frame.style.right = '0';
+    frame.style.bottom = '0';
+    frame.style.width = '0';
+    frame.style.height = '0';
+    frame.style.border = '0';
+    document.body.appendChild(frame);
+    const doc = frame.contentDocument;
+    const win = frame.contentWindow;
+    if (!doc || !win) {
+      frame.remove();
+      return;
+    }
+    const rotation = this.expandedAttachmentImageRotation();
+    const sideways = rotation === 90 || rotation === 270;
+    doc.open();
+    doc.write(`<!doctype html><html><head><title></title><style>
+      @page { margin: 10mm; }
+      html, body { margin: 0; padding: 0; height: 100%; }
+      body { display: flex; align-items: center; justify-content: center; }
+      img { max-width: ${sideways ? '100vh' : '100%'}; max-height: ${sideways ? '100vw' : '100vh'}; object-fit: contain; transform: rotate(${rotation}deg); }
+    </style></head><body><img id="print-img" /></body></html>`);
+    doc.close();
+    const img = doc.getElementById('print-img') as HTMLImageElement;
+    const cleanup = () => setTimeout(() => frame.remove(), 1000);
+    img.onload = () => {
+      win.focus();
+      win.print();
+      cleanup();
+    };
+    img.onerror = cleanup;
+    img.src = url;
   }
 
   override ngOnDestroy(): void {
