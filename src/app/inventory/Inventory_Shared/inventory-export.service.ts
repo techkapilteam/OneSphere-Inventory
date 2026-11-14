@@ -96,7 +96,9 @@ const TERMS_LINE_HEIGHT = 3.6;
 /** Text/spacing scales tried in turn for a fitOnePage document. */
 const ONE_PAGE_SCALES = [1, 0.92, 0.85, 0.78, 0.7, 0.62];
 const BANK_BOX_HEIGHT = 58;
-const SIGNATURE_ROW_HEIGHT = 32;
+// Previous: 32 — too little room to sign; taller box gives space for the
+// Authorised Signatory signature and the Common Seal.
+const SIGNATURE_ROW_HEIGHT = 45;
 const NUMERIC_CELL =/^-?(rs\.?\s*|₹\s*)?-?[\d,]+(\.\d+)?\s*%?$/i;
 
 @Injectable({ providedIn: 'root' })
