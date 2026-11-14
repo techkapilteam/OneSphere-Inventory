@@ -9331,13 +9331,17 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       return;
     }
     const docType = this.config?.key || '';
+    // Sales Invoice is numbered per branch with the branch code in it
+    // (INV-CP-00001/26-27, migration 290): preview for the location picked.
+    const location = docType === 'salesInvoice' ? this.salesInvoiceNumberLocation() : undefined;
     // Keyed on the saved-record count too, so the preview refreshes once a
-    // save lands in the grid instead of showing the number just used.
-    const previewKey = `${docType}:${this.savedRecordObjects().length}`;
+    // save lands in the grid instead of showing the number just used; and on
+    // the picked location, so changing the branch refreshes the code.
+    const previewKey = `${docType}:${this.savedRecordObjects().length}:${location?.branchId ?? ''}:${location?.warehouseId ?? ''}`;
     if (!docType || this.previewDocNumberKey === previewKey) return;
 
     this.previewDocNumberKey = previewKey;
-    this.txService.peekNextDocNumber(docType)
+    this.txService.peekNextDocNumber(docType, location)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: res => this.previewDocNumber.set(String(res?.data ?? '')),
@@ -9345,6 +9349,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         // field just stays blank and the server still numbers correctly.
         error: () => this.previewDocNumber.set('')
       });
+  }
+
+  // The Sales Invoice location exactly as buildPayload() sends it
+  // (branch_id / warehouse_id are mutually exclusive), so the previewed
+  // INV-CP-…/26-27 number matches the one the save assigns.
+  private salesInvoiceNumberLocation(): { branchId: number | null; warehouseId: number | null } {
+    const v = this.formValues();
+    const picked = this.resolveMergedLocation(v['warehouse']);
+    const warehouse = picked.warehouse;
+    const branch = warehouse ? null : picked.branch;
+    return {
+      branchId: branch ? this.branchResolvedId(branch) : null,
+      warehouseId: warehouse?.id ?? (branch ? null : this.optionalNumber(v['warehouseId']))
+    };
   }
 
   transactionNumberValue(field: InventoryField): string {
@@ -9371,7 +9389,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (this.serverAssignsDocNumber() && this.editingId() === null) {
       // Only seen in the moment before the preview lands, or if it failed.
       // Financial-year numbered server-side (migration 249).
-      const fyServerPrefix: Record<string, string> = { salesInvoice: 'INV', salesReturn: 'SRT' };
+      // Sales Invoice also carries the branch code (migration 290).
+      const fyServerPrefix: Record<string, string> = { salesInvoice: 'INV-XX-', salesReturn: 'SRT' };
       const fyPrefix = fyServerPrefix[this.config?.key || ''];
       if (fyPrefix) return `Auto (${fyPrefix}…/YY-YY) — assigned on save`;
       return `Auto (${this.transactionDocPrefix(field)}-YY-…) — assigned on save`;
