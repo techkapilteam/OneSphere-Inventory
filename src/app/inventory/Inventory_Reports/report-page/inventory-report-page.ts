@@ -727,6 +727,18 @@ export class InventoryReportPageComponent implements OnInit {
       rows.push(columns.map((column, index) => index === 0 ? 'Grand Total' : (column.total ? totals[column.key] ?? '' : '')));
     }
 
+    // Stock Summary: Grand Total line at the end of PDF / Print / Excel, only for
+    // Stock Value and GST Amount (user request 2026-11-14).
+    if (this.report().key === 'stockSummary' && rows.length) {
+      const grandTotalKeys = ['stockValue', 'gstAmount'];
+      const sumOf = (key: string) => this.sortedRows().reduce((acc, row) => acc + this.numberValue(row[key]), 0);
+      groupRowIndexes.push(rows.length);
+      rows.push(columns.map((column, index) => {
+        if (index === 0) return 'Grand Total';
+        return grandTotalKeys.includes(column.key) ? this.formatCell(sumOf(column.key), column) : '';
+      }));
+    }
+
     return {
       title: this.report().title,
       columns: columns.map(column => column.label),
