@@ -83,6 +83,7 @@ interface GridExportPayload {
   gstInvoiceLayout?: boolean;
   signatureBlock?: boolean;
   signatures?: string[];
+  boldCellSegments?: { column: number; byRow: Array<string | undefined> };
 }
 
 export interface PriceHintView {
@@ -8415,7 +8416,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       const lineTax = savedTax || this.transactionLineTaxBreakup(qty, rate, discPct, gstPct, undefined, this.itemGstIncluded(item) ?? false).taxAmount;
       return [
         String(index + 1),
-        this.purchaseInvoiceItemName(item),
+        // Serial nos (bold, in brackets) on the line under the product name.
+        // Previous: this.purchaseInvoiceItemName(item),
+        [this.purchaseInvoiceItemName(item), this.documentSerialText(item)].filter(Boolean).join('\n'),
         this.purchaseInvoiceItemHsn(item),
         this.moneyValue(item?.qty ?? 0),
         this.grnExpandedValue(item, 'uom_name', 'uomName'),
@@ -8543,6 +8546,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Common Seal / Authorised Signatory row (old printed invoice layout).
       gstInvoiceLayout: true,
       signatureBlock: true,
+      boldCellSegments: rows.length ? this.documentSerialSegments(record) : undefined,
       fileName: `Purchase_Invoice_${docNo || 'Selected_Record'}`
     };
   }
@@ -8563,7 +8567,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // Previous columns: S.No | Product / Service | HSN/SAC Code | Qty | UOM |
   // Rate (Rs.) | MRP | Selling Price | Disc % | Taxable Value | GST % |
   // CGST Amt | SGST Amt (or IGST Amt) | Amount (Rs.)
-  private salesInvoiceDocumentRows(record: any, isInterstate = false): { rows: string[][]; totalRow: string[] } {
+  // withSerials: the line's serial nos print (bold, in brackets) under the
+  // product name — Sales Invoice only; Sales Return shares these rows without.
+  private salesInvoiceDocumentRows(record: any, isInterstate = false, withSerials = false): { rows: string[][]; totalRow: string[] } {
     const sum = { gross: 0, discount: 0, taxable: 0, cgst: 0, sgst: 0, total: 0 };
     const rows = (record?.items || []).map((item: any, index: number) => {
       // Product-wise GST: taxable value and CGST/SGST (or IGST) amount per line.
@@ -8587,7 +8593,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       return [
         String(index + 1),
         // Previous: [this.purchaseInvoiceItemName(item), batchNo ? `BATCH NUMBER : ${batchNo}` : ''].filter(Boolean).join('\n'),
-        [this.salesInvoicePrintItemName(this.purchaseInvoiceItemName(item)), batchNo ? `BATCH NUMBER : ${batchNo}` : ''].filter(Boolean).join('\n'),
+        // Previous: [this.salesInvoicePrintItemName(this.purchaseInvoiceItemName(item)), batchNo ? `BATCH NUMBER : ${batchNo}` : ''].filter(Boolean).join('\n'),
+        [
+          this.salesInvoicePrintItemName(this.purchaseInvoiceItemName(item)),
+          withSerials ? this.documentSerialText(item) : '',
+          batchNo ? `BATCH NUMBER : ${batchNo}` : ''
+        ].filter(Boolean).join('\n'),
         this.purchaseInvoiceItemHsn(item),
         Number.isInteger(qty) ? String(qty) : this.moneyValue(qty),
         this.moneyValue(item?.rate ?? 0),
@@ -8622,6 +8633,25 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     };
     const key = String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
     return printNames[key] ?? name;
+  }
+
+  // Sold serials of DC-linked Sales Invoice lines, by SI item id. Those lines
+  // never store serial_numbers themselves (see
+  // hydrateSoldSerialsForDcLinkedSalesInvoiceLines), so the print fetches them
+  // once (printInvoiceWithCopyType) and the rows read them from here.
+  private readonly printSoldSerialsByItemId = new Map<number, string[]>();
+
+  // "(SN1, SN2)" for a PI / SI print line, or '' when the line has no serials.
+  private documentSerialText(item: any): string {
+    let serials = this.serialNumbersFromRecordItem(item);
+    if (!serials.length) serials = this.printSoldSerialsByItemId.get(Number(item?.id)) || [];
+    return serials.length ? `(${serials.join(', ')})` : '';
+  }
+
+  // Per row, the serial line to print bold in the Product column (index 1).
+  private documentSerialSegments(record: any): { column: number; byRow: Array<string | undefined> } | undefined {
+    const byRow = (record?.items || []).map((item: any) => this.documentSerialText(item) || undefined);
+    return byRow.some(Boolean) ? { column: 1, byRow } : undefined;
   }
 
   // Same per-line taxable/tax rule as documentFinancials(): saved values first,
@@ -8693,7 +8723,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     //     ...(lineIsInterstate ? ['IGST Amt'] : ['CGST Amt', 'SGST Amt']), 'Amount (Rs.)'],
     //   this.salesInvoiceDocumentRows(record, lineIsInterstate)
     // );
-    const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate);
+    // Previous: const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate);
+    const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate, true);
     const columns = ['S.No', 'Product Description', 'HSN/SAC Code', 'Qty', 'Rate', 'Amount', 'Disc.', 'Taxable Value',
       ...(lineIsInterstate ? ['Rate %', 'Amount'] : ['Rate %', 'Amount', 'Rate %', 'Amount']), 'TOTAL'];
     const columnGroups: Array<[string, number]> = [
@@ -8806,6 +8837,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // The whole invoice (grid, totals, terms, bank box) prints on one page;
       // text and spacing shrink as needed for longer invoices.
       fitOnePage: true,
+      boldCellSegments: rows.length ? this.documentSerialSegments(record) : undefined,
       fileName: `Sales_Invoice_${docNo || 'Selected_Record'}`
     };
   }
@@ -9046,6 +9078,27 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // (migrations 272 / 274) so it holds across users, refreshes and machines.
   // Drafts, or a failed call, print without a copy type and are not counted.
   private printInvoiceWithCopyType(kind: 'salesInvoice' | 'purchaseInvoice', record: any, payload: GridExportPayload, mode: 'Pdf' | 'Print' | 'Open'): void {
+    // DC-linked SI lines: fetch their sold serials first so they print under
+    // the product name, then rebuild the payload from the expanded record.
+    if (kind === 'salesInvoice') {
+      const pending = (record?.items || []).filter((item: any) => item?.dc_item_id && item?.id
+        && !this.serialNumbersFromRecordItem(item).length
+        && !this.printSoldSerialsByItemId.has(Number(item.id)));
+      if (pending.length) {
+        forkJoin(pending.map((item: any) => this.txService.getSoldSerialsForSiItem(item.id).pipe(
+          map(res => ({ id: Number(item.id), serials: (res?.data || []).map((s: any) => s?.serial_no).filter((s: any): s is string => !!s) })),
+          catchError(() => of({ id: Number(item.id), serials: [] as string[] }))
+        )))
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe((results: any) => {
+            (results as Array<{ id: number; serials: string[] }>).forEach(r => this.printSoldSerialsByItemId.set(r.id, r.serials));
+            const docNo = String(record?.doc_number || record?.docNumber || '');
+            const rebuilt = this.salesInvoiceDocumentExportPayload(record, docNo, [], payload.columns, payload.rows);
+            this.printInvoiceWithCopyType(kind, record, { ...rebuilt, copyType: payload.copyType }, mode);
+          });
+        return;
+      }
+    }
     if (kind === 'salesInvoice' && !this.hasPreviousBalanceRow(payload)) {
       this.withSalesInvoicePreviousBalance(record, payload, withBalance =>
         this.printInvoiceWithCopyType(kind, record, withBalance, mode));
@@ -9139,6 +9192,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       gstInvoiceLayout: payload.gstInvoiceLayout,
       signatureBlock: payload.signatureBlock,
       signatures: payload.signatures,
+      boldCellSegments: payload.boldCellSegments,
       fileName: payload.fileName || payload.title
     };
   }
