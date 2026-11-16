@@ -11948,11 +11948,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             }
             if (this.isGstAutoFillLineGrid() && product.gst_rate != null) {
               // Auto-bind GST from the product's own mapped rate (Product Master /
-              // HSN-SAC) instead of leaving it for manual re-entry on every inward line.
+              // HSN-SAC). This runs only when the row's product changes, so the
+              // previous product's (or a default) GST is REPLACED.
               const gstIdx = (this.config?.lineColumns || []).findIndex(c => c.toLowerCase().includes('gst'));
-              if (gstIdx >= 0 && !nextRow[gstIdx]) {
-                const gstValue = `${Number(product.gst_rate)}%`;
-                nextRow[gstIdx] = gstValue;
+              if (gstIdx >= 0) {
+                nextRow[gstIdx] = `${Number(product.gst_rate)}%`;
               }
             }
             this.applyProductPricingDefaults(nextRow, product);
@@ -13905,7 +13905,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (this.config?.kind === 'transaction' && (key.includes('qty') || key === 'uom')) return '';
       if (key.includes('qty')) return '1';
       if (key.includes('disc')) return '0';
-      if (key.includes('gst') || key.includes('tax')) return '18%';
+      // if (key.includes('gst') || key.includes('tax')) return '18%';
+      // Previous: if (key.includes('gst') || key.includes('tax')) return '18%';
+      // Transaction rows: GST stays empty until an item is picked (then it comes
+      // from the product). Other grids keep the 18% default.
+      if (key.includes('gst') || key.includes('tax')) return this.config?.kind === 'transaction' ? '' : '18%';
       if (key.includes('rate') || key.includes('amount')) return '0';
       if (key.includes('warehouse')) return this.locationOptions[0] || '';
       if (key.includes('remark')) return '';
