@@ -12336,15 +12336,22 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // selling rate, while PI's Rate is
     // the vendor purchase rate (must NOT be overwritten from selling price)
     // — only MRP/Selling Price are safe to auto-bind on both.
-    if (this.config?.key === 'salesInvoice') {
+        if (this.config?.key === 'salesInvoice') {
       const mrp = this.productSalesPriceForLineUom(product, row, this.productMrp(product));
       const selling = this.productSalesPriceForLineUom(product, row, this.productSellingPrice(product, row));
-      // Cost + category / product margin (migration 283), converted to the line's UOM.
+      // Rate = closing stock (FIFO) cost + product / category margin (migration 283).
+      // Selling Price / MRP are NOT used for the rate any more (they were a temporary workaround).
       const suggested = this.productSalesPriceForLineUom(product, row, this.productSuggestedSalesRate(product));
+      const cost = this.productSalesPriceForLineUom(product, row, this.productSuggestedRateCost(product));
       this.setLineColumnDefault(row, ['mrp'], mrp, true);
       this.setLineColumnDefault(row, ['selling'], selling, true);
-      // Rate: the margin rate when the product has one, otherwise as before (MRP, else selling price).
-      this.setLineColumnDefault(row, ['rate'], suggested > 0 ? suggested : (mrp > 0 ? mrp : selling), true);
+      // This runs only when the row's product changes, so the previous product's
+      // rate must be REPLACED (not kept, as a "default" would do).
+      const rateIdx = (this.config?.lineColumns || []).findIndex(c => this.compactKey(c) === 'rate');
+      if (rateIdx >= 0) {
+        const newRate = suggested > 0 ? suggested : cost;
+        row[rateIdx] = newRate > 0 ? String(Math.round(newRate * 100) / 100) : '';
+      }
     }
     else if (this.config?.key === 'salesOrder' || this.config?.key === 'purchaseInvoice') {
       const mrp = this.productSalesPriceForLineUom(product, row, this.productMrp(product));
