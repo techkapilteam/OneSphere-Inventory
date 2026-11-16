@@ -10464,6 +10464,11 @@ body .p-connected-overlay {
   margin-bottom: 12px;
 }
 
+/* Guide panel now has two cards (Use, Steps) — the video moved to the top-bar icon. */
+.inventory-advice-grid--short {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
+}
+
 .inventory-advice-card {
   min-width: 0;
   padding: 12px;
