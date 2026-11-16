@@ -11810,6 +11810,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       colKey.includes('product') || colKey.includes('item') || colKey.includes('sku') ||
       colKey.includes('material') || colKey.includes('variant')
     );
+    if (this.config?.kind === 'transaction' && !productionCostColumn &&
+      (colKey.includes('product') || colKey.includes('item') || colKey.includes('sku'))) {
+      const duplicateRow = this.salesInvoiceDuplicateProductRow(rowIndex, columnIndex, value);
+      if (duplicateRow >= 0) {
+        this.saveError.set(`"${String(value).trim()}" is already added on S.No ${duplicateRow + 1}. Increase the Qty on that line instead of adding the product again.`);
+        return;
+      }
+    }
     if (resetsAttr) {
       this.lineAttrValueMap.update(map => {
         const next = { ...map };
@@ -13518,7 +13526,51 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (!productName) return 'Every Sales Invoice line needs a Product selected.';
       if ((Number(item?.qty) || 0) <= 0) return `"${productName}": Qty must be greater than zero.`;
     }
+    // The same product (same variant/attribute) on two lines duplicates the
+    // invoice line — it must be one line with the combined Qty. Lines tied to
+    // different DC / SO lines stay separate (each settles its own reference).
+    const seen = new Map<string, number>();
+    for (const item of items) {
+      const key = this.salesInvoiceDuplicateLineKey(item);
+      const firstSno = seen.get(key);
+      if (firstSno !== undefined) {
+        const productName = String(item?.product_name || '').trim();
+        return `"${productName}" is added more than once (S.No ${firstSno} and ${item?.sno}). Remove the duplicate line and increase the Qty on S.No ${firstSno} instead.`;
+      }
+      seen.set(key, Number(item?.sno) || 0);
+    }
     return '';
+  }
+
+  private salesInvoiceDuplicateLineKey(item: any): string {
+    const norm = (v: any) => String(v ?? '').trim().toLowerCase();
+    return [
+      item?.product_id ?? norm(item?.product_name),
+      item?.variant_id ?? norm(item?.variant_name),
+      norm(item?.attribute_value),
+      item?.dc_item_id ?? '',
+      item?.so_item_id ?? ''
+    ].join('|');
+  }
+
+  // Pick-time half of the duplicate check above: choosing a product that is
+  // already on another Sales Invoice line is refused straight away. Products
+  // with variants are left to the save-time check, since two lines of the
+  // same product with different variants are legitimate.
+  private salesInvoiceDuplicateProductRow(rowIndex: number, columnIndex: number, value: any): number {
+    if (this.config?.key !== 'salesInvoice') return -1;
+    const text = String(value ?? '').trim();
+    if (!text) return -1;
+    const product = this.findProductBySelection(text);
+    if (!product) return -1;
+    if ((this.productVariantOptionObjects(product) || []).length) return -1;
+    const refMap = this.lineRefItemIdMap();
+    return this.entryLineRows().findIndex((row, index) => {
+      if (index === rowIndex) return false;
+      if (refMap[index]?.dcItemId || refMap[index]?.soItemId) return false;
+      const other = this.findProductBySelection(String(row?.[columnIndex] ?? '').trim());
+      return !!other && other.id === product.id;
+    });
   }
 
   private isInwardStockControlQtyColumn(column: string): boolean {
