@@ -155,15 +155,6 @@
             }
           </ol>
         </article>
-
-        <article class="inventory-advice-card inventory-guide-video-card">
-          <strong>{{ config.guideVideoTitle || 'Video' }}</strong>
-          @if (guideVideoUrl()) {
-            <video class="inventory-guide-video" controls preload="metadata" [src]="guideVideoUrl()"></video>
-          } @else {
-            <span class="inventory-guide-video-empty"><i class="pi pi-video"></i> Video can be attached for this screen.</span>
-          }
-        </article>
       </div>
 
       @if (config.dependsOn?.length) {

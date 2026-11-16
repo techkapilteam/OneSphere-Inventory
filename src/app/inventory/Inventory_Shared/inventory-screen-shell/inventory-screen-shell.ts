@@ -75,6 +75,9 @@ interface GridExportPayload {
   columnGroups?: Array<[string, number]>;
   totalRow?: string[];
   fitOnePage?: boolean;
+  pdfMaxScale?: number;
+  pdfFixedGridScale?: boolean;
+  boldFieldLabels?: string[];
   copyType?: string;
   terms?: string[];
   bankDetails?: Array<[string, string]>;
@@ -6047,10 +6050,6 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return Math.max(0, this.displayFields().length - this.guideFields().length);
   }
 
-  guideVideoUrl(): string {
-    return (this.config?.guideVideoUrl || '').trim();
-  }
-
   shortText(value: string | null | undefined, maxLength = 120): string {
     const text = String(value || '').replace(/\s+/g, ' ').trim();
     if (text.length <= maxLength) return text;
@@ -8807,11 +8806,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Previous: ['Invoice Date', this.gridDateDisplay(String(record.doc_date || record.docDate || ''))],
       // Previous: ['Due Date', this.gridDateDisplay(String(record.due_date || record.dueDate || ''))],
       ['Invoice Date', this.fullYearDateDisplay(record.doc_date || record.docDate) || '-'],
-      ['Due Date', this.fullYearDateDisplay(record.due_date || record.dueDate) || '-'],
+      // Due Date removed from the PDF (user request 2026-11-16); the fields are
+      // re-paired so Bill To / Ship To and State / State Code stay side by side.
+      // Previous: ['Due Date', this.fullYearDateDisplay(record.due_date || record.dueDate) || '-'],
+      // Previous order: Customer, Customer Phone, GSTIN No, ..., SO Reference last.
       ['Customer', customerName || '-'],
-      ['Customer Phone', String(customer?.mobile || '').trim() || '-'],
-      // Previous position: after State.
       ['GSTIN No', customerGstin || '-'],
+      ['Customer Phone', String(customer?.mobile || '').trim() || '-'],
+      ['SO Reference', soReference],
       // Previous: ['Customer Address', this.partyFullAddress(customer)],
       // Delivery Address entered on the invoice (customer master address when
       // none was entered); Ship Address falls back to the delivery address.
@@ -8829,8 +8831,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['State', customerState || '-'],
       ['State Code', customerStateCode || '-'],
       ['Warehouse', warehouseName],
-      ['Vehicle No', String(record.vehicle_no || record.vehicleNo || '')],
-      ['SO Reference', soReference]
+      ['Vehicle No', String(record.vehicle_no || record.vehicleNo || '')]
+      // Previous: ['SO Reference', soReference] (moved up beside Customer Phone)
       // Payment Terms not required on the print.
       // ['Payment Terms', String(record.payment_terms || record.paymentTerms || '')]
       // Header 'Status' removed from the Sales Invoice print.
@@ -8899,6 +8901,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // The whole invoice (grid, totals, terms, bank box) prints on one page;
       // text and spacing shrink as needed for longer invoices.
       fitOnePage: true,
+      // Previous: pdfMaxScale: 0.85 — every invoice at the INV-CP-00004 size;
+      // user found that too small and prefers the full-size INV-CP-00007 look.
+      // Now: full size, stepping down 2% at a time only as far as needed to
+      // keep the invoice on one page.
+      pdfMaxScale: 1,
+      // Items grid always at the INV-CP-00007 (full) size, however many lines.
+      pdfFixedGridScale: true,
+      boldFieldLabels: ['Customer', 'GSTIN No'],
       boldCellSegments: rows.length ? this.documentSerialSegments(record) : undefined,
       fileName: `Sales_Invoice_${docNo || 'Selected_Record'}`
     };
@@ -9247,6 +9257,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       columnGroups: payload.columnGroups,
       totalRow: payload.totalRow,
       fitOnePage: payload.fitOnePage,
+      pdfMaxScale: payload.pdfMaxScale,
+      pdfFixedGridScale: payload.pdfFixedGridScale,
+      boldFieldLabels: payload.boldFieldLabels,
       copyType: payload.copyType,
       terms: payload.terms,
       bankDetails: payload.bankDetails,
