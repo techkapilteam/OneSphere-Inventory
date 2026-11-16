@@ -83,6 +83,7 @@ interface GridExportPayload {
   gstInvoiceLayout?: boolean;
   signatureBlock?: boolean;
   signatures?: string[];
+  boldCellSegments?: { column: number; byRow: Array<string | undefined> };
 }
 
 export interface PriceHintView {
@@ -548,6 +549,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       : null;
     const editingRow = editingRecord ? this.mapToGridRows([editingRecord])[0] : null;
 
+    // Product / Service Master rows are [code, sku, name, category, ...]: match
+    // code, SKU, name and Product Category so typing a category name lists the
+    // products already under it.
+    if (this.config?.key === 'productServiceMaster') {
+      return this.liveRows()
+        .filter(row => !(editingRow && row[0] === editingRow[0]))
+        .filter(row => [row[0], row[1], row[2], row[3]].some(cell => String(cell ?? '').toLowerCase().includes(q)))
+        .slice(0, 6);
+    }
+
     // Match on what the hint shows (code and name), not on every column:
     // text like "Not used yet" in other columns would match almost anything.
     return this.liveRows()
@@ -563,6 +574,58 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const q = this.genericNameValue().trim().toLowerCase();
     return !!q && row.some(cell => String(cell ?? '').trim().toLowerCase() === q);
   }
+
+  // Product / Service Master hint text: name/code/SKU exact → "Already exists",
+  // Product Category exact → "Category already exists", otherwise similar.
+  productExistingHint(row: string[]): string {
+    const norm = (s: any) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const q = norm(this.genericNameValue());
+    if (q && [row[0], row[1], row[2]].some(c => norm(c) === q)) return 'Already exists · click to edit';
+    if (q && norm(row[3]) === q) return 'Category already exists · click to edit';
+    return 'Similar name · click to edit';
+  }
+
+  // Product / Service Master: a product whose name exactly matches (ignoring
+  // case and extra spaces) another saved product in this segment, or another
+  // row already in the pending list, is a duplicate and must not be saved.
+  // The record currently open for edit is left out of the comparison.
+  productNameDuplicateOf(name: string): string {
+    if (this.config?.key !== 'productServiceMaster') return '';
+    const norm = (s: any) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const q = norm(name);
+    if (!q) return '';
+    const editingId = this.editingId();
+    const saved = this.savedRecordObjects().find((r: any) =>
+      norm(r?.product_name ?? r?.productName) === q
+      && !(editingId !== null && Number(r?.id) === Number(editingId)));
+    if (saved) return String(saved?.product_name ?? saved?.productName ?? name).trim();
+    const editingPending = this.editingPendingIndex();
+    const pending = this.pendingRows().find((r, i) =>
+      i !== editingPending && norm(r?.payload?.['product_name']) === q);
+    return pending ? String(pending.payload['product_name']).trim() : '';
+  }
+
+  readonly productNameDuplicate = computed(() => this.productNameDuplicateOf(this.productName()));
+
+  // Same rule for Product / Service Code: an exact match (ignoring case and
+  // spaces) against another saved product or a pending row blocks the save.
+  productCodeDuplicateOf(code: string): string {
+    if (this.config?.key !== 'productServiceMaster') return '';
+    const norm = (s: any) => String(s ?? '').replace(/\s+/g, '').toLowerCase();
+    const q = norm(code);
+    if (!q) return '';
+    const editingId = this.editingId();
+    const saved = this.savedRecordObjects().find((r: any) =>
+      norm(r?.product_code ?? r?.productCode) === q
+      && !(editingId !== null && Number(r?.id) === Number(editingId)));
+    if (saved) return String(saved?.product_code ?? saved?.productCode ?? code).trim();
+    const editingPending = this.editingPendingIndex();
+    const pending = this.pendingRows().find((r, i) =>
+      i !== editingPending && norm(r?.payload?.['product_code']) === q);
+    return pending ? String(pending.payload['product_code']).trim() : '';
+  }
+
+  readonly productCodeDuplicate = computed(() => this.productCodeDuplicateOf(this.formValues()['productCode']));
 
   readonly formValues = signal<Record<string, any>>({});
   readonly savedRecordObjects = signal<any[]>([]);
@@ -8415,7 +8478,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       const lineTax = savedTax || this.transactionLineTaxBreakup(qty, rate, discPct, gstPct, undefined, this.itemGstIncluded(item) ?? false).taxAmount;
       return [
         String(index + 1),
-        this.purchaseInvoiceItemName(item),
+        // Serial nos (bold, in brackets) on the line under the product name.
+        // Previous: this.purchaseInvoiceItemName(item),
+        [this.purchaseInvoiceItemName(item), this.documentSerialText(item)].filter(Boolean).join('\n'),
         this.purchaseInvoiceItemHsn(item),
         this.moneyValue(item?.qty ?? 0),
         this.grnExpandedValue(item, 'uom_name', 'uomName'),
@@ -8543,6 +8608,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Common Seal / Authorised Signatory row (old printed invoice layout).
       gstInvoiceLayout: true,
       signatureBlock: true,
+      boldCellSegments: rows.length ? this.documentSerialSegments(record) : undefined,
       fileName: `Purchase_Invoice_${docNo || 'Selected_Record'}`
     };
   }
@@ -8563,7 +8629,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // Previous columns: S.No | Product / Service | HSN/SAC Code | Qty | UOM |
   // Rate (Rs.) | MRP | Selling Price | Disc % | Taxable Value | GST % |
   // CGST Amt | SGST Amt (or IGST Amt) | Amount (Rs.)
-  private salesInvoiceDocumentRows(record: any, isInterstate = false): { rows: string[][]; totalRow: string[] } {
+  // withSerials: the line's serial nos print (bold, in brackets) under the
+  // product name — Sales Invoice only; Sales Return shares these rows without.
+  private salesInvoiceDocumentRows(record: any, isInterstate = false, withSerials = false): { rows: string[][]; totalRow: string[] } {
     const sum = { gross: 0, discount: 0, taxable: 0, cgst: 0, sgst: 0, total: 0 };
     const rows = (record?.items || []).map((item: any, index: number) => {
       // Product-wise GST: taxable value and CGST/SGST (or IGST) amount per line.
@@ -8587,7 +8655,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       return [
         String(index + 1),
         // Previous: [this.purchaseInvoiceItemName(item), batchNo ? `BATCH NUMBER : ${batchNo}` : ''].filter(Boolean).join('\n'),
-        [this.salesInvoicePrintItemName(this.purchaseInvoiceItemName(item)), batchNo ? `BATCH NUMBER : ${batchNo}` : ''].filter(Boolean).join('\n'),
+        // Previous: [this.salesInvoicePrintItemName(this.purchaseInvoiceItemName(item)), batchNo ? `BATCH NUMBER : ${batchNo}` : ''].filter(Boolean).join('\n'),
+        [
+          this.salesInvoicePrintItemName(this.purchaseInvoiceItemName(item)),
+          withSerials ? this.documentSerialText(item) : '',
+          batchNo ? `BATCH NUMBER : ${batchNo}` : ''
+        ].filter(Boolean).join('\n'),
         this.purchaseInvoiceItemHsn(item),
         Number.isInteger(qty) ? String(qty) : this.moneyValue(qty),
         this.moneyValue(item?.rate ?? 0),
@@ -8622,6 +8695,25 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     };
     const key = String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
     return printNames[key] ?? name;
+  }
+
+  // Sold serials of DC-linked Sales Invoice lines, by SI item id. Those lines
+  // never store serial_numbers themselves (see
+  // hydrateSoldSerialsForDcLinkedSalesInvoiceLines), so the print fetches them
+  // once (printInvoiceWithCopyType) and the rows read them from here.
+  private readonly printSoldSerialsByItemId = new Map<number, string[]>();
+
+  // "(S.No: SN1, SN2)" for a PI / SI print line, or '' when the line has no serials.
+  private documentSerialText(item: any): string {
+    let serials = this.serialNumbersFromRecordItem(item);
+    if (!serials.length) serials = this.printSoldSerialsByItemId.get(Number(item?.id)) || [];
+    return serials.length ? `(S.No: ${serials.join(', ')})` : '';
+  }
+
+  // Per row, the serial line to print bold in the Product column (index 1).
+  private documentSerialSegments(record: any): { column: number; byRow: Array<string | undefined> } | undefined {
+    const byRow = (record?.items || []).map((item: any) => this.documentSerialText(item) || undefined);
+    return byRow.some(Boolean) ? { column: 1, byRow } : undefined;
   }
 
   // Same per-line taxable/tax rule as documentFinancials(): saved values first,
@@ -8693,7 +8785,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     //     ...(lineIsInterstate ? ['IGST Amt'] : ['CGST Amt', 'SGST Amt']), 'Amount (Rs.)'],
     //   this.salesInvoiceDocumentRows(record, lineIsInterstate)
     // );
-    const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate);
+    // Previous: const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate);
+    const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate, true);
     const columns = ['S.No', 'Product Description', 'HSN/SAC Code', 'Qty', 'Rate', 'Amount', 'Disc.', 'Taxable Value',
       ...(lineIsInterstate ? ['Rate %', 'Amount'] : ['Rate %', 'Amount', 'Rate %', 'Amount']), 'TOTAL'];
     const columnGroups: Array<[string, number]> = [
@@ -8806,6 +8899,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // The whole invoice (grid, totals, terms, bank box) prints on one page;
       // text and spacing shrink as needed for longer invoices.
       fitOnePage: true,
+      boldCellSegments: rows.length ? this.documentSerialSegments(record) : undefined,
       fileName: `Sales_Invoice_${docNo || 'Selected_Record'}`
     };
   }
@@ -9046,6 +9140,27 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // (migrations 272 / 274) so it holds across users, refreshes and machines.
   // Drafts, or a failed call, print without a copy type and are not counted.
   private printInvoiceWithCopyType(kind: 'salesInvoice' | 'purchaseInvoice', record: any, payload: GridExportPayload, mode: 'Pdf' | 'Print' | 'Open'): void {
+    // DC-linked SI lines: fetch their sold serials first so they print under
+    // the product name, then rebuild the payload from the expanded record.
+    if (kind === 'salesInvoice') {
+      const pending = (record?.items || []).filter((item: any) => item?.dc_item_id && item?.id
+        && !this.serialNumbersFromRecordItem(item).length
+        && !this.printSoldSerialsByItemId.has(Number(item.id)));
+      if (pending.length) {
+        forkJoin(pending.map((item: any) => this.txService.getSoldSerialsForSiItem(item.id).pipe(
+          map(res => ({ id: Number(item.id), serials: (res?.data || []).map((s: any) => s?.serial_no).filter((s: any): s is string => !!s) })),
+          catchError(() => of({ id: Number(item.id), serials: [] as string[] }))
+        )))
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe((results: any) => {
+            (results as Array<{ id: number; serials: string[] }>).forEach(r => this.printSoldSerialsByItemId.set(r.id, r.serials));
+            const docNo = String(record?.doc_number || record?.docNumber || '');
+            const rebuilt = this.salesInvoiceDocumentExportPayload(record, docNo, [], payload.columns, payload.rows);
+            this.printInvoiceWithCopyType(kind, record, { ...rebuilt, copyType: payload.copyType }, mode);
+          });
+        return;
+      }
+    }
     if (kind === 'salesInvoice' && !this.hasPreviousBalanceRow(payload)) {
       this.withSalesInvoicePreviousBalance(record, payload, withBalance =>
         this.printInvoiceWithCopyType(kind, record, withBalance, mode));
@@ -9139,6 +9254,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       gstInvoiceLayout: payload.gstInvoiceLayout,
       signatureBlock: payload.signatureBlock,
       signatures: payload.signatures,
+      boldCellSegments: payload.boldCellSegments,
       fileName: payload.fileName || payload.title
     };
   }
@@ -9398,13 +9514,17 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       return;
     }
     const docType = this.config?.key || '';
+    // Sales Invoice is numbered per branch with the branch code in it
+    // (INV-CP-00001/26-27, migration 290): preview for the location picked.
+    const location = docType === 'salesInvoice' ? this.salesInvoiceNumberLocation() : undefined;
     // Keyed on the saved-record count too, so the preview refreshes once a
-    // save lands in the grid instead of showing the number just used.
-    const previewKey = `${docType}:${this.savedRecordObjects().length}`;
+    // save lands in the grid instead of showing the number just used; and on
+    // the picked location, so changing the branch refreshes the code.
+    const previewKey = `${docType}:${this.savedRecordObjects().length}:${location?.branchId ?? ''}:${location?.warehouseId ?? ''}`;
     if (!docType || this.previewDocNumberKey === previewKey) return;
 
     this.previewDocNumberKey = previewKey;
-    this.txService.peekNextDocNumber(docType)
+    this.txService.peekNextDocNumber(docType, location)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: res => this.previewDocNumber.set(String(res?.data ?? '')),
@@ -9412,6 +9532,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         // field just stays blank and the server still numbers correctly.
         error: () => this.previewDocNumber.set('')
       });
+  }
+
+  // The Sales Invoice location exactly as buildPayload() sends it
+  // (branch_id / warehouse_id are mutually exclusive), so the previewed
+  // INV-CP-…/26-27 number matches the one the save assigns.
+  private salesInvoiceNumberLocation(): { branchId: number | null; warehouseId: number | null } {
+    const v = this.formValues();
+    const picked = this.resolveMergedLocation(v['warehouse']);
+    const warehouse = picked.warehouse;
+    const branch = warehouse ? null : picked.branch;
+    return {
+      branchId: branch ? this.branchResolvedId(branch) : null,
+      warehouseId: warehouse?.id ?? (branch ? null : this.optionalNumber(v['warehouseId']))
+    };
   }
 
   transactionNumberValue(field: InventoryField): string {
@@ -9438,7 +9572,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (this.serverAssignsDocNumber() && this.editingId() === null) {
       // Only seen in the moment before the preview lands, or if it failed.
       // Financial-year numbered server-side (migration 249).
-      const fyServerPrefix: Record<string, string> = { salesInvoice: 'INV', salesReturn: 'SRT' };
+      // Sales Invoice also carries the branch code (migration 290).
+      const fyServerPrefix: Record<string, string> = { salesInvoice: 'INV-XX-', salesReturn: 'SRT' };
       const fyPrefix = fyServerPrefix[this.config?.key || ''];
       if (fyPrefix) return `Auto (${fyPrefix}…/YY-YY) — assigned on save`;
       return `Auto (${this.transactionDocPrefix(field)}-YY-…) — assigned on save`;
@@ -11675,6 +11810,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       colKey.includes('product') || colKey.includes('item') || colKey.includes('sku') ||
       colKey.includes('material') || colKey.includes('variant')
     );
+    if (this.config?.kind === 'transaction' && !productionCostColumn &&
+      (colKey.includes('product') || colKey.includes('item') || colKey.includes('sku'))) {
+      const duplicateRow = this.salesInvoiceDuplicateProductRow(rowIndex, columnIndex, value);
+      if (duplicateRow >= 0) {
+        this.saveError.set(`"${String(value).trim()}" is already added on S.No ${duplicateRow + 1}. Increase the Qty on that line instead of adding the product again.`);
+        return;
+      }
+    }
     if (resetsAttr) {
       this.lineAttrValueMap.update(map => {
         const next = { ...map };
@@ -13390,7 +13533,51 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (!productName) return 'Every Sales Invoice line needs a Product selected.';
       if ((Number(item?.qty) || 0) <= 0) return `"${productName}": Qty must be greater than zero.`;
     }
+    // The same product (same variant/attribute) on two lines duplicates the
+    // invoice line — it must be one line with the combined Qty. Lines tied to
+    // different DC / SO lines stay separate (each settles its own reference).
+    const seen = new Map<string, number>();
+    for (const item of items) {
+      const key = this.salesInvoiceDuplicateLineKey(item);
+      const firstSno = seen.get(key);
+      if (firstSno !== undefined) {
+        const productName = String(item?.product_name || '').trim();
+        return `"${productName}" is added more than once (S.No ${firstSno} and ${item?.sno}). Remove the duplicate line and increase the Qty on S.No ${firstSno} instead.`;
+      }
+      seen.set(key, Number(item?.sno) || 0);
+    }
     return '';
+  }
+
+  private salesInvoiceDuplicateLineKey(item: any): string {
+    const norm = (v: any) => String(v ?? '').trim().toLowerCase();
+    return [
+      item?.product_id ?? norm(item?.product_name),
+      item?.variant_id ?? norm(item?.variant_name),
+      norm(item?.attribute_value),
+      item?.dc_item_id ?? '',
+      item?.so_item_id ?? ''
+    ].join('|');
+  }
+
+  // Pick-time half of the duplicate check above: choosing a product that is
+  // already on another Sales Invoice line is refused straight away. Products
+  // with variants are left to the save-time check, since two lines of the
+  // same product with different variants are legitimate.
+  private salesInvoiceDuplicateProductRow(rowIndex: number, columnIndex: number, value: any): number {
+    if (this.config?.key !== 'salesInvoice') return -1;
+    const text = String(value ?? '').trim();
+    if (!text) return -1;
+    const product = this.findProductBySelection(text);
+    if (!product) return -1;
+    if ((this.productVariantOptionObjects(product) || []).length) return -1;
+    const refMap = this.lineRefItemIdMap();
+    return this.entryLineRows().findIndex((row, index) => {
+      if (index === rowIndex) return false;
+      if (refMap[index]?.dcItemId || refMap[index]?.soItemId) return false;
+      const other = this.findProductBySelection(String(row?.[columnIndex] ?? '').trim());
+      return !!other && other.id === product.id;
+    });
   }
 
   private isInwardStockControlQtyColumn(column: string): boolean {
@@ -25523,6 +25710,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
 
     if (!hasValue(payload['product_name'])) return 'Product / Service Name is required.';
+    const duplicateName = this.productNameDuplicateOf(payload['product_name']);
+    if (duplicateName) return `Product / Service Name "${duplicateName}" already exists. Please enter a different name.`;
+    const duplicateCode = this.productCodeDuplicateOf(payload['product_code']);
+    if (duplicateCode) return `Product / Service Code "${duplicateCode}" already exists. Please enter a different code.`;
     if (!hasValue(payload['category_name']) && !hasValue(payload['category_id'])) return 'Product Category is mandatory.';
     if (!hasValue(payload['base_uom_name']) && !hasValue(payload['base_uom_id'])) return 'Base UOM is mandatory.';
     if (!hasValue(payload['hsn_sac_code']) && !hasValue(payload['hsn_sac_id'])) return 'HSN/SAC tax classification is mandatory.';

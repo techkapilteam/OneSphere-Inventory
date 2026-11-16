@@ -2639,8 +2639,15 @@ export class InventoryTransactionsService {
    * closing it leaves no gap. The saved document is the authority: if someone
    * else saves first, the server hands this one the next free number instead.
    */
-  peekNextDocNumber(docType: string): Observable<ApiResponse<string | null>> {
-    const params = new HttpParams().set('docType', docType);
+  peekNextDocNumber(
+    docType: string,
+    location?: { branchId: number | null; warehouseId: number | null }
+  ): Observable<ApiResponse<string | null>> {
+    let params = new HttpParams().set('docType', docType);
+    // Sales Invoice numbers carry the branch code (INV-CP-00001/26-27), so
+    // the preview needs the Branch / Warehouse picked on the screen.
+    if (location?.branchId) params = params.set('branchId', String(location.branchId));
+    if (location?.warehouseId) params = params.set('warehouseId', String(location.warehouseId));
     return this.http.get<ApiResponse<string | null>>(
       this.url('next-doc-number'), { headers: this.headers(), params });
   }

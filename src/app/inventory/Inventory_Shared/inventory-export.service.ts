@@ -80,6 +80,10 @@ export interface InventoryExportDocument {
   boldColumns?: number[];
   /** PDF only: signature captions, e.g. (Approved By), in bold (Vendor Payment). */
   boldSignatures?: boolean;
+  /** PDF only: per body row, one '\n'-separated line of that row's cell in
+   *  `column` printed bold while the rest of the cell stays normal — e.g. the
+   *  "(serial nos)" line under the product name (Purchase / Sales Invoice). */
+  boldCellSegments?: { column: number; byRow: Array<string | undefined> };
 }
 
 const HEADER_COLOR = '#0b4093';
@@ -96,8 +100,42 @@ const TERMS_LINE_HEIGHT = 3.6;
 /** Text/spacing scales tried in turn for a fitOnePage document. */
 const ONE_PAGE_SCALES = [1, 0.92, 0.85, 0.78, 0.7, 0.62];
 const BANK_BOX_HEIGHT = 58;
-const SIGNATURE_ROW_HEIGHT = 32;
+// Previous: 32 — too little room to sign; taller box gives space for the
+// Authorised Signatory signature and the Common Seal.
+const SIGNATURE_ROW_HEIGHT = 45;
 const NUMERIC_CELL =/^-?(rs\.?\s*|₹\s*)?-?[\d,]+(\.\d+)?\s*%?$/i;
+
+// No "Rs." / ₹ in any Inventory PDF, Print or Excel (user request 2026-11-14);
+// screens keep it. Header suffixes like "Amount (Rs.)" / "(₹)" / "(in Rs.)"
+// go, and an "Rs." / "₹" directly in front of an amount goes. "Rupees … Only"
+// (amount in words) is left as is.
+const RUPEE_SUFFIX = /\s*\(\s*(?:in\s+)?(?:Rs\.?|₹|INR)\s*\)/gi;
+const RUPEE_SYMBOL = /₹\s*/g;
+const RUPEE_PREFIX = /\bRs\.?\s*(?=[-+(]?\s*\d)/gi;
+function stripRupee(value: string): string {
+  if (!value) return value;
+  return value.replace(RUPEE_SUFFIX, '').replace(RUPEE_SYMBOL, '').replace(RUPEE_PREFIX, '');
+}
+function stripRupeeDocument(doc: InventoryExportDocument): InventoryExportDocument {
+  const s = (v: any) => (typeof v === 'string' ? stripRupee(v) : v);
+  const pairs = (list?: Array<[string, string]>) => list?.map(([label, value]) => [s(label), s(value)] as [string, string]);
+  return {
+    ...doc,
+    title: s(doc.title),
+    columns: (doc.columns || []).map(s),
+    rows: (doc.rows || []).map(row => (row || []).map(s)),
+    fields: pairs(doc.fields),
+    summary: pairs(doc.summary),
+    notes: s(doc.notes),
+    totalRow: doc.totalRow?.map(s),
+    columnGroups: doc.columnGroups?.map(([title, span]) => [s(title), span] as [string, number]),
+    periodText: s(doc.periodText),
+    bankDetails: pairs(doc.bankDetails),
+    boldCellSegments: doc.boldCellSegments
+      ? { ...doc.boldCellSegments, byRow: doc.boldCellSegments.byRow.map(s) }
+      : undefined
+  };
+}
 
 @Injectable({ providedIn: 'root' })
 export class InventoryExportService {
@@ -109,6 +147,7 @@ export class InventoryExportService {
   // If the browser blocks the new tab, the PDF is downloaded instead.
   // Previous: pdf(document: InventoryExportDocument, mode: 'Pdf' | 'Print'): void {
   pdf(document: InventoryExportDocument, mode: 'Pdf' | 'Print' | 'Open'): void {
+    document = stripRupeeDocument(document);
     // Previous: const doc = this.buildPdf(document);
     const doc = this.buildPdfFitted(document);
     if (mode === 'Open') {
@@ -123,6 +162,7 @@ export class InventoryExportService {
   }
 
   excel(document: InventoryExportDocument): void {
+    document = stripRupeeDocument(document);
     // Single documents (invoice, challan, voucher …) get the same layout as
     // their PDF; plain grids keep the Accounts list-export layout below.
     if (this.filledFields(document).length || document.summary?.length) {
@@ -678,6 +718,48 @@ export class InventoryExportService {
           data.cell.styles.fillColor = [230, 238, 250];
         }
       },
+      // Bold segment inside a normal cell (serial nos under the product name):
+      // autotable draws one font per cell, so the segment's wrapped lines are
+      // blanked here (keeping every other line in place) and drawn bold below.
+      willDrawCell: (data: any) => {
+        const segment = this.boldSegmentFor(document, data);
+        if (!segment) return;
+        const lines: string[] = Array.isArray(data.cell.text) ? data.cell.text : [String(data.cell.text ?? '')];
+        const range = this.segmentLineRange(lines, segment);
+        if (!range) return;
+        data.cell.__boldLines = { lines: [...lines], from: range[0], to: range[1] };
+        data.cell.text = lines.map((line, i) => (i >= range[0] && i <= range[1] ? '' : line));
+      },
+      didDrawCell: (data: any) => {
+        const bold = data.cell.__boldLines;
+        if (!bold) return;
+        const cell = data.cell;
+        const k = doc.internal.scaleFactor;
+        const fontPt = Number(cell.styles.fontSize) || 8;
+        const fontSize = fontPt / k;
+        const lineHeight = fontSize * (doc.getLineHeightFactor ? doc.getLineHeightFactor() : 1.15);
+        const textPos = cell.getTextPos();
+        // Same first-line position autotable's own text drawing uses.
+        let top = textPos.y + fontSize * (2 - 1.15);
+        if (cell.styles.valign === 'middle') top -= (bold.lines.length / 2) * lineHeight;
+        else if (cell.styles.valign === 'bottom') top -= bold.lines.length * lineHeight;
+        const available = cell.width - cell.padding('left') - cell.padding('right');
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(0);
+        for (let i = bold.from; i <= bold.to; i++) {
+          const line = String(bold.lines[i] ?? '');
+          if (!line) continue;
+          // Bold is wider than the normal text the line was wrapped for; shrink
+          // that line just enough to stay inside the cell.
+          doc.setFontSize(fontPt);
+          const width = doc.getTextWidth(line);
+          if (width > available && width > 0) doc.setFontSize(fontPt * available / width);
+          doc.text(line, textPos.x, top + i * lineHeight);
+        }
+        doc.setFontSize(fontPt);
+        doc.setFont('helvetica', 'normal');
+        delete cell.__boldLines;
+      },
       rowPageBreak: 'avoid',
       showHead: 'everyPage'
     });
@@ -866,6 +948,30 @@ export class InventoryExportService {
       doc.text(`Page ${page} of ${totalPages}`, pageWidth - R_MARGIN, pageHeight - 5, { align: 'right' });
     }
     return doc;
+  }
+
+  /** The bold segment (boldCellSegments) for this body cell, if any. */
+  private boldSegmentFor(document: InventoryExportDocument, data: any): string {
+    const spec = document.boldCellSegments;
+    if (!spec || data.section !== 'body' || data.column.index !== spec.column) return '';
+    if (data.row.index >= document.rows.length) return '';
+    return String(spec.byRow[data.row.index] ?? '').trim();
+  }
+
+  /** First..last index of the wrapped cell lines that make up `segment`
+   *  (whitespace ignored, since wrapping drops the spaces it breaks on). */
+  private segmentLineRange(lines: string[], segment: string): [number, number] | null {
+    const target = segment.replace(/\s+/g, '');
+    if (!target) return null;
+    for (let from = 0; from < lines.length; from++) {
+      let joined = '';
+      for (let to = from; to < lines.length; to++) {
+        joined += String(lines[to] ?? '').replace(/\s+/g, '');
+        if (joined === target) return [from, to];
+        if (!target.startsWith(joined)) break;
+      }
+    }
+    return null;
   }
 
   // Two header rows for a grouped grid: a group spanning several columns
