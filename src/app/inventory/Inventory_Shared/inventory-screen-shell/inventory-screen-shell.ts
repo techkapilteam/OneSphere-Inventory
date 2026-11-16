@@ -11585,6 +11585,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   lineGridCellReadonly(rowIndex: number, row: string[], column: string): boolean {
+    // Sales Invoice: Amount is always calculated from Qty x Rate (- Disc + GST);
+    // the user can change Qty and Rate, never the Amount itself.
+    if (this.config?.key === 'salesInvoice' && this.compactKey(column) === 'amount') {
+      return true;
+    }
     // 259: Purchase Return may return part of the invoice - Return Qty stays editable
     // (any quantity up to what is still returnable; the server enforces the limit).
     if ((this.config?.key === 'salesInvoice' || this.config?.key === 'deliveryChallan') && this.normalizeKey(column) === 'warehouse') {
