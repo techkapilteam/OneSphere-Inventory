@@ -25436,9 +25436,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // Mirrors the server-side guard in UpsertProductAsync (migration 236) so
     // the user sees this immediately instead of after a round trip — the
     // backend still enforces it regardless of whether this check ever runs.
-    if (this.config?.key === 'productServiceMaster' && this.editingId() !== null && this.isCurrentProductLocked()) {
-      return 'This product has already been used in a posted transaction and can no longer be edited. Deactivate it and create a new product instead.';
-    }
+    // Previous: a locked product could not be saved at all.
+    // if (this.config?.key === 'productServiceMaster' && this.editingId() !== null && this.isCurrentProductLocked()) {
+    //   return 'This product has already been used in a posted transaction and can no longer be edited. Deactivate it and create a new product instead.';
+    // }
+    // Now only Basic Product Details is locked (template fieldset); the API
+    // keeps those fields from the DB and saves Tax Details onward.
 
     // PAN format (Vendor / Customer / Channel Partner / Contact masters).
     const panMessage = this.panValidationMessage(payload['pan']);

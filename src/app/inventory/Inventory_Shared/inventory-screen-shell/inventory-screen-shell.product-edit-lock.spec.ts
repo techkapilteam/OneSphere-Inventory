@@ -76,7 +76,9 @@ describe('InventoryScreenShell — Product Master edit-lock after stock movement
     expect(component.isCurrentProductLocked()).toBe(false);
   });
 
-  it('validatePayload() refuses to save a locked product, mirroring the server-side 409', () => {
+  // 2026-11-17: a locked product may now be saved -- only Basic Product
+  // Details is locked; the API keeps those fields from the DB.
+  it('validatePayload() no longer refuses a locked product outright', () => {
     component.savedRecordObjects.set([{
       id: 103, product_code: 'ROO-26-00001', product_name: 'Rooftop Panels',
       locked_for_edit: true, status: 'active'
@@ -85,7 +87,7 @@ describe('InventoryScreenShell — Product Master edit-lock after stock movement
 
     const message = (component as any).validatePayload({});
 
-    expect(message).toContain('already been used in a posted transaction');
+    expect(message).not.toContain('already been used in a posted transaction');
   });
 
   it('validatePayload() does not block a brand-new (never-saved) product even though editingId starts unset', () => {
