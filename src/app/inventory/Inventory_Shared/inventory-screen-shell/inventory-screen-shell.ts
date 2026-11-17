@@ -8916,7 +8916,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Square box around Bill To Address and Ship To Address (only these two).
       boxedFieldLabels: ['Bill To Address', 'Ship To Address'],
       // Wider TOTAL column (last) so amounts like 29,145.86 never crowd/wrap.
-      pdfColumnWidths: rows.length ? { [exportColumns.length - 1]: 24 } : undefined,
+      // Previous: { [exportColumns.length - 1]: 24 } — Qty (index 3) also widened
+      // so 3-digit quantities (100, 200) don't touch the cell border.
+      pdfColumnWidths: rows.length ? { 3: 12, [exportColumns.length - 1]: 24 } : undefined,
       boldCellSegments: rows.length ? this.documentSerialSegments(record) : undefined,
       fileName: `Sales_Invoice_${docNo || 'Selected_Record'}`
     };
