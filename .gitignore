@@ -61,6 +61,11 @@ STYLING_MIGRATION_COMPLETE.md
 # Diagram / documentation exports (generated files)
 *.drawio
 
+# Inventory walkthrough video — too large for git (GitHub rejects >100 MB).
+# Lives on the server at <inventory-site>/public/guide-videos/inventory-guide.mp4;
+# keep a local copy here only for testing.
+/public/guide-videos/
+
 # Temporary / editor backup files
 *.tmp
 *.bak

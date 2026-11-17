@@ -39,6 +39,17 @@ export interface InventoryExportDocument {
   /** PDF only: shrink text and spacing step by step until the whole document
    *  fits on one page (Sales Invoice). */
   fitOnePage?: boolean;
+  /** PDF only, with fitOnePage: largest text/spacing scale tried (default 1).
+   *  When set, scales step down in fine 2% steps from here, so the document
+   *  prints at the largest size that fits one page (Sales Invoice uses 1). */
+  pdfMaxScale?: number;
+  /** PDF only, with fitOnePage: the items grid never shrinks (Sales Invoice);
+   *  only the header, totals, terms and bank box shrink to fit one page. */
+  pdfFixedGridScale?: boolean;
+  /** PDF only: header fields (by label) whose VALUE prints bold (Sales Invoice: Customer, GSTIN No). */
+  boldFieldLabels?: string[];
+  /** PDF only: header fields (by label) drawn inside a box, label + value (Sales Invoice: Bill To / Ship To Address). */
+  boxedFieldLabels?: string[];
   /** Copy type printed at the top right, on the title line (Sales Invoice),
    *  e.g. "Original for Recipient" / "Duplicate for Recipient". */
   copyType?: string;
@@ -318,6 +329,8 @@ export class InventoryExportService {
         row.getCell(labelCol).font = { bold: true };
         row.getCell(labelCol + 1).value = pair[1];
         row.getCell(labelCol + 1).alignment = { wrapText: true, vertical: 'top' };
+        // Same bold values as the PDF (Sales Invoice: Customer, GSTIN No).
+        if (document.boldFieldLabels?.includes(pair[0])) row.getCell(labelCol + 1).font = { bold: true };
         mergeRow(row.number, labelCol + 1, lastCol);
         // Excel never auto-grows a merged cell's row, so size it for the
         // wrapped value (e.g. a full customer address) or it shows one line.
@@ -517,11 +530,43 @@ export class InventoryExportService {
   private buildPdfFitted(document: InventoryExportDocument): jsPDF {
     if (!document.fitOnePage) return this.buildPdf(document);
     let doc!: jsPDF;
+    // Sales Invoice (2026-11-17): nothing shrinks any more — header, grid,
+    // totals, terms and bank box always print at full size (like INV-CP-00017);
+    // a long invoice simply runs onto a 2nd / 3rd page.
+    if (document.pdfFixedGridScale) {
+      try {
+        this.pdfScale = document.pdfMaxScale || 1;
+        return this.buildPdf(document);
+      } finally {
+        this.pdfScale = 1;
+      }
+    }
     try {
-      for (const scale of ONE_PAGE_SCALES) {
+      // Previous: for (const scale of ONE_PAGE_SCALES) {
+      // Previous: const scales = ONE_PAGE_SCALES.filter(scale => scale <= maxScale + 1e-9);
+      //           if (!scales.length || scales[0] < maxScale - 1e-9) scales.unshift(maxScale);
+      // A document that sets pdfMaxScale (Sales Invoice) steps down in fine
+      // 2% steps, so it prints at the largest size that still fits one page
+      // instead of jumping 0.92 -> 0.85 and leaving the page bottom empty.
+      const maxScale = document.pdfMaxScale || 1;
+      const minScale = ONE_PAGE_SCALES[ONE_PAGE_SCALES.length - 1];
+      const scales: number[] = [];
+      if (document.pdfMaxScale) {
+        for (let scale = maxScale; scale >= minScale - 1e-9; scale -= 0.02) scales.push(Math.round(scale * 100) / 100);
+      } else {
+        scales.push(...ONE_PAGE_SCALES);
+      }
+      let fitted = false;
+      for (const scale of scales) {
         this.pdfScale = scale;
         doc = this.buildPdf(document);
-        if (doc.getNumberOfPages() === 1) break;
+        if (doc.getNumberOfPages() === 1) { fitted = true; break; }
+      }
+      // Grid kept at full size (Sales Invoice) and still too long for one
+      // page: print everything at full size across pages instead of tiny text.
+      if (!fitted && document.pdfFixedGridScale) {
+        this.pdfScale = maxScale;
+        doc = this.buildPdf(document);
       }
     } finally {
       this.pdfScale = 1;
@@ -648,6 +693,27 @@ export class InventoryExportService {
           1: { cellWidth: valueWidth },
           2: { fontStyle: 'bold', cellWidth: 38 },
           3: { cellWidth: valueWidth }
+        },
+        // Values of the listed labels (e.g. Customer, GSTIN No) print bold.
+        didParseCell: data => {
+          const bold = document.boldFieldLabels;
+          if (!bold?.length || (data.column.index !== 1 && data.column.index !== 3)) return;
+          const label = String((data.row.raw as string[])[data.column.index - 1] || '').replace(/\s*:\s*$/, '').trim();
+          if (bold.includes(label)) data.cell.styles.fontStyle = 'bold';
+        },
+        // Listed fields (Sales Invoice: Bill To / Ship To Address) get a square
+        // box around their label + value, each pair its own box.
+        didDrawCell: data => {
+          const boxed = document.boxedFieldLabels;
+          if (!boxed?.length || data.section !== 'body' || (data.column.index !== 1 && data.column.index !== 3)) return;
+          const label = String((data.row.raw as string[])[data.column.index - 1] || '').replace(/\s*:\s*$/, '').trim();
+          if (!boxed.includes(label)) return;
+          const { x, y: cellY, width, height } = data.cell;
+          const left = x - 38 + 0.5;   // label column is 38mm wide
+          const right = x + width - 0.5;
+          doc.setDrawColor(0, 0, 0);
+          doc.setLineWidth(0.2);
+          doc.rect(left, cellY, right - left, height);
         }
       });
       y = (doc as any).lastAutoTable.finalY + 3;
@@ -666,6 +732,9 @@ export class InventoryExportService {
     });
 
     const taxGrid = !!document.columnGroups?.length;
+    // Items grid scale: always full size when pdfFixedGridScale (Sales Invoice),
+    // so a 19-line invoice's grid reads the same as a 4-line one.
+    const gs = document.pdfFixedGridScale ? 1 : s;
     const bodyRows: any[][] = document.rows.map(row => document.columns.map((_, index) => String(row[index] ?? '').replace(/₹/g, '').trim()));
     if (document.totalRow) {
       const span = this.totalRowSpan(document.totalRow, document.columns.length);
@@ -689,11 +758,11 @@ export class InventoryExportService {
       margin: { left: L_MARGIN, right: R_MARGIN, top: 15, bottom: 15 },
       // Previous: headStyles: { fillColor: HEADER_COLOR, textColor: 255, halign: 'center', valign: 'middle', fontSize: document.pdfHeadFontSize || 10 },
       headStyles: taxGrid
-        ? { fillColor: 255, textColor: 0, fontStyle: 'bold', halign: 'center', valign: 'middle', fontSize: (document.pdfHeadFontSize || 8) * s, cellPadding: 0.8 * s, lineColor: 0, lineWidth: 0.2 }
+        ? { fillColor: 255, textColor: 0, fontStyle: 'bold', halign: 'center', valign: 'middle', fontSize: (document.pdfHeadFontSize || 8) * gs, cellPadding: 0.8 * gs, lineColor: 0, lineWidth: 0.2 }
         : { fillColor: HEADER_COLOR, textColor: 255, halign: 'center', valign: 'middle', fontSize: document.pdfHeadFontSize || 10 },
       // Previous: styles: { fontSize: 8, cellPadding: 0.8, overflow: 'linebreak', valign: 'middle' } as any,
       styles: taxGrid
-        ? { fontSize: 7.5 * s, cellPadding: 0.8 * s, overflow: 'linebreak', valign: 'top', lineColor: 0, lineWidth: 0.2, textColor: 0 } as any
+        ? { fontSize: 7.5 * gs, cellPadding: 0.8 * gs, overflow: 'linebreak', valign: 'top', lineColor: 0, lineWidth: 0.2, textColor: 0 } as any
         : { fontSize: 8, cellPadding: 0.8, overflow: 'linebreak', valign: 'middle' } as any,
       columnStyles,
       didParseCell: (data: any) => {
@@ -710,7 +779,7 @@ export class InventoryExportService {
         }
         if (document.totalRow && data.section === 'body' && data.row.index === bodyRows.length - 1) {
           data.cell.styles.fontStyle = 'bold';
-          data.cell.styles.fontSize = 8.5 * s;
+          data.cell.styles.fontSize = 8.5 * gs;
         }
         // Group headers / subtotals (report "Group by"): bold, shaded.
         if (data.section === 'body' && (document.groupRowIndexes || []).includes(data.row.index)) {
@@ -1086,10 +1155,12 @@ export class InventoryExportService {
       y = 15;
     }
     const company = String(this.companyDetails()?.companyName || '').trim();
+    // Previous: a blank 2% middle column, which printed as a double line
+    // between Bank Details and Certified; now one single divider.
     const body = [
-      ['Bank Details :', '', 'Certified that the particulars given above are true and correct'],
-      ...bankDetails.map(([label, value], index) => [`${label} : ${value}`, '', index === 0 && company ? `For  ${company}` : '']),
-      ['', '', 'Authorised Signatory']
+      ['Bank Details :', 'Certified that the particulars given above are true and correct'],
+      ...bankDetails.map(([label, value], index) => [`${label} : ${value}`, index === 0 && company ? `For  ${company}` : '']),
+      ['', 'Authorised Signatory']
     ];
     const lastRow = body.length - 1;
     // Where the table really starts: if it still moves to a new page, the
@@ -1097,7 +1168,8 @@ export class InventoryExportService {
     let boxTop = y;
     // Previous: [0.36, 0.2, 0.44] — "Account Name : <company>" wrapped onto two
     // lines; the blank middle column gives up its width so it stays on one.
-    const widths = [width * 0.54, width * 0.02, width * 0.44];
+    // Previous: [width * 0.54, width * 0.02, width * 0.44] (blank middle column).
+    const widths = [width * 0.56, width * 0.44];
     autoTable(doc, {
       body,
       theme: 'plain',
@@ -1107,15 +1179,15 @@ export class InventoryExportService {
       pageBreak: 'avoid',
       // Previous: styles: { fontSize: 9, fontStyle: 'bold', cellPadding: { top: 1.5, bottom: 1.5, left: 2, right: 2 }, overflow: 'linebreak' },
       styles: { fontSize: 9 * s, fontStyle: 'bold', cellPadding: { top: 1.2 * s, bottom: 1.2 * s, left: 2, right: 2 }, overflow: 'linebreak' },
-      columnStyles: { 0: { cellWidth: widths[0] }, 1: { cellWidth: widths[1] }, 2: { cellWidth: widths[2] } },
+      columnStyles: { 0: { cellWidth: widths[0] }, 1: { cellWidth: widths[1] } },
       didParseCell: data => {
         if (data.row.index === 0 && data.column.index === 0) data.cell.styles.fontSize = 10 * s;
-        if (data.row.index === 0 && data.column.index === 2) data.cell.styles.fontSize = 8 * s;
-        if (data.row.index === 1 && data.column.index === 2) data.cell.styles.fontSize = 11 * s;
+        if (data.row.index === 0 && data.column.index === 1) data.cell.styles.fontSize = 8 * s;
+        if (data.row.index === 1 && data.column.index === 1) data.cell.styles.fontSize = 11 * s;
         if (data.row.index === lastRow) {
           data.cell.styles.minCellHeight = 14 * s;
           data.cell.styles.valign = 'bottom';
-          if (data.column.index === 2) {
+          if (data.column.index === 1) {
             data.cell.styles.halign = 'center';
             data.cell.styles.fontSize = 10 * s;
           }
@@ -1127,9 +1199,9 @@ export class InventoryExportService {
         doc.setDrawColor(0, 0, 0);
         doc.setLineWidth(0.2);
         // Rule under "Certified …" and above "Authorised Signatory".
-        if (data.row.index === 0 && data.column.index === 2) doc.line(x, cellY + height, x + cellWidth, cellY + height);
+        if (data.row.index === 0 && data.column.index === 1) doc.line(x, cellY + height, x + cellWidth, cellY + height);
         // Previous: rule at height - 7.
-        if (data.row.index === lastRow && data.column.index > 0) doc.line(x, cellY + height - 7 * s, x + cellWidth, cellY + height - 7 * s);
+        if (data.row.index === lastRow && data.column.index === 1) doc.line(x, cellY + height - 7 * s, x + cellWidth, cellY + height - 7 * s);
       }
     });
     const end = (doc as any).lastAutoTable.finalY;
@@ -1138,7 +1210,7 @@ export class InventoryExportService {
     // Previous: drawn from y, which was the old page's position after a break.
     doc.rect(L_MARGIN, boxTop, width, end - boxTop);
     doc.line(L_MARGIN + widths[0], boxTop, L_MARGIN + widths[0], end);
-    doc.line(L_MARGIN + widths[0] + widths[1], boxTop, L_MARGIN + widths[0] + widths[1], end);
+    // Previous: second divider at widths[0] + widths[1] (the double line).
   }
 
     // Point 7: one bordered block joined directly under the items table:

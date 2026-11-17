@@ -309,6 +309,10 @@
     <div class="inv-modal-head">
       <h3>{{ modal.title }}</h3>
       <div class="inv-modal-actions">
+        <div class="inv-modal-search">
+          <i class="pi pi-search"></i>
+          <input type="text" placeholder="Search..." [value]="modalSearch()" (input)="onModalSearch($event)" />
+        </div>
         <button type="button" title="Export CSV" (click)="exportModalCsv()"><i class="pi pi-file-excel"></i></button>
         <button type="button" title="Close" (click)="closeModal()"><i class="pi pi-times"></i></button>
       </div>
@@ -321,12 +325,12 @@
           </tr>
         </thead>
         <tbody>
-          @for (row of modal.rows; track $index) {
+          @for (row of modalRows(); track $index) {
             <tr>
               @for (cell of row; track $index) { <td>{{ cell }}</td> }
             </tr>
           } @empty {
-            <tr><td [attr.colspan]="modal.headers.length"><div class="inventory-grid-empty-hint">No records for this card.</div></td></tr>
+            <tr><td [attr.colspan]="modal.headers.length"><div class="inventory-grid-empty-hint">{{ modalSearch().trim() ? 'No matching records.' : 'No records for this card.' }}</div></td></tr>
           }
         </tbody>
       </table>

@@ -76,6 +76,11 @@ interface GridExportPayload {
   columnGroups?: Array<[string, number]>;
   totalRow?: string[];
   fitOnePage?: boolean;
+  pdfMaxScale?: number;
+  pdfFixedGridScale?: boolean;
+  boldFieldLabels?: string[];
+  boxedFieldLabels?: string[];
+  pdfColumnWidths?: Record<number, number>;
   copyType?: string;
   terms?: string[];
   bankDetails?: Array<[string, string]>;
@@ -6052,10 +6057,6 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return Math.max(0, this.displayFields().length - this.guideFields().length);
   }
 
-  guideVideoUrl(): string {
-    return (this.config?.guideVideoUrl || '').trim();
-  }
-
   shortText(value: string | null | undefined, maxLength = 120): string {
     const text = String(value || '').replace(/\s+/g, ' ').trim();
     if (text.length <= maxLength) return text;
@@ -8812,11 +8813,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Previous: ['Invoice Date', this.gridDateDisplay(String(record.doc_date || record.docDate || ''))],
       // Previous: ['Due Date', this.gridDateDisplay(String(record.due_date || record.dueDate || ''))],
       ['Invoice Date', this.fullYearDateDisplay(record.doc_date || record.docDate) || '-'],
-      ['Due Date', this.fullYearDateDisplay(record.due_date || record.dueDate) || '-'],
+      // Due Date removed from the PDF (user request 2026-11-16); the fields are
+      // re-paired so Bill To / Ship To and State / State Code stay side by side.
+      // Previous: ['Due Date', this.fullYearDateDisplay(record.due_date || record.dueDate) || '-'],
+      // Previous order: Customer, Customer Phone, GSTIN No, ..., SO Reference last.
       ['Customer', customerName || '-'],
-      ['Customer Phone', String(customer?.mobile || '').trim() || '-'],
-      // Previous position: after State.
       ['GSTIN No', customerGstin || '-'],
+      ['Customer Phone', String(customer?.mobile || '').trim() || '-'],
+      ['SO Reference', soReference],
       // Previous: ['Customer Address', this.partyFullAddress(customer)],
       // Delivery Address entered on the invoice (customer master address when
       // none was entered); Ship Address falls back to the delivery address.
@@ -8824,10 +8828,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Addresses print in Title Case so the address line and City / District
       // don't mix small and capital letters.
       // Previous: ['Bill To Address', deliveryAddress || '-'],
-      ['Bill To Address', toInventoryTitleCase(deliveryAddress) || '-'],
-      // Previous: ['Ship Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
-      // Previous: ['Ship To Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
-      ['Ship To Address', toInventoryTitleCase(String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress) || '-'],
+      // Previous position of Bill To / Ship To: here, before State (2026-11-17:
+      // moved to the end so the boxed addresses sit just above the grid).
       // Previous position: after GSTIN No.
       // Place of Supply not required on the print.
       // ['Place of Supply', String(record.place_of_supply || record.placeOfSupply || '').trim() || '-'],
@@ -8835,7 +8837,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['State Code', customerStateCode || '-'],
       ['Warehouse', warehouseName],
       ['Vehicle No', String(record.vehicle_no || record.vehicleNo || '')],
-      ['SO Reference', soReference]
+      // Previous: ['Ship Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
+      // Previous: ['Ship To Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
+      ['Bill To Address', toInventoryTitleCase(deliveryAddress) || '-'],
+      ['Ship To Address', toInventoryTitleCase(String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress) || '-']
+      // Previous: ['SO Reference', soReference] (moved up beside Customer Phone)
       // Payment Terms not required on the print.
       // ['Payment Terms', String(record.payment_terms || record.paymentTerms || '')]
       // Header 'Status' removed from the Sales Invoice print.
@@ -8904,6 +8910,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // The whole invoice (grid, totals, terms, bank box) prints on one page;
       // text and spacing shrink as needed for longer invoices.
       fitOnePage: true,
+      // Previous: pdfMaxScale: 0.85 — every invoice at the INV-CP-00004 size;
+      // user found that too small and prefers the full-size INV-CP-00007 look.
+      // Now: full size, stepping down 2% at a time only as far as needed to
+      // keep the invoice on one page.
+      pdfMaxScale: 1,
+      // Items grid always at the INV-CP-00007 (full) size, however many lines.
+      pdfFixedGridScale: true,
+      boldFieldLabels: ['Customer', 'GSTIN No'],
+      // Square box around Bill To Address and Ship To Address (only these two).
+      boxedFieldLabels: ['Bill To Address', 'Ship To Address'],
+      // Wider TOTAL column (last) so amounts like 29,145.86 never crowd/wrap.
+      // Previous: { [exportColumns.length - 1]: 24 } — Qty (index 3) also widened
+      // so 3-digit quantities (100, 200) don't touch the cell border.
+      pdfColumnWidths: rows.length ? { 3: 12, [exportColumns.length - 1]: 24 } : undefined,
       boldCellSegments: rows.length ? this.documentSerialSegments(record) : undefined,
       fileName: `Sales_Invoice_${docNo || 'Selected_Record'}`
     };
@@ -9252,6 +9272,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       columnGroups: payload.columnGroups,
       totalRow: payload.totalRow,
       fitOnePage: payload.fitOnePage,
+      pdfMaxScale: payload.pdfMaxScale,
+      pdfFixedGridScale: payload.pdfFixedGridScale,
+      boldFieldLabels: payload.boldFieldLabels,
+      boxedFieldLabels: payload.boxedFieldLabels,
+      pdfColumnWidths: payload.pdfColumnWidths,
       copyType: payload.copyType,
       terms: payload.terms,
       bankDetails: payload.bankDetails,
@@ -11577,6 +11602,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   lineGridCellReadonly(rowIndex: number, row: string[], column: string): boolean {
+    // Sales Invoice: Amount is always calculated from Qty x Rate (- Disc + GST);
+    // the user can change Qty and Rate, never the Amount itself.
+    if (this.config?.key === 'salesInvoice' && this.compactKey(column) === 'amount') {
+      return true;
+    }
     // 259: Purchase Return may return part of the invoice - Return Qty stays editable
     // (any quantity up to what is still returnable; the server enforces the limit).
     if ((this.config?.key === 'salesInvoice' || this.config?.key === 'deliveryChallan') && this.normalizeKey(column) === 'warehouse') {
@@ -25411,9 +25441,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // Mirrors the server-side guard in UpsertProductAsync (migration 236) so
     // the user sees this immediately instead of after a round trip — the
     // backend still enforces it regardless of whether this check ever runs.
-    if (this.config?.key === 'productServiceMaster' && this.editingId() !== null && this.isCurrentProductLocked()) {
-      return 'This product has already been used in a posted transaction and can no longer be edited. Deactivate it and create a new product instead.';
-    }
+    // Previous: a locked product could not be saved at all.
+    // if (this.config?.key === 'productServiceMaster' && this.editingId() !== null && this.isCurrentProductLocked()) {
+    //   return 'This product has already been used in a posted transaction and can no longer be edited. Deactivate it and create a new product instead.';
+    // }
+    // Now only Basic Product Details is locked (template fieldset); the API
+    // keeps those fields from the DB and saves Tax Details onward.
 
     // PAN format (Vendor / Customer / Channel Partner / Contact masters).
     const panMessage = this.panValidationMessage(payload['pan']);
