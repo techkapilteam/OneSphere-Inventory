@@ -528,6 +528,17 @@ export class InventoryExportService {
   private buildPdfFitted(document: InventoryExportDocument): jsPDF {
     if (!document.fitOnePage) return this.buildPdf(document);
     let doc!: jsPDF;
+    // Sales Invoice (2026-11-17): nothing shrinks any more — header, grid,
+    // totals, terms and bank box always print at full size (like INV-CP-00017);
+    // a long invoice simply runs onto a 2nd / 3rd page.
+    if (document.pdfFixedGridScale) {
+      try {
+        this.pdfScale = document.pdfMaxScale || 1;
+        return this.buildPdf(document);
+      } finally {
+        this.pdfScale = 1;
+      }
+    }
     try {
       // Previous: for (const scale of ONE_PAGE_SCALES) {
       // Previous: const scales = ONE_PAGE_SCALES.filter(scale => scale <= maxScale + 1e-9);
