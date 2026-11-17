@@ -1,7 +1,7 @@
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable, map } from 'rxjs';
-import { currentAccessToken } from './inventory-auth-token.util';
+import { currentAccessToken } from '../../core/host/host-bridge';
 
 export interface ApiResponse<T = any> {
   success: boolean;

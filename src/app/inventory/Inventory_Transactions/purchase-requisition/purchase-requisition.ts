@@ -10,7 +10,7 @@ import { InventoryScreenShell } from '../../Inventory_Shared/inventory-screen-sh
 import { ProductItem, BranchInvItem } from '../../Inventory_Shared/inventory-config.service';
 import { purchaseRequisitionConfig } from '../../Inventory_Shared/inventory-screen.model';
 import { InventoryQuickAddModalComponent } from '../../Inventory_Shared/inventory-quick-add-modal/inventory-quick-add-modal.component';
-import { AccessControlService, UserResponse } from '../../../core/services/Settings/access-control.service';
+import { AccessControlService, UserResponse } from '../../../core/host/host-bridge';
 
 export interface VariantAttrSelection {
   name: string;

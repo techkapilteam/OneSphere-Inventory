@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { screenPermissionGuard, reportPermissionGuard } from '../core/guards/auth.guard';
+import { screenPermissionGuard, reportPermissionGuard } from '../core/host/host-bridge';
 
 export const inventoryRoutes: Routes = [
   {

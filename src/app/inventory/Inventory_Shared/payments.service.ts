@@ -2,7 +2,7 @@ import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable, catchError, forkJoin, map, of } from 'rxjs';
 import { ApiResponse } from './inventory-config.service';
-import { currentAccessToken } from './inventory-auth-token.util';
+import { currentAccessToken } from '../../core/host/host-bridge';
 
 export interface OutstandingInvoice {
   invoice_type: 'purchase_invoice' | 'sales_invoice';

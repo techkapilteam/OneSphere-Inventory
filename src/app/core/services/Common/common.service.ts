@@ -19,7 +19,7 @@ import { AbstractControl } from '@angular/forms';
 import { DatePipe } from '@angular/common';
 import { environment } from '../../../../envir/environment';
 import { PageCriteria } from '../../models/pagecriteria';
-import { currentAccessToken } from '../../../inventory/Inventory_Shared/inventory-auth-token.util';
+import { currentAccessToken } from '../../host/host-bridge';
 
 
 

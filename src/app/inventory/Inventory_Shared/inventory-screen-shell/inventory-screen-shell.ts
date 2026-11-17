@@ -10,6 +10,7 @@ import { Observable, Subject, catchError, concatMap, debounceTime, distinctUntil
 import { ApiResponse, AttributeItem, BomItem, BomLineItem, PriceListItem, WorkCenterItem, AttributeValueItem, BranchInvItem, CategoryItem, ChannelPartnerItem, ContactItem, CustomerItem, GstRateGuide, HsnSacItem, InventoryConfigService, PaymentTermItem, ProductApplicableVariant, ProductBundleItem, ProductItem, ProductTypeItem, ProductUomConversion, ProductVariantStockAttribute, ProductVariantStockControl, SegmentItem, SerialPolicyItem, TaxCodeSuggestion, UomItem, VariantCombinationRow, VariantItem, VendorItem, WarehouseItem } from '../inventory-config.service';
 import { AvailableStock, InventoryTransactionsService, PurchaseRefDoc, ServiceBundleConsumption, TransportDetails } from '../inventory-transactions.service';
 import { applyInventoryTextCase, inventoryTextCaseForField, inventoryTextCaseForLineColumn, toInventoryTitleCase } from '../inventory-text-case.util';
+import { isCompanyAdmin } from '../../../core/host/host-bridge';
 import {
   INVENTORY_KPIS,
   INVENTORY_OPTIONS,
@@ -1504,17 +1505,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   ngOnInit(): void {
-    const token = sessionStorage.getItem('token') || sessionStorage.getItem('jwt') || sessionStorage.getItem('access_token') || localStorage.getItem('token') || '';
-    if (token) {
-      try {
-        const jwtPayload = JSON.parse(atob(token.split('.')[1]));
-        const role: any = jwtPayload?.role || jwtPayload?.roles || jwtPayload?.userRole || '';
-        const roleStr = Array.isArray(role) ? role.join(',') : String(role);
-        this.isAdmin.set(roleStr.toLowerCase().includes('admin'));
-      } catch { this.isAdmin.set(true); }
-    } else {
-      this.isAdmin.set(true); // dev fallback — no token means dev mode
-    }
+    // Admin = Company Admin (or Super Admin), decided by OneSphere-Accounts.
+    // This used to decode a token from sessionStorage, but inside the shell the
+    // token lives only in memory, so it always fell back to "admin" for everyone.
+    this.isAdmin.set(isCompanyAdmin());
     // Item 26: must run before directEntryLineRows() below (and before the
     // rest of ngOnInit touches formValues/entryLineRows) — it restores a
     // snapshot taken just before this same GRN/PI in-progress document was
