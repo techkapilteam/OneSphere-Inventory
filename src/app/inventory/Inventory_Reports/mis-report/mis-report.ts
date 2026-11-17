@@ -3,7 +3,7 @@ import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { AuthService } from '../../../core/services/auth.service';
+import { AuthService } from '../../../core/host/host-bridge';
 import { StatCardComponent } from '../../Inventory_Shared/stat-card/stat-card.component';
 import { BarChartComponent, ChartSeries } from '../../Inventory_Shared/charts/bar-chart.component';
 import { DonutChartComponent, DonutSlice } from '../../Inventory_Shared/charts/donut-chart.component';

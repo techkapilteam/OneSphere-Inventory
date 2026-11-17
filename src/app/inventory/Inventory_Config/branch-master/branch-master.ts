@@ -6,10 +6,10 @@ import { NgSelectModule } from '@ng-select/ng-select';
 import { catchError, forkJoin, of } from 'rxjs';
 import {
   AccessControlService, BranchResponse
-} from '../../../core/services/Settings/access-control.service';
+} from '../../../core/host/host-bridge';
 import {
   SubscriptionPlan, SubscriptionService
-} from '../../../core/services/subscription/subscription.service';
+} from '../../../core/host/host-bridge';
 import {
   BranchInvItem, InventoryConfigService, SegmentItem
 } from '../../Inventory_Shared/inventory-config.service';

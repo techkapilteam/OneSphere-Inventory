@@ -6,6 +6,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Observable } from 'rxjs';
 import { NgSelectModule } from '@ng-select/ng-select';
 import { DatePickerModule } from 'primeng/datepicker';
+import { isCompanyAdmin } from '../../../core/host/host-bridge';
 import {
   INVENTORY_COMMON_REPORT_FILTERS,
   INVENTORY_REPORT_PRIMARY_FILTERS,
@@ -103,8 +104,6 @@ export class InventoryReportPageComponent implements OnInit {
   }
 
   private readReportLocationScope(): ReportLocationScope {
-    const user = this.readStorageObject<{ isSuperAdmin?: boolean }>('authUser', {});
-    const roles = this.readStorageObject<Array<{ roleType?: string }>>('authRoles', []);
     const companyDetails = this.readStorageObject<{ branchName?: string }>('CompanyDetails', {});
     const branches = this.readStorageObject<Array<{ id?: number; branchName?: string }>>('authBranches', []);
     const branchId = this.positiveNumber(sessionStorage.getItem('branchId'));
@@ -114,8 +113,7 @@ export class InventoryReportPageComponent implements OnInit {
       '';
 
     return {
-      isCompanyAdmin: user.isSuperAdmin === true ||
-        roles.some(role => String(role.roleType ?? '').toLowerCase() === 'company_admin'),
+      isCompanyAdmin: isCompanyAdmin(),
       branchId,
       branchName,
       warehouseId,

@@ -15,6 +15,7 @@ import { rupeesInWords } from '../inventory-amount-in-words';
 import { InvoiceBankDetails, PaymentsService } from '../payments.service';
 import { CommonService } from '../../../core/services/Common/common.service';
 import { attachInventorySaveToast } from '../inventory-save-toast/inventory-save-toast.component';
+import { isCompanyAdmin } from '../../../core/host/host-bridge';
 import {
   INVENTORY_KPIS,
   INVENTORY_OPTIONS,
@@ -1832,6 +1833,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (this.config?.key === 'salesInvoice' || this.config?.key === 'salesReturn') {
       this.loadGstStateCodes();
     }
+    // Admin = Company Admin (or Super Admin), decided by OneSphere-Accounts.
+    // This used to decode a token from sessionStorage, but inside the shell the
+    // token lives only in memory, so it always fell back to "admin" for everyone.
+    this.isAdmin.set(isCompanyAdmin());
     // Item 26: must run before directEntryLineRows() below (and before the
     // rest of ngOnInit touches formValues/entryLineRows) — it restores a
     // snapshot taken just before this same GRN/PI in-progress document was
