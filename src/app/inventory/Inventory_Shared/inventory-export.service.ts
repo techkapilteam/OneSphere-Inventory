@@ -48,6 +48,8 @@ export interface InventoryExportDocument {
   pdfFixedGridScale?: boolean;
   /** PDF only: header fields (by label) whose VALUE prints bold (Sales Invoice: Customer, GSTIN No). */
   boldFieldLabels?: string[];
+  /** PDF only: header fields (by label) drawn inside a box, label + value (Sales Invoice: Bill To / Ship To Address). */
+  boxedFieldLabels?: string[];
   /** Copy type printed at the top right, on the title line (Sales Invoice),
    *  e.g. "Original for Recipient" / "Duplicate for Recipient". */
   copyType?: string;
@@ -698,6 +700,20 @@ export class InventoryExportService {
           if (!bold?.length || (data.column.index !== 1 && data.column.index !== 3)) return;
           const label = String((data.row.raw as string[])[data.column.index - 1] || '').replace(/\s*:\s*$/, '').trim();
           if (bold.includes(label)) data.cell.styles.fontStyle = 'bold';
+        },
+        // Listed fields (Sales Invoice: Bill To / Ship To Address) get a square
+        // box around their label + value, each pair its own box.
+        didDrawCell: data => {
+          const boxed = document.boxedFieldLabels;
+          if (!boxed?.length || data.section !== 'body' || (data.column.index !== 1 && data.column.index !== 3)) return;
+          const label = String((data.row.raw as string[])[data.column.index - 1] || '').replace(/\s*:\s*$/, '').trim();
+          if (!boxed.includes(label)) return;
+          const { x, y: cellY, width, height } = data.cell;
+          const left = x - 38 + 0.5;   // label column is 38mm wide
+          const right = x + width - 0.5;
+          doc.setDrawColor(0, 0, 0);
+          doc.setLineWidth(0.2);
+          doc.rect(left, cellY, right - left, height);
         }
       });
       y = (doc as any).lastAutoTable.finalY + 3;

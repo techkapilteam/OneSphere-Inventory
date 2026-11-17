@@ -78,6 +78,8 @@ interface GridExportPayload {
   pdfMaxScale?: number;
   pdfFixedGridScale?: boolean;
   boldFieldLabels?: string[];
+  boxedFieldLabels?: string[];
+  pdfColumnWidths?: Record<number, number>;
   copyType?: string;
   terms?: string[];
   bankDetails?: Array<[string, string]>;
@@ -8821,17 +8823,19 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Addresses print in Title Case so the address line and City / District
       // don't mix small and capital letters.
       // Previous: ['Bill To Address', deliveryAddress || '-'],
-      ['Bill To Address', toInventoryTitleCase(deliveryAddress) || '-'],
-      // Previous: ['Ship Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
-      // Previous: ['Ship To Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
-      ['Ship To Address', toInventoryTitleCase(String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress) || '-'],
+      // Previous position of Bill To / Ship To: here, before State (2026-11-17:
+      // moved to the end so the boxed addresses sit just above the grid).
       // Previous position: after GSTIN No.
       // Place of Supply not required on the print.
       // ['Place of Supply', String(record.place_of_supply || record.placeOfSupply || '').trim() || '-'],
       ['State', customerState || '-'],
       ['State Code', customerStateCode || '-'],
       ['Warehouse', warehouseName],
-      ['Vehicle No', String(record.vehicle_no || record.vehicleNo || '')]
+      ['Vehicle No', String(record.vehicle_no || record.vehicleNo || '')],
+      // Previous: ['Ship Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
+      // Previous: ['Ship To Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
+      ['Bill To Address', toInventoryTitleCase(deliveryAddress) || '-'],
+      ['Ship To Address', toInventoryTitleCase(String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress) || '-']
       // Previous: ['SO Reference', soReference] (moved up beside Customer Phone)
       // Payment Terms not required on the print.
       // ['Payment Terms', String(record.payment_terms || record.paymentTerms || '')]
@@ -8909,6 +8913,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Items grid always at the INV-CP-00007 (full) size, however many lines.
       pdfFixedGridScale: true,
       boldFieldLabels: ['Customer', 'GSTIN No'],
+      // Square box around Bill To Address and Ship To Address (only these two).
+      boxedFieldLabels: ['Bill To Address', 'Ship To Address'],
+      // Wider TOTAL column (last) so amounts like 29,145.86 never crowd/wrap.
+      pdfColumnWidths: rows.length ? { [exportColumns.length - 1]: 24 } : undefined,
       boldCellSegments: rows.length ? this.documentSerialSegments(record) : undefined,
       fileName: `Sales_Invoice_${docNo || 'Selected_Record'}`
     };
@@ -9260,6 +9268,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       pdfMaxScale: payload.pdfMaxScale,
       pdfFixedGridScale: payload.pdfFixedGridScale,
       boldFieldLabels: payload.boldFieldLabels,
+      boxedFieldLabels: payload.boxedFieldLabels,
+      pdfColumnWidths: payload.pdfColumnWidths,
       copyType: payload.copyType,
       terms: payload.terms,
       bankDetails: payload.bankDetails,
