@@ -1,0 +1,240 @@
+<!-- Laid out like OneSphere-Accounts' Journal Voucher reprint page
+     (Accounts_Reports/journal-voucher/journal-voucher.html). -->
+<div class="module-page accounts-entry-page no-padding-print">
+  <div class="erp-card report-print-card shadow-sm border-0">
+
+    <!-- Header / Toolbar (Hidden on Print) -->
+    <div class="card-header d-print-none bg-white border-bottom py-3">
+      <div class="d-flex align-items-center justify-content-between w-100">
+        <h2 class="card-title mb-0"><i class="pi pi-file me-2 text-primary"></i> {{ reprintLabel }}</h2>
+        <!-- No "grid-export-actions" class here: InventoryScreenShell's click
+             listener hijacks buttons inside it for the SI/PI grid Print/PDF
+             ("Expand a Sales Invoice row first…"). -->
+        <!-- Previous: <div class="d-flex gap-2 grid-export-actions"> -->
+        <div class="d-flex gap-2">
+          <button class="erp-btn btn-white btn-sm shadow-sm" type="button" (click)="download('Print')" [disabled]="!reprintDoc()" title="Print">
+            <i class="pi pi-print"></i>
+          </button>
+          <button class="erp-btn btn-white btn-sm shadow-sm" type="button" (click)="download('Pdf')" [disabled]="!reprintDoc()" title="Export PDF">
+            <i class="pi pi-file-pdf"></i>
+          </button>
+          <a class="erp-btn btn-white btn-sm grid-icon-action" href="mailto:" title="Mail" aria-label="Mail" data-grid-share="mail"><i class="pi pi-envelope"></i></a>
+          <a class="erp-btn btn-white btn-sm grid-icon-action" href="https://wa.me/" target="_blank" rel="noopener" title="WhatsApp" aria-label="WhatsApp" data-grid-share="whatsapp"><i class="pi pi-whatsapp"></i></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card-body p-0">
+      @if (reprintError()) {
+        <div class="p-5 text-center text-danger">
+          <i class="pi pi-exclamation-triangle me-2"></i>{{ reprintError() }}
+        </div>
+      } @else if (!reprintDoc()) {
+        <div class="p-5 text-center text-muted">
+          <i class="pi pi-spin pi-spinner me-2"></i>Loading {{ reprintLabel }} {{ reprintNo }}…
+        </div>
+      } @else {
+      <div id="template" class="p-5 p-print-0">
+        <div class="receipt-voucher-wrap mx-auto" style="max-width: 1000px;">
+
+          <!-- Letterhead -->
+          <div class="voucher-header d-flex align-items-start border-bottom pb-4 mb-4">
+            @if (company()?.companyLogo) {
+            <div class="company-logo me-4">
+              <img [src]="company().companyLogo" height="80" alt="Logo" class="d-block" />
+            </div>
+            }
+            <div class="company-info flex-grow-1">
+              <h4 class="mb-1 font-black text-primary" style="font-size: 24px; letter-spacing: -0.5px;">{{ company()?.companyName }}</h4>
+              <p class="mb-1 text-muted small lh-base" style="max-width: 450px;">{{ company()?.registrationAddress }}</p>
+              <div class="d-flex gap-3 mt-2 flex-wrap">
+                @for (item of cinGst(); track item[0]) {
+                <span class="badge bg-light text-dark border small"><strong>{{ item[0] }}:</strong> {{ item[1] }}</span>
+                }
+              </div>
+            </div>
+            <div class="branch-meta text-end ps-3">
+              <div class="p-2 bg-light rounded border border-light-subtle">
+                <p class="mb-1 small font-bold text-dark text-uppercase letter-spacing-1">Branch</p>
+                <p class="mb-0 h6 font-bold text-primary">{{ company()?.branchName | titlecase }}</p>
+              </div>
+              <p class="mt-2 mb-0 x-small text-muted italic">Printed: {{ printedOn | date:'dd-MMM-yyyy h:mm a' }}</p>
+            </div>
+          </div>
+
+          <!-- Title Banner -->
+          <div class="voucher-title-banner text-center py-3 mb-5 bg-primary-subtle border border-primary-subtle rounded position-relative overflow-hidden">
+            <div class="position-absolute top-0 start-0 w-100 h-100 opacity-05" style="background: repeating-linear-gradient(45deg, var(--clr-p1), var(--clr-p1) 10px, transparent 10px, transparent 20px);"></div>
+            <h5 class="mb-0 font-black text-primary text-uppercase position-relative" style="letter-spacing: 3px;">
+              {{ bannerTitle() }}
+              <span class="badge bg-danger text-white ms-3 px-3 py-2 small" style="font-size: 10px; vertical-align: middle;">DUPLICATE</span>
+            </h5>
+          </div>
+
+          <!-- Invoice details -->
+          <div class="row g-3 mb-4">
+            @for (field of plainFields(); track $index) {
+            <div class="col-6 col-md-4">
+              <div class="p-3 border rounded bg-white shadow-sm h-100">
+                <span class="text-muted x-small text-uppercase letter-spacing-1 font-bold d-block mb-1">{{ field[0] }}</span>
+                <div class="mb-0 text-dark" [class.font-black]="boldLabels().has(field[0])" style="white-space: pre-line;">{{ field[1] }}</div>
+              </div>
+            </div>
+            }
+            @for (field of boxedFields(); track $index) {
+            <div class="col-12 col-md-6">
+              <div class="p-3 border rounded bg-white shadow-sm h-100">
+                <span class="text-muted x-small text-uppercase letter-spacing-1 font-bold d-block mb-1">{{ field[0] }}</span>
+                <div class="mb-0 text-dark" style="white-space: pre-line;">{{ field[1] || '--' }}</div>
+              </div>
+            </div>
+            }
+          </div>
+
+          <!-- Items -->
+          <div class="voucher-content mb-4">
+            <div class="table-responsive">
+              <table class="table table-bordered voucher-table-print mb-0 shadow-sm overflow-hidden rounded">
+                <thead class="bg-primary text-white">
+                  @if (reprintDoc()!.columnGroups?.length) {
+                  <tr>
+                    @for (group of groupedHeader(); track $index) {
+                    <th class="text-center align-middle py-2" [attr.colspan]="group.span" [attr.rowspan]="group.rowspan">{{ group.title }}</th>
+                    }
+                  </tr>
+                  <tr>
+                    @for (col of subHeaderColumns(); track $index) {
+                    <th class="text-center align-middle py-2">{{ col }}</th>
+                    }
+                  </tr>
+                  } @else {
+                  <tr>
+                    @for (col of reprintDoc()!.columns; track $index) {
+                    <th class="text-center align-middle py-2">{{ col }}</th>
+                    }
+                  </tr>
+                  }
+                </thead>
+                <tbody>
+                  @for (row of reprintDoc()!.rows; track $index) {
+                  <tr>
+                    @for (cell of row; track $index) {
+                    <td class="py-2" [class.text-end]="isNumeric(cell)" style="white-space: pre-line;">{{ cell }}</td>
+                    }
+                  </tr>
+                  }
+                </tbody>
+                @if (reprintDoc()!.totalRow?.length) {
+                <tfoot class="bg-light-subtle">
+                  <tr class="font-black">
+                    @for (cell of totalRowCells(); track $index) {
+                    <td class="py-2" [attr.colspan]="cell.span" [class.text-end]="$index > 0 || isNumeric(cell.value)">{{ cell.value }}</td>
+                    }
+                  </tr>
+                </tfoot>
+                }
+              </table>
+            </div>
+          </div>
+
+          <!-- Amount in words | Totals -->
+          <div class="row g-3 mb-4">
+            <div class="col-12 col-md-7">
+              @if (reprintDoc()!.amountInWords) {
+              <div class="p-3 border rounded bg-light h-100">
+                <p class="mb-1 font-bold small text-muted text-uppercase letter-spacing-1">Total Invoice Amount In Words</p>
+                <p class="mb-0 font-bold text-dark">{{ reprintDoc()!.amountInWords }}</p>
+              </div>
+              }
+            </div>
+            <div class="col-12 col-md-5">
+              @if (reprintDoc()!.summary?.length) {
+              <table class="table table-bordered voucher-table-print mb-0">
+                <tbody>
+                  @for (line of reprintDoc()!.summary!; track $index; let last = $last) {
+                  <tr [class.font-black]="last" [class.bg-light-subtle]="last">
+                    <td class="py-2">{{ line[0] }}</td>
+                    <td class="py-2 text-end" [class.text-primary]="last">{{ line[1] }}</td>
+                  </tr>
+                  }
+                </tbody>
+              </table>
+              }
+            </div>
+          </div>
+
+          <!-- Notes -->
+          @if (reprintDoc()!.notes) {
+          <div class="mb-4 p-4 bg-light rounded border border-dashed border-primary-subtle">
+            <p class="mb-2 font-bold small text-muted text-uppercase letter-spacing-1">{{ reprintDoc()!.notesLabel || 'Notes' }}</p>
+            <p class="mb-0 text-dark lh-base" style="white-space: pre-line;">{{ reprintDoc()!.notes }}</p>
+          </div>
+          }
+
+          <!-- Terms & Conditions -->
+          @if (reprintDoc()!.terms?.length) {
+          <div class="mb-4 p-4 border rounded bg-white">
+            <p class="mb-2 font-bold small text-muted text-uppercase letter-spacing-1">Terms &amp; Conditions</p>
+            @for (term of reprintDoc()!.terms!; track $index) {
+            <p class="mb-1 small text-dark">{{ term }}</p>
+            }
+          </div>
+          }
+
+          <!-- Bank details | Authorised signatory -->
+          <div class="row g-4 mt-2">
+            @if (reprintDoc()!.bankDetails?.length) {
+            <div class="col-12 col-md-6">
+              <div class="p-4 border rounded bg-light-subtle h-100">
+                <p class="mb-2 font-bold small text-muted text-uppercase letter-spacing-1">Bank Details</p>
+                @for (bank of reprintDoc()!.bankDetails!; track $index) {
+                <p class="mb-1 small text-dark"><strong>{{ bank[0] }}:</strong> {{ bank[1] }}</p>
+                }
+              </div>
+            </div>
+            }
+            <div class="col-12" [class.col-md-6]="reprintDoc()!.bankDetails?.length">
+              <div class="signature-box p-4 border rounded bg-light-subtle h-100 text-center">
+                <div class="small text-muted mb-1">Certified that the particulars given above are true and correct</div>
+                <div class="font-black small text-uppercase text-primary mb-5">For {{ company()?.companyName }}</div>
+                <div class="signature-line mx-auto mb-2 border-top border-dark opacity-50" style="width: 160px;"></div>
+                <div class="text-muted x-small">(Authorised Signatory)</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Footer Disclaimer -->
+          <div class="mt-5 pt-4 border-top">
+            <p class="x-small text-muted text-center italic mb-0 letter-spacing-1">
+              <i class="pi pi-info-circle me-1"></i>
+              This is a duplicate copy of {{ reprintLabel | lowercase }} {{ reprintNo }}, reprinted from Accounts.
+            </p>
+          </div>
+
+        </div>
+      </div>
+      }
+    </div>
+  </div>
+</div>
+
+<style>
+  .letter-spacing-1 { letter-spacing: 0.5px; }
+  .font-black { font-weight: 600; }
+  .x-small { font-size: 10px; }
+  .opacity-05 { opacity: 0.05; }
+
+  .voucher-table-print { border-collapse: separate; border-spacing: 0; font-size: 12px; }
+  .voucher-table-print thead th { font-size: 11px; }
+
+  .receipt-voucher-wrap .border {
+    border-width: 2px !important;
+    border-color: #6c757d !important;
+  }
+  .voucher-table-print,
+  .voucher-table-print th,
+  .voucher-table-print td {
+    border-width: 1.5px !important;
+    border-color: #6c757d !important;
+  }
+</style>

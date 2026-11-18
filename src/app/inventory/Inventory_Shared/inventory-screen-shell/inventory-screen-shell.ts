@@ -10,7 +10,8 @@ import { Observable, Subject, catchError, concatMap, debounceTime, distinctUntil
 import { ApiResponse, AttributeItem, BomItem, BomLineItem, PriceListItem, WorkCenterItem, AttributeValueItem, BranchInvItem, CategoryItem, ChannelPartnerItem, ContactItem, CustomerItem, GstRateGuide, HsnSacItem, InventoryConfigService, PaymentTermItem, ProductApplicableVariant, ProductBundleItem, ProductItem, ProductTypeItem, ProductUomConversion, ProductVariantStockAttribute, ProductVariantStockControl, SegmentItem, SerialPolicyItem, TaxCodeSuggestion, UomItem, VariantCombinationRow, VariantItem, VendorItem, WarehouseItem } from '../inventory-config.service';
 import { AvailableStock, InventoryTransactionsService, PurchaseRefDoc, ServiceBundleConsumption, TransportDetails, UinRegistrationRow, UinRegistrationSaveItem, IdentifierRegistrationRow, IdentifierRegistrationSaveItem, RegistrationPolicyOption } from '../inventory-transactions.service';
 import { applyInventoryTextCase, inventoryTextCaseForField, inventoryTextCaseForLineColumn, toInventoryTitleCase } from '../inventory-text-case.util';
-import { InventoryExportService } from '../inventory-export.service';
+// Previous: import { InventoryExportService } from '../inventory-export.service';
+import { InventoryExportDocument, InventoryExportService } from '../inventory-export.service';
 import { rupeesInWords } from '../inventory-amount-in-words';
 import { InvoiceBankDetails, PaymentsService } from '../payments.service';
 import { CommonService } from '../../../core/services/Common/common.service';
@@ -8417,14 +8418,43 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       discount: computed.discount,
       taxable,
       tax,
-      cgst: isInterstate ? 0 : tax / 2,
-      sgst: isInterstate ? 0 : tax / 2,
+      // Previous: cgst: isInterstate ? 0 : tax / 2,
+      // Previous: sgst: isInterstate ? 0 : tax / 2,
+      cgst: isInterstate ? 0 : this.gstHalves(tax).cgst,
+      sgst: isInterstate ? 0 : this.gstHalves(tax).sgst,
       igst: isInterstate ? tax : 0,
       isInterstate,
       total,
       transport,
       // Previous: roundOff: total - (taxable + tax)
       roundOff: total - (taxable + tax + transport)
+    };
+  }
+
+  // CGST/SGST exactly as the backend posts them (sp_post_sales_invoice and
+  // taxation.tbl_trans_gst): CGST = ROUND(tax / 2, 2) (half away from zero,
+  // like PostgreSQL), SGST = tax - CGST. Worked in whole paise so float noise
+  // cannot lose a paisa (tax / 2 = 4711.335 used to print 4711.33 twice).
+  private gstHalves(tax: number): { cgst: number; sgst: number } {
+    const paise = Math.round((Number(tax) || 0) * 100);
+    const cgstPaise = Math.sign(paise) * Math.ceil(Math.abs(paise) / 2);
+    return { cgst: cgstPaise / 100, sgst: (paise - cgstPaise) / 100 };
+  }
+
+  // Line-wise CGST/SGST for the print grid. The odd paisa of each line goes
+  // to CGST and SGST in turn (not always CGST), so the CGST and SGST column
+  // totals equal gstHalves(total tax), i.e. the backend posting, and the
+  // summary rows below the grid.
+  private gstLineSplitter(): (tax: number) => { cgst: number; sgst: number } {
+    let oddLines = 0;
+    return (tax: number) => {
+      const paise = Math.round((Number(tax) || 0) * 100);
+      const half = Math.trunc(paise / 2);
+      if (paise % 2 === 0) return { cgst: half / 100, sgst: half / 100 };
+      const extra = Math.sign(paise);
+      const toCgst = oddLines++ % 2 === 0;
+      const cgstPaise = toCgst ? half + extra : half;
+      return { cgst: cgstPaise / 100, sgst: (paise - cgstPaise) / 100 };
     };
   }
 
@@ -8457,8 +8487,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       discount: computed.discount,
       taxable: computed.taxable,
       tax: computed.tax,
-      cgst: isInterstate ? 0 : computed.tax / 2,
-      sgst: isInterstate ? 0 : computed.tax / 2,
+      // Previous: cgst: isInterstate ? 0 : computed.tax / 2,
+      // Previous: sgst: isInterstate ? 0 : computed.tax / 2,
+      cgst: isInterstate ? 0 : this.gstHalves(computed.tax).cgst,
+      sgst: isInterstate ? 0 : this.gstHalves(computed.tax).sgst,
       igst: isInterstate ? computed.tax : 0,
       isInterstate,
       total,
@@ -8469,6 +8501,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   // Previous: private purchaseInvoiceDocumentRows(record: any): string[][] {
   private purchaseInvoiceDocumentRows(record: any, isInterstate = false): string[][] {
+    const splitGst = this.gstLineSplitter();
     return (record?.items || []).map((item: any, index: number) => {
       // Test point 39: line-wise Taxable Amt and CGST/SGST (or IGST) — same
       // saved-value-first / computed-fallback rule documentFinancials() uses,
@@ -8499,7 +8532,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         this.moneyValue(lineTaxable),
         ...(isInterstate
           ? [this.moneyValue(lineTax)]
-          : [this.moneyValue(lineTax / 2), this.moneyValue(lineTax / 2)]),
+          // Previous: : [this.moneyValue(lineTax / 2), this.moneyValue(lineTax / 2)]),
+          : (({ cgst, sgst }) => [this.moneyValue(cgst), this.moneyValue(sgst)])(splitGst(lineTax))),
         this.moneyValue(item?.amount ?? 0)
       ];
     });
@@ -8639,12 +8673,19 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // product name — Sales Invoice only; Sales Return shares these rows without.
   private salesInvoiceDocumentRows(record: any, isInterstate = false, withSerials = false): { rows: string[][]; totalRow: string[] } {
     const sum = { gross: 0, discount: 0, taxable: 0, cgst: 0, sgst: 0, total: 0 };
+    const splitGst = this.gstLineSplitter();
     const rows = (record?.items || []).map((item: any, index: number) => {
       // Product-wise GST: taxable value and CGST/SGST (or IGST) amount per line.
       // SGST = tax - CGST so the two halves always add up to the line tax.
       const { taxable, tax } = this.salesInvoiceLineTax(item);
-      const cgst = isInterstate ? tax : Math.round((tax / 2) * 100) / 100;
-      const sgst = isInterstate ? 0 : tax - cgst;
+      // Previous: const cgst = isInterstate ? tax : Math.round((tax / 2) * 100) / 100;
+      // Previous: const sgst = isInterstate ? 0 : tax - cgst;
+      // Odd paisa alternates between CGST and SGST so the column totals match
+      // the backend CGST/SGST posting (was always CGST: INV-CP-00045 printed
+      // 4,711.35 / 4,711.32 against 4,711.34 / 4,711.33 in the database).
+      const lineGst = isInterstate ? { cgst: tax, sgst: 0 } : splitGst(tax);
+      const cgst = lineGst.cgst;
+      const sgst = lineGst.sgst;
       const qty = Number(item?.qty ?? 0) || 0;
       const gross = qty * (Number(item?.rate ?? 0) || 0);
       const discount = gross * (Number(item?.discount_pct ?? item?.discountPct ?? 0) || 0) / 100;
@@ -9164,7 +9205,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // Recipient" on every print after it. The count is kept on the invoice
   // (migrations 272 / 274) so it holds across users, refreshes and machines.
   // Drafts, or a failed call, print without a copy type and are not counted.
-  private printInvoiceWithCopyType(kind: 'salesInvoice' | 'purchaseInvoice', record: any, payload: GridExportPayload, mode: 'Pdf' | 'Print' | 'Open'): void {
+  // forceCopyType: Accounts > Re-Print always prints "Duplicate for Recipient",
+  // whatever the stored print count says.
+  // Previous: private printInvoiceWithCopyType(kind: 'salesInvoice' | 'purchaseInvoice', record: any, payload: GridExportPayload, mode: 'Pdf' | 'Print' | 'Open'): void {
+  private printInvoiceWithCopyType(kind: 'salesInvoice' | 'purchaseInvoice', record: any, payload: GridExportPayload, mode: 'Pdf' | 'Print' | 'Open', forceCopyType?: string): void {
     // DC-linked SI lines: fetch their sold serials first so they print under
     // the product name, then rebuild the payload from the expanded record.
     if (kind === 'salesInvoice') {
@@ -9181,17 +9225,27 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             (results as Array<{ id: number; serials: string[] }>).forEach(r => this.printSoldSerialsByItemId.set(r.id, r.serials));
             const docNo = String(record?.doc_number || record?.docNumber || '');
             const rebuilt = this.salesInvoiceDocumentExportPayload(record, docNo, [], payload.columns, payload.rows);
-            this.printInvoiceWithCopyType(kind, record, { ...rebuilt, copyType: payload.copyType }, mode);
+            this.printInvoiceWithCopyType(kind, record, { ...rebuilt, copyType: payload.copyType }, mode, forceCopyType);
           });
         return;
       }
     }
     if (kind === 'salesInvoice' && !this.hasPreviousBalanceRow(payload)) {
       this.withSalesInvoicePreviousBalance(record, payload, withBalance =>
-        this.printInvoiceWithCopyType(kind, record, withBalance, mode));
+        this.printInvoiceWithCopyType(kind, record, withBalance, mode, forceCopyType));
       return;
     }
-    const output = (copyType?: string) => this.exportService.pdf(this.exportDocument({ ...payload, copyType }), mode);
+    // Previous: const output = (copyType?: string) => this.exportService.pdf(this.exportDocument({ ...payload, copyType }), mode);
+    // invoiceDocumentSink (Accounts Re-Print page) takes the finished document
+    // instead of it being downloaded/printed here.
+    const output = (copyType?: string) => {
+      const exportDoc = this.exportDocument({ ...payload, copyType: forceCopyType || copyType });
+      if (this.invoiceDocumentSink) {
+        this.invoiceDocumentSink(exportDoc);
+        return;
+      }
+      this.exportService.pdf(exportDoc, mode);
+    };
     const id = Number(record?.id);
     const status = this.normalizeKey(record?.status || '');
     if (!id || (status !== 'posted' && status !== 'paid')) {
@@ -19297,6 +19351,83 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // Last document opened by printAutoGeneratedDocument(), so one post never
   // opens the same Sales Invoice twice.
   private lastAutoOpenedDocKey = '';
+
+  // Accounts > Re-Print, Transaction Type "Sales Invoice" / "Purchase Invoice"
+  // (InventoryInvoiceReprintComponent): when set, printInvoiceWithCopyType()
+  // hands the finished document here instead of downloading/printing it.
+  protected invoiceDocumentSink: ((doc: InventoryExportDocument) => void) | null = null;
+
+  // Finds the invoice by its number across all segments (SI doc no.; PI no. or
+  // the vendor's invoice no.) and builds the same document the screen's Print
+  // button prints, always as "Duplicate for Recipient". Only posted/paid
+  // invoices can be reprinted. Still counts as a print (mark*Printed).
+  protected loadInvoiceReprintDocument(
+    kind: 'salesInvoice' | 'purchaseInvoice',
+    invoiceNo: string,
+    done: (result: { doc?: InventoryExportDocument; record?: any; error?: string }) => void
+  ): void {
+    const label = kind === 'salesInvoice' ? 'Sales Invoice' : 'Purchase Invoice';
+    const wanted = String(invoiceNo || '').trim().toUpperCase();
+    if (!wanted) {
+      done({ error: `Enter the ${label} number.` });
+      return;
+    }
+    const list$: Observable<ApiResponse<any[]>> = kind === 'salesInvoice'
+      ? this.txService.getSalesInvoices()
+      : this.txService.getPurchaseInvoices();
+    list$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: res => {
+        const norm = (v: any) => String(v ?? '').trim().toUpperCase();
+        const record = (res?.data || []).find((r: any) => kind === 'salesInvoice'
+          ? norm(r?.doc_number ?? r?.docNumber) === wanted
+          : norm(r?.pi_number ?? r?.piNumber) === wanted || norm(r?.vendor_invoice_no ?? r?.vendorInvoiceNo) === wanted);
+        if (!record) {
+          done({ error: `${label} ${wanted} does not exist.` });
+          return;
+        }
+        const status = this.normalizeKey(record?.status || '');
+        if (status !== 'posted' && status !== 'paid') {
+          done({ error: `${label} ${wanted} is not posted, so it cannot be reprinted.` });
+          return;
+        }
+        // Give the lookups (bank details, GST state codes, customers/vendors)
+        // a moment to load so the reprint matches the screen's print exactly.
+        setTimeout(() => {
+          // Like the Journal Voucher reprint ("Journal Voucher (Duplicate)"):
+          // the title reads "Tax Invoice (DUPLICATE)" and the right-side
+          // "Duplicate for Recipient" copy type is dropped.
+          // Previous: this.invoiceDocumentSink = doc => { this.invoiceDocumentSink = null; done({ doc, record }); };
+          this.invoiceDocumentSink = doc => {
+            this.invoiceDocumentSink = null;
+            const fileName = doc.fileName || doc.title;
+            done({ doc: { ...doc, title: `${doc.title} (DUPLICATE)`, copyType: undefined, fileName }, record });
+          };
+          if (kind === 'purchaseInvoice') {
+            const piNo = String(record?.pi_number || record?.piNumber || '');
+            this.printInvoiceWithCopyType('purchaseInvoice', record,
+              this.purchaseInvoiceDocumentExportPayload(record, piNo, [], [], []), 'Pdf', 'Duplicate for Recipient');
+          } else {
+            const docNo = String(record?.doc_number || record?.docNumber || '');
+            this.printInvoiceWithCopyType('salesInvoice', record,
+              this.salesInvoiceDocumentExportPayload(record, docNo, [], [], []), 'Pdf', 'Duplicate for Recipient');
+          }
+        }, 1500);
+      },
+      error: () => done({ error: `Could not load ${label} ${wanted}.` })
+    });
+  }
+
+  // PDF / Print of an already-built document (the Re-Print page's buttons).
+  protected outputInvoiceDocument(doc: InventoryExportDocument, mode: 'Pdf' | 'Print'): void {
+    this.exportService.pdf(doc, mode);
+  }
+
+  // Company letterhead (name, address, CIN/GST, logo, branch) the PDF prints,
+  // for the Re-Print page's on-screen header.
+  // Previous: protected invoiceDocumentPreviewUrl(doc) { return this.exportService.pdfBlobUrl(doc); } (PDF iframe preview)
+  protected invoiceCompanyDetails(): any {
+    return this.exportService.companyDetails();
+  }
 
   saveConfigRecord(forceDocumentStatus?: 'draft' | 'posted' | 'sent'): void {
     if (this.isSaving()) return;

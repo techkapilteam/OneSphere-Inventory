@@ -6,6 +6,8 @@ module.exports = withNativeFederation({
   exposes: {
     './InventoryRoutes': './src/app/inventory/inventory_routs.ts',
     './InventoryDashboard': './src/app/inventory/inventory-dashboard/inventory-dashboard.ts',
+    // Accounts > Re-Print of a Sales / Purchase Invoice (top-level route invoice-reprint/:id).
+    './InvoiceReprint': './src/app/inventory/Inventory_Transactions/invoice-reprint/invoice-reprint.ts',
   },
 
   shared: {
