@@ -8764,10 +8764,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // CGST Amt | SGST Amt (or IGST Amt) | Amount (Rs.)
   // withSerials: the line's serial nos print (bold, in brackets) under the
   // product name — Sales Invoice only; Sales Return shares these rows without.
-  private salesInvoiceDocumentRows(record: any, isInterstate = false, withSerials = false): { rows: string[][]; totalRow: string[] } {
+  // sortByName: lines print A→Z by product name with S.No renumbered 1..n
+  // (Sales Invoice only, user request 2026-11-18). The CGST/SGST split is still
+  // worked out in entry order first so each line's odd paisa matches the DB.
+  // Previous: private salesInvoiceDocumentRows(record: any, isInterstate = false, withSerials = false): { rows: string[][]; totalRow: string[] } {
+  private salesInvoiceDocumentRows(record: any, isInterstate = false, withSerials = false, sortByName = false): { rows: string[][]; totalRow: string[] } {
     const sum = { gross: 0, discount: 0, taxable: 0, cgst: 0, sgst: 0, total: 0 };
     const splitGst = this.gstLineSplitter();
-    const rows = (record?.items || []).map((item: any, index: number) => {
+    const builtRows: string[][] = (record?.items || []).map((item: any, index: number) => {
       // Product-wise GST: taxable value and CGST/SGST (or IGST) amount per line.
       // SGST = tax - CGST so the two halves always add up to the line tax.
       const { taxable, tax } = this.salesInvoiceLineTax(item);
@@ -8813,6 +8817,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         this.moneyValue(lineTotal)
       ];
     });
+    const productName = (row: string[]) => String(row[1] || '').split('\n')[0].trim();
+    const rows = sortByName
+      ? [...builtRows]
+          .sort((a, b) => productName(a).localeCompare(productName(b), undefined, { sensitivity: 'base', numeric: true }))
+          .map((row, index) => [String(index + 1), ...row.slice(1)])
+      : builtRows;
     const totalRow = [
       'Total', '', '', '', '',
       this.moneyValue(sum.gross),
@@ -8926,7 +8936,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     //   this.salesInvoiceDocumentRows(record, lineIsInterstate)
     // );
     // Previous: const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate);
-    const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate, true);
+    // Previous: const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate, true);
+    const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate, true, true);
     const columns = ['S.No', 'Product Description', 'HSN/SAC Code', 'Qty', 'Rate', 'Amount', 'Disc.', 'Taxable Value',
       ...(lineIsInterstate ? ['Rate %', 'Amount'] : ['Rate %', 'Amount', 'Rate %', 'Amount']), 'TOTAL'];
     const columnGroups: Array<[string, number]> = [
@@ -12272,6 +12283,45 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     });
     const fmt = (n: number) => `Rs. ${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     return { value: fmt(value), discount: fmt(discount), gst: fmt(gst) };
+  }
+
+  // Purchase Invoice entry grid: CGST + SGST (or IGST) under the GST Total in
+  // the Total row. Same rule as the PI print (purchaseInvoiceFinancials):
+  // our branch/company GSTIN vs the vendor's GSTIN/state, CGST/SGST halves as
+  // the backend posts them (gstHalves). Shown only once a vendor is selected;
+  // a selected vendor whose state cannot be determined -> CGST + SGST.
+  lineFooterGstSplit(): { isInterstate: boolean; cgst: string; sgst: string; igst: string } | null {
+    if (this.config?.key !== 'purchaseInvoice') return null;
+    let tax = 0;
+    this.directEntryLineRows().forEach((row, rowIndex) => {
+      const preview = this.transactionLineAmountPreview(row, rowIndex);
+      if (preview) tax += this.roundLineAmount(preview.taxAmount);
+    });
+    tax = this.roundLineAmount(tax);
+    const form = this.formValues();
+    const warehouse = this.findWarehouseBySelection(form['receivingLocation'] || form['warehouse'] || form['warehouseId']);
+    const record = {
+      branch_id: this.optionalNumber(form['branchId']),
+      warehouse_id: warehouse?.id ?? this.optionalNumber(form['warehouseId']),
+      vendor_id: this.optionalNumber(form['vendorId']),
+      vendor_name: form['vendor']
+    };
+    const vendor = this.vendorForRecord(record);
+    // No vendor selected yet -> show only the GST Total; the CGST/SGST or
+    // IGST lines appear once a vendor is picked, by that vendor's state.
+    if (!vendor) return null;
+    const origin = this.ourGstOrigin(record);
+    const isInterstate = !!this.isInterstateTransaction(
+      origin.gstin, origin.state, this.partyPrimaryGstin(vendor), this.partyPrimaryState(vendor)
+    );
+    const halves = this.gstHalves(tax);
+    const fmt = (n: number) => `Rs. ${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return {
+      isInterstate,
+      cgst: fmt(isInterstate ? 0 : halves.cgst),
+      sgst: fmt(isInterstate ? 0 : halves.sgst),
+      igst: fmt(isInterstate ? tax : 0)
+    };
   }
 
   // Sales / Purchase Invoice: the whole-rupee Grand Total under the line grid
