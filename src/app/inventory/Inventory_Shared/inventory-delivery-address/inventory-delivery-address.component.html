@@ -1,92 +1,69 @@
 <section class="inventory-fieldset delivery-challan-fieldset">
+  <!-- Delivery address = the customer's address (read-only). To change it,
+       use + beside Party / Customer (Update on the customer). -->
   <div class="inventory-fieldset-title inventory-fieldset-title-row">
     <span><i class="pi pi-map-marker"></i> Delivery Address</span>
-    <label class="inventory-labeled-switch yes-no" title="Deliver to a different address?">
-      <input type="checkbox" [checked]="host.deliveryAddressEnabled()" (change)="host.toggleDeliveryAddress($any($event.target).checked)" />
-      <span class="inventory-switch-track">
-        <span class="switch-text switch-on">Yes</span>
-        <span class="switch-text switch-off">No</span>
-      </span>
-    </label>
+    <small class="inventory-field-hint">From the customer master. To change it, use + beside Party / Customer.</small>
   </div>
-  @if (host.deliveryAddressEnabled()) {
-    <div class="inventory-form-grid delivery-address-grid">
-      <div class="erp-form-group">
-        <label class="erp-label">House No / Plot No</label>
-        <input class="erp-input" type="text"
-          [ngModel]="host.formValues()['deliveryHouseNo'] || ''"
-          (ngModelChange)="host.updateDcDeliveryAddressPart('deliveryHouseNo', $event)"
-          placeholder="House No / Plot No" />
-      </div>
-      <div class="erp-form-group">
-        <label class="erp-label">Street / Area</label>
-        <input class="erp-input" type="text"
-          [ngModel]="host.formValues()['deliveryStreet'] || ''"
-          (ngModelChange)="host.updateDcDeliveryAddressPart('deliveryStreet', $event)"
-          placeholder="Street, area or landmark" />
-      </div>
-      <div class="erp-form-group">
-        <label class="erp-label">State @if (stateRequired) {<span class="text-danger">*</span>}</label>
-        <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
-          [items]="host.dcAddressStates" [searchable]="true" [clearable]="true"
-          [ngModel]="host.formValues()['deliveryState'] || ''"
-          (ngModelChange)="host.onDcDeliveryStateChange($event)"
-          placeholder="Select state">
-        </ng-select>
-      </div>
-      <div class="erp-form-group">
-        <label class="erp-label">District</label>
-        <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
-          [items]="host.dcDistrictOptions()" [searchable]="true" [clearable]="true"
-          [ngModel]="host.formValues()['deliveryDistrict'] || ''"
-          (ngModelChange)="host.updateDcDeliveryAddressPart('deliveryDistrict', $event)"
-          placeholder="Select district">
-        </ng-select>
-      </div>
-      <div class="erp-form-group">
-        <label class="erp-label">City / Town</label>
-        <input class="erp-input" type="text"
-          [ngModel]="host.formValues()['deliveryCity'] || ''"
-          (ngModelChange)="host.updateDcDeliveryAddressPart('deliveryCity', $event)"
-          placeholder="City or town" />
-      </div>
-      <div class="erp-form-group">
-        <label class="erp-label">Pincode</label>
-        <input class="erp-input" type="text" maxlength="6"
-          [ngModel]="host.formValues()['deliveryPincode'] || ''"
-          (ngModelChange)="host.onDcDeliveryPincodeChange($event)"
-          placeholder="6-digit pincode" />
-      </div>
+  <div class="inventory-form-grid delivery-address-grid">
+    <div class="erp-form-group span-2">
+      <label class="erp-label">Address</label>
+      <textarea class="erp-input" rows="2" readonly
+        [value]="host.formValues()['deliveryStreet'] || ''"
+        placeholder="Select a customer"></textarea>
+    </div>
+    <div class="erp-form-group">
+      <label class="erp-label">State @if (stateRequired) {<span class="text-danger">*</span>}</label>
+      <input class="erp-input" type="text" readonly [value]="host.formValues()['deliveryState'] || ''" placeholder="—" />
+    </div>
+    <div class="erp-form-group">
+      <label class="erp-label">District</label>
+      <input class="erp-input" type="text" readonly [value]="host.formValues()['deliveryDistrict'] || ''" placeholder="—" />
+    </div>
+    <div class="erp-form-group">
+      <label class="erp-label">City / Town</label>
+      <input class="erp-input" type="text" readonly [value]="host.formValues()['deliveryCity'] || ''" placeholder="—" />
+    </div>
+    <div class="erp-form-group">
+      <label class="erp-label">Pincode</label>
+      <input class="erp-input" type="text" readonly [value]="host.formValues()['deliveryPincode'] || ''" placeholder="—" />
+    </div>
+    @if (showShipAddress) {
       <div class="erp-form-group span-2">
-        <label class="erp-label">Full Delivery Address</label>
-        <textarea class="erp-input" rows="2"
-          [ngModel]="host.formValues()['deliveryAddress'] || ''"
-          (ngModelChange)="host.collectFormField('deliveryAddress', $event)"
-          placeholder="Auto-filled from address details or enter manually"></textarea>
-      </div>
-      @if (showShipAddress) {
-        <div class="erp-form-group span-2">
-          <div class="inventory-fieldset-title-row">
-            <label class="erp-label">Ship Address same as Full Delivery Address</label>
-            <label class="inventory-labeled-switch yes-no" title="Ship to the same address as the Full Delivery Address?">
-              <input type="checkbox" [checked]="host.shipSameAsDelivery()" (change)="host.toggleShipSameAsDelivery($any($event.target).checked)" />
-              <span class="inventory-switch-track">
-                <span class="switch-text switch-on">Yes</span>
-                <span class="switch-text switch-off">No</span>
-              </span>
-            </label>
-          </div>
+        <div class="inventory-fieldset-title-row">
+          <label class="erp-label">Ship Address same as Delivery Address</label>
+          <label class="inventory-labeled-switch yes-no" title="Ship to the same address as the Delivery Address?">
+            <input type="checkbox" [checked]="host.shipSameAsDelivery()" (change)="host.toggleShipSameAsDelivery($any($event.target).checked)" />
+            <span class="inventory-switch-track">
+              <span class="switch-text switch-on">Yes</span>
+              <span class="switch-text switch-off">No</span>
+            </span>
+          </label>
         </div>
-        @if (!host.shipSameAsDelivery()) {
+      </div>
+            @if (!host.shipSameAsDelivery()) {
+        <div class="erp-form-group">
+          <label class="erp-label">Ship State <span class="text-danger">*</span></label>
+          <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+            [items]="host.dcAddressStates" [searchable]="true" [clearable]="false"
+            [ngModel]="host.formValues()['shipState'] || ''"
+            (ngModelChange)="host.collectFormField('shipState', $event)"
+            placeholder="Select state">
+          </ng-select>
+        </div>
+        <div class="erp-form-group span-2">
+          <label class="erp-label">Ship Address <span class="text-danger">*</span></label>
+          <textarea class="erp-input" rows="2"
+            [ngModel]="host.formValues()['shipAddress'] || ''"
+            (ngModelChange)="host.collectFormField('shipAddress', $event)"
+            placeholder="Another branch of the same customer, in the same state"></textarea>
+        </div>
+        @if (host.shipStateMismatchMessage(); as shipError) {
           <div class="erp-form-group span-2">
-            <label class="erp-label">Ship Address</label>
-            <textarea class="erp-input" rows="2"
-              [ngModel]="host.formValues()['shipAddress'] || ''"
-              (ngModelChange)="host.collectFormField('shipAddress', $event)"
-              placeholder="Enter the address the goods ship to"></textarea>
+            <div class="erp-field-error"><i class="pi pi-exclamation-triangle"></i> {{ shipError }}</div>
           </div>
         }
       }
-    </div>
-  }
+    }
+  </div>
 </section>

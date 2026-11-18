@@ -410,6 +410,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // that nested quick-add flow.
   readonly quickVendorLinkedContact = signal<GlobalContactOption | null>(null);
   readonly quickCustomerLinkedContact = signal<GlobalContactOption | null>(null);
+    /** Existing customer being edited in the quick-add popup (null = new customer). */
+  readonly quickCustomerEditingId = signal<number | null>(null);
   readonly quickChannelPartnerLinkedContact = signal<GlobalContactOption | null>(null);
   readonly consumptionApprovalRequired = signal(false);
   readonly approvalLevel = signal('Single Level');
@@ -6320,6 +6322,19 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           .forEach(key => delete next[key]);
         return next;
       });
+      this.quickCustomerEditingId.set(null);
+      // + beside Party / Customer with a customer already selected: open that
+      // customer for Update instead of an empty form.
+      const selectedValue = sourceFieldKey ? this.formValues()[sourceFieldKey] : null;
+      const selectedCustomer = selectedValue ? this.findCustomerBySelection(selectedValue) : null;
+      if (selectedCustomer) {
+        const contactId = (selectedCustomer as any).contact_id ?? (selectedCustomer as any).contactId;
+        const contact = contactId != null
+          ? (this.partyContactOptions() || []).find((c: any) => Number(c?.id) === Number(contactId)) ?? null
+          : null;
+        this.quickCustomerLinkedContact.set(contact);
+        this.loadCustomerIntoQuickAdd(selectedCustomer);
+      }
     }
 
     if (master === 'Channel Partner') {
@@ -7171,7 +7186,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return '';
   }
 
-  saveQuickCustomer(): void {
+   saveQuickCustomer(): void {
     const name = this.quickAddName().trim();
     if (!name) { this.quickAddError.set('Customer name is required.'); return; }
     const quickCustomerPanError = this.panValidationMessage(this.formValues()['quickCustomerPan']);
@@ -7179,8 +7194,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!String(this.formValues()['quickCustomerState'] ?? '').trim()) { this.quickAddError.set('State is required.'); return; }
     if (this.isSavingQuickAdd()) return;
     const v = this.formValues();
-  const code = this.quickAddCode().trim() || this.nextCustomerCode(name) || null; 
-   const linkedContact = this.quickCustomerLinkedContact();
+    const editingId = this.quickCustomerEditingId();                       
+    const code = this.quickAddCode().trim() || this.nextCustomerCode(name) || null;
+    const linkedContact = this.quickCustomerLinkedContact();
     this.isSavingQuickAdd.set(true);
     this.quickAddError.set('');
     this.saveCustomerWithContactWriteback({
@@ -7196,6 +7212,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       email: v['quickCustomerEmail'] || null,
       address: v['quickCustomerAddress'] || null,
       state: v['quickCustomerState'] || null,
+      district: v['quickCustomerDistrict'] || null,
       city: v['quickCustomerCity'] || null,
       pincode: v['quickCustomerPincode'] || null,
       shipping_address: v['quickCustomerShippingAddress'] || null,
@@ -7209,18 +7226,28 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       status: v['quickCustomerStatus'] === 'Inactive' ? 'inactive' : 'active',
       contact_id: linkedContact?.id ?? null,
       contact_source: linkedContact?.source ?? null
-    }, null).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    }, editingId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({   
       next: (res: ApiResponse<any>) => {
         this.isSavingQuickAdd.set(false);
         if (res.success && res.data) {
           const saved = res.data;
           const savedName = saved.customer_name || name;
-          this.loadedCustomerObjects.update(list => [...list, saved]);
+          if (editingId) {                                                
+            this.loadedCustomerObjects.update(list =>
+              list.map((c: any) => Number(c?.id) === Number(editingId) ? saved : c));
+          } else {
+            this.loadedCustomerObjects.update(list => [...list, saved]);
+          }
           if (!this.customerOptionList().includes(savedName)) {
             this.customerOptionList.update(opts => [...opts, savedName]);
           }
           const sourceKey = this.addMasterSourceFieldKey();
           if (sourceKey) this.collectFormField(sourceKey, savedName);
+          // ← NEW: refresh the document's Delivery Address from the saved customer
+          if (['deliveryChallan', 'salesOrder', 'salesInvoice'].includes(this.config?.key || '')) {
+            this.formValues.update(fv => ({ ...fv, ...this.deliveryFromCustomer(saved) }));
+          }
+          this.quickCustomerEditingId.set(null);                           
           this.quickCustomerLinkedContact.set(null);
           this.restoreParentModal();
         } else {
@@ -7585,11 +7612,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }));
   }
 
-  // Same auto-fill as selectQuickVendorContact(), but targets the "Customer"
-  // quick-add modal's own fields (used when that modal is opened from any
-  // transaction screen) instead of a Customer Master top-level form.
-  selectQuickCustomerContact(contact: GlobalContactOption | null): void {
+
+   selectQuickCustomerContact(contact: GlobalContactOption | null): void {
     this.quickCustomerLinkedContact.set(contact);
+    // A contact that is already a customer of this segment: load it (Update mode).
+    const existing = this.existingCustomerForContact(contact);
+    if (existing) {
+      this.loadCustomerIntoQuickAdd(existing);
+      return;
+    }
+    this.quickCustomerEditingId.set(null);
     this.quickAddName.set(contact?.name || '');
     if (!this._quickAddCodeManuallySet) {
       this.quickAddCode.set(contact?.name ? this.nextCustomerCode(contact.name) : '');
@@ -7601,6 +7633,67 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       quickCustomerGstin: contact?.gstin || '',
       quickCustomerPan: contact?.pan || '',
       quickCustomerAddress: contact?.address || ''
+    }));
+  }
+
+
+    /** The active customer of this segment that belongs to this contact (same contact id, else same name). */
+  private existingCustomerForContact(contact: GlobalContactOption | null): any | null {
+    if (!contact) return null;
+    const segmentId = this.selectedSegmentId();
+    const sameSegment = (c: any) => {
+      const s = c?.segment_id ?? c?.segmentId ?? null;
+      return segmentId == null || s == null || Number(s) === Number(segmentId);
+    };
+    const active = (this.loadedCustomerObjects() || [])
+      .filter((c: any) => (c?.status || 'active') === 'active' && sameSegment(c));
+    const contactId = (contact as any)?.id;
+    return active.find((c: any) => contactId != null && Number(c?.contact_id ?? c?.contactId) === Number(contactId))
+      || active.find((c: any) => this.optionEquals(c?.customer_name ?? c?.customerName, contact.name))
+      || null;
+  }
+
+  /** Fills the quick-add popup with a saved customer's values (Update mode). */
+  private loadCustomerIntoQuickAdd(customer: any): void {
+    const pick = (snake: string, camel: string) => customer?.[snake] ?? customer?.[camel] ?? '';
+    this.quickCustomerEditingId.set(Number(customer?.id) || null);
+    this.quickAddName.set(pick('customer_name', 'customerName'));
+    this.quickAddCode.set(pick('customer_code', 'customerCode'));
+    this._quickAddCodeManuallySet = true;          // keep the existing code
+    const gstins = (pick('gstins', 'gstins') || []).map((g: any) => ({
+      id: g?.id,
+      stateName: g?.stateName ?? g?.state_name ?? '',
+      state_name: g?.state_name ?? g?.stateName ?? '',
+      stateCode: g?.stateCode ?? g?.state_code ?? null,
+      state_code: g?.state_code ?? g?.stateCode ?? null,
+      gstin: g?.gstin ?? '',
+      isPrimary: !!(g?.isPrimary ?? g?.is_primary),
+      is_primary: !!(g?.is_primary ?? g?.isPrimary)
+    }));
+    const state = pick('state', 'state');
+    this.formValues.update(fv => ({
+      ...fv,
+      quickCustomerType: pick('customer_type', 'customerType') || 'Company',
+      quickCustomerCategory: pick('customer_category', 'customerCategory'),
+      quickCustomerPan: pick('pan', 'pan'),
+      quickCustomerMobile: pick('mobile', 'mobile'),
+      quickCustomerEmail: pick('email', 'email'),
+      quickCustomerAddress: pick('address', 'address'),
+      quickCustomerPincode: pick('pincode', 'pincode'),
+      quickCustomerState: state,
+      quickCustomerDistrict: pick('district', 'district'),
+      quickCustomerCity: pick('city', 'city'),
+      quickCustomerPincodeState: '',               // set again if the pincode is retyped
+      quickCustomerShippingAddress: pick('shipping_address', 'shippingAddress'),
+      quickCustomerCreditLimit: pick('credit_limit', 'creditLimit') || 0,
+      quickCustomerPaymentTerms: pick('payment_term_name', 'paymentTermName'),
+      quickCustomerBankPayeeName: pick('bank_payee_name', 'bankPayeeName'),
+      quickCustomerBankAccountNo: pick('bank_account_no', 'bankAccountNo'),
+      quickCustomerBankIfscCode: pick('bank_ifsc_code', 'bankIfscCode'),
+      quickCustomerBankName: pick('bank_name', 'bankName'),
+      quickCustomerBankBranchName: pick('bank_branch_name', 'bankBranchName'),
+      quickCustomerStatus: (pick('status', 'status') || 'active') === 'inactive' ? 'Inactive' : 'Active',
+      quickCustomerGstins: gstins
     }));
   }
 
@@ -18339,23 +18432,33 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (customer?.payment_term_name) {
       next['paymentTerms'] = customer.payment_term_name;
     }
-    if (this.config?.key === 'deliveryChallan') {
-      Object.assign(next, this.dcAddressPatchFromSource(customer, false, next));
-    }
-    // Sales Invoice: fill the Delivery / Ship Address from the customer master.
-    // A different customer clears the previous customer's address first, so
-    // the new one is not left behind the old values.
-    if (this.config?.key === 'salesInvoice') {
+    // Delivery Challan, Sales Order, Sales Invoice: the Delivery Address IS the
+    // customer's address (read-only on the document; changed only through
+    // + / Update on the customer). A different customer replaces it completely.
+    const deliveryFromCustomerScreens = ['deliveryChallan', 'salesOrder', 'salesInvoice'];
+    if (deliveryFromCustomerScreens.includes(this.config?.key || '')) {
       const customerChanged = !this.optionEquals(this.formValues()[key], value);
       if (customerChanged) {
-        Object.assign(next, {
-          deliveryHouseNo: '', deliveryStreet: '', deliveryState: '', deliveryDistrict: '',
-          deliveryCity: '', deliveryPincode: '', deliveryAddress: '',
-          shipSameAsDelivery: 'Yes', shipAddress: ''
-        });
+        next['shipSameAsDelivery'] = 'Yes';
+        next['shipAddress'] = '';
       }
-      Object.assign(next, this.dcAddressPatchFromSource(customer, false, next));
+      Object.assign(next, this.deliveryFromCustomer(customer));
     }
+  }
+
+    /** Delivery fields of a sales document, taken as-is from the customer master. */
+  private deliveryFromCustomer(customer: any): Record<string, any> {
+    const patch: Record<string, any> = {
+      deliveryHouseNo: '',
+      deliveryStreet: String(customer?.address || '').trim(),   // the customer's address text
+      deliveryState: String(customer?.state || '').trim(),
+      deliveryDistrict: String(customer?.district || '').trim(),
+      deliveryCity: String(customer?.city || '').trim(),
+      deliveryPincode: String(customer?.pincode || '').trim()
+    };
+    // Full address for print / saving: "address, city, district, state, pincode"
+    patch['deliveryAddress'] = this.composeDcDeliveryAddress(patch);
+    return patch;
   }
 
   private applySalesTransactionPaymentDefaults(next: Record<string, any>, key: string): void {
@@ -18407,11 +18510,40 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return this.formValues()['shipSameAsDelivery'] !== 'No';
   }
 
-  toggleShipSameAsDelivery(checked: boolean): void {
+    /** Ship-to state differs from the delivery state: the GST type would change, so it is not allowed. */
+  shipStateMismatchMessage(): string {
+    if (this.shipSameAsDelivery()) return '';
+    const v = this.formValues();
+    const deliveryState = String(v['deliveryState'] || '').trim();
+    const shipState = String(v['shipState'] || '').trim();
+    if (!deliveryState || !shipState || this.optionEquals(deliveryState, shipState)) return '';
+    return `Shipping to ${shipState} is not allowed: the customer's address is in ${deliveryState}, `
+      + `and another state changes the GST. Ship only within ${deliveryState}, or use the customer's branch in ${shipState}.`;
+  }
+
+    /** Customer GSTIN for the invoice header: the GSTIN registered in the delivery state,
+   *  else the primary one, else the single one; '' when the customer has none. */
+  salesInvoiceCustomerGstin(): string {
+    const v = this.formValues();
+    const customer: any = this.findCustomerBySelection(v['customer']);
+    if (!customer) return '';
+    const rows: any[] = Array.isArray(customer.gstins) ? customer.gstins : [];
+    const deliveryState = String(v['deliveryState'] || '').trim();
+    const gstinOf = (r: any) => String(r?.gstin || '').trim();
+    const stateOf = (r: any) => String(r?.stateName ?? r?.state_name ?? '').trim();
+    const inDeliveryState = deliveryState ? rows.find(r => gstinOf(r) && this.optionEquals(stateOf(r), deliveryState)) : null;
+    const primary = rows.find(r => gstinOf(r) && (r?.isPrimary ?? r?.is_primary));
+    const any = rows.find(r => gstinOf(r));
+    return gstinOf(inDeliveryState) || gstinOf(primary) || gstinOf(any) || String(customer.gstin || '').trim();
+  }
+
+    toggleShipSameAsDelivery(checked: boolean): void {
     this.formValues.update(v => ({
       ...v,
       shipSameAsDelivery: checked ? 'Yes' : 'No',
-      shipAddress: checked ? '' : (v['shipAddress'] || '')
+      shipAddress: checked ? '' : (v['shipAddress'] || ''),
+      // ship to another branch of the same customer: same state as the delivery address
+      shipState: checked ? '' : (v['shipState'] || v['deliveryState'] || '')
     }));
   }
 
@@ -18660,39 +18792,55 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // 'district'/'city'/'pincode' keys are safe here (no 'delivery' prefix
   // needed) since Vendor Master and Customer Master are never both open at
   // once and those are exactly the backend column names already.
-  partyDistrictOptions(): string[] {
-    const state = String(this.formValues()['state'] || '').trim();
-    const current = String(this.formValues()['district'] || '').trim();
+    partyDistrictOptions(prefix = ''): string[] {
+    const state = String(this.formValues()[this.partyAddressKey(prefix, 'state')] || '').trim();
+    const current = String(this.formValues()[this.partyAddressKey(prefix, 'district')] || '').trim();
     const districts = DC_STATE_DISTRICTS[state] || [];
     return current && !districts.some(item => this.optionEquals(item, current))
       ? [current, ...districts]
       : districts;
   }
 
-  onPartyStateChange(value: any): void {
+    /** Warning when the chosen State is not the state of the entered pincode. */
+  partyPincodeStateMismatch(prefix = ''): string {
+    const state = String(this.formValues()[this.partyAddressKey(prefix, 'state')] || '').trim();
+    const pinState = String(this.formValues()[this.partyAddressKey(prefix, 'pincodeState')] || '').trim();
+    const pincode = String(this.formValues()[this.partyAddressKey(prefix, 'pincode')] || '').trim();
+    if (!state || !pinState || this.optionEquals(state, pinState)) return '';
+    return `Pincode ${pincode} is in ${pinState}, but the state is ${state}. Please check.`;
+  }
+
+    onPartyStateChange(value: any, prefix = ''): void {
     const state = toInventoryTitleCase(String(value || ''));
+    const stateKey = this.partyAddressKey(prefix, 'state');
+    const districtKey = this.partyAddressKey(prefix, 'district');
     this.formValues.update(values => {
       const districts = DC_STATE_DISTRICTS[state] || [];
-      const currentDistrict = String(values['district'] || '').trim();
+      const currentDistrict = String(values[districtKey] || '').trim();
       return {
         ...values,
-        state,
-        district: currentDistrict && districts.length && !districts.some(item => this.optionEquals(item, currentDistrict)) ? '' : currentDistrict
+        [stateKey]: state,
+        [districtKey]: currentDistrict && districts.length && !districts.some(item => this.optionEquals(item, currentDistrict)) ? '' : currentDistrict
       };
     });
   }
 
-  onPartyPincodeChange(value: any): void {
+    /** '' -> 'state'; 'quickCustomer' -> 'quickCustomerState' (same rule as the party form's pfx()). */
+  private partyAddressKey(prefix: string, field: string): string {
+    return prefix ? prefix + field[0].toUpperCase() + field.slice(1) : field;
+  }
+
+   onPartyPincodeChange(value: any, prefix = ''): void {
     const pincode = String(value || '').replace(/\D/g, '').slice(0, 6);
-    this.collectFormField('pincode', pincode);
+    this.collectFormField(this.partyAddressKey(prefix, 'pincode'), pincode);
     if (pincode.length === 6) {
-      this.lookupPartyPincode(pincode);
+      this.lookupPartyPincode(pincode, prefix);
     }
   }
 
-  private lookupPartyPincode(pincode: string): void {
+    private lookupPartyPincode(pincode: string, prefix = ''): void {
     const local = this.localDcPincodeLookup(pincode);
-    if (local) this.applyPartyPincodeLookup(local);
+    if (local) this.applyPartyPincodeLookup(local, prefix);
 
     const seq = ++this.partyPincodeLookupSeq;
     fetch(`https://api.postalpincode.in/pincode/${encodeURIComponent(pincode)}`)
@@ -18706,17 +18854,23 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           district: postOffice.District || '',
           city: postOffice.Block && postOffice.Block !== 'NA' ? postOffice.Block : (postOffice.Name || ''),
           area: postOffice.Name || ''
-        });
+        }, prefix);
       })
       .catch(() => { });
   }
 
-  private applyPartyPincodeLookup(lookup: { state: string; district: string; city: string; area: string }): void {
+    private applyPartyPincodeLookup(lookup: { state: string; district: string; city: string; area: string }, prefix = ''): void {
+    const stateKey = this.partyAddressKey(prefix, 'state');
+    const districtKey = this.partyAddressKey(prefix, 'district');
+    const cityKey = this.partyAddressKey(prefix, 'city');
+    const pinStateKey = this.partyAddressKey(prefix, 'pincodeState');
     this.formValues.update(values => ({
       ...values,
-      state: lookup.state || values['state'] || '',
-      district: lookup.district || values['district'] || '',
-      city: lookup.city || values['city'] || ''
+      [stateKey]: lookup.state || values[stateKey] || '',
+      [districtKey]: lookup.district || values[districtKey] || '',
+      [cityKey]: lookup.city || values[cityKey] || '',
+      // the pincode's own state, for the "state doesn't match pincode" warning
+      [pinStateKey]: lookup.state ? toInventoryTitleCase(String(lookup.state)) : (values[pinStateKey] || '')
     }));
   }
 
@@ -23071,31 +23225,6 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           usage_note: v['usageNote'] || null,
           status: lc(v['status'] || 'active')
         };
-      // case 'bomMaster':
-      //   return {
-      //     id: this.editingId(),
-      //     segment_id: selectedSegmentId,
-      //     bom_code: String(v['bomCode'] || '').trim() || null,
-      //     bom_version: String(v['version'] || '').trim() || null,
-      //     finished_product_id: this.findProductBySelection(v['finishedProduct'])?.id ?? null,
-      //     finished_product_name: String(v['finishedProduct'] || '').trim(),
-      //     quantity: this.parseCurrency(v['quantity']) || 1,
-      //     wastage_percent: this.parseCurrency(v['wastagePercent']) || 0,
-      //     production_cost: this.parseCurrency(v['productionCost']) || 0,
-      //     status: lc(v['status'] || 'active'),
-      //     // Raw materials are rows now, not a comma-joined string, so a BOM can
-      //     // be queried and costed. sp_upsert_bom replaces them wholesale.
-      //     items: this.rawMaterialNamesFromBomValue(v['rawMaterials']).map(name => {
-      //       const product = this.findProductBySelection(name);
-      //       return {
-      //         product_id: product?.id ?? null,
-      //         product_name: name,
-      //         quantity: 1,
-      //         uom_id: null,
-      //         uom_name: this.productBaseUomLabel(product) || null
-      //       };
-      //     })
-      //   };
       case 'bomMaster':
         return {
           id: this.editingId(),
@@ -24089,7 +24218,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         reference_no: v['referenceNo'] || v['soReference'] || null,
         customer_id: customerId,
         customer_name: customerName,
-        customer_gstin: customerGstin,
+        // the GSTIN shown on the screen (registered in the delivery state, else primary)
+        customer_gstin: this.salesInvoiceCustomerGstin() || customerGstin,
         channel_partner_id: channelPartnerId,
         channel_partner_name: channelPartnerName,
         lead_by_contact_id: String(v['leadBy'] || '').trim()
@@ -24112,7 +24242,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         internal_notes: v['internalNotes'] || null,
         // Delivery / Ship address (migration 257).
         delivery_address: v['deliveryAddress'] || this.composeDcDeliveryAddress(v) || null,
-        ship_address: this.resolvedShipAddress(v) || null,
+        // Ship to another branch: the address text plus its state (same state as delivery)
+        ship_address: this.shipSameAsDelivery()
+          ? (this.resolvedShipAddress(v) || null)
+          : ([String(v['shipAddress'] || '').trim(), String(v['shipState'] || '').trim()].filter(Boolean).join(', ') || null),
         status: status(v['status'], 'draft'),
         items
       };
@@ -25808,6 +25941,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Delivery Address is optional, but once switched on its State is mandatory.
       if (this.deliveryAddressEnabled() && !String(this.formValues()['deliveryState'] ?? '').trim()) {
         return 'State is required in Delivery Address.';
+      }
+      // Ship to another address: address required, and only within the same state.
+      if (!this.shipSameAsDelivery()) {
+        if (!String(this.formValues()['shipAddress'] ?? '').trim()) return 'Ship Address is required (or set "Ship Address same as Delivery Address" to Yes).';
+        const shipStateError = this.shipStateMismatchMessage();
+        if (shipStateError) return shipStateError;
       }
       const invoiceItemsError = this.validateSalesInvoiceLineItems(payload['items']);
       if (invoiceItemsError) return invoiceItemsError;
