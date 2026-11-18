@@ -12184,7 +12184,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // Purchase Invoice entry grid: CGST + SGST (or IGST) under the GST Total in
   // the Total row. Same rule as the PI print (purchaseInvoiceFinancials):
   // our branch/company GSTIN vs the vendor's GSTIN/state, CGST/SGST halves as
-  // the backend posts them (gstHalves). Unknown states -> CGST + SGST.
+  // the backend posts them (gstHalves). Shown only once a vendor is selected;
+  // a selected vendor whose state cannot be determined -> CGST + SGST.
   lineFooterGstSplit(): { isInterstate: boolean; cgst: string; sgst: string; igst: string } | null {
     if (this.config?.key !== 'purchaseInvoice') return null;
     let tax = 0;
@@ -12202,6 +12203,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       vendor_name: form['vendor']
     };
     const vendor = this.vendorForRecord(record);
+    // No vendor selected yet -> show only the GST Total; the CGST/SGST or
+    // IGST lines appear once a vendor is picked, by that vendor's state.
+    if (!vendor) return null;
     const origin = this.ourGstOrigin(record);
     const isInterstate = !!this.isInterstateTransaction(
       origin.gstin, origin.state, this.partyPrimaryGstin(vendor), this.partyPrimaryState(vendor)
