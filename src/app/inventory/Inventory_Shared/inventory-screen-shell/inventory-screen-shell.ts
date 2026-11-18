@@ -8671,10 +8671,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // CGST Amt | SGST Amt (or IGST Amt) | Amount (Rs.)
   // withSerials: the line's serial nos print (bold, in brackets) under the
   // product name — Sales Invoice only; Sales Return shares these rows without.
-  private salesInvoiceDocumentRows(record: any, isInterstate = false, withSerials = false): { rows: string[][]; totalRow: string[] } {
+  // sortByName: lines print A→Z by product name with S.No renumbered 1..n
+  // (Sales Invoice only, user request 2026-11-18). The CGST/SGST split is still
+  // worked out in entry order first so each line's odd paisa matches the DB.
+  // Previous: private salesInvoiceDocumentRows(record: any, isInterstate = false, withSerials = false): { rows: string[][]; totalRow: string[] } {
+  private salesInvoiceDocumentRows(record: any, isInterstate = false, withSerials = false, sortByName = false): { rows: string[][]; totalRow: string[] } {
     const sum = { gross: 0, discount: 0, taxable: 0, cgst: 0, sgst: 0, total: 0 };
     const splitGst = this.gstLineSplitter();
-    const rows = (record?.items || []).map((item: any, index: number) => {
+    const builtRows: string[][] = (record?.items || []).map((item: any, index: number) => {
       // Product-wise GST: taxable value and CGST/SGST (or IGST) amount per line.
       // SGST = tax - CGST so the two halves always add up to the line tax.
       const { taxable, tax } = this.salesInvoiceLineTax(item);
@@ -8720,6 +8724,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         this.moneyValue(lineTotal)
       ];
     });
+    const productName = (row: string[]) => String(row[1] || '').split('\n')[0].trim();
+    const rows = sortByName
+      ? [...builtRows]
+          .sort((a, b) => productName(a).localeCompare(productName(b), undefined, { sensitivity: 'base', numeric: true }))
+          .map((row, index) => [String(index + 1), ...row.slice(1)])
+      : builtRows;
     const totalRow = [
       'Total', '', '', '', '',
       this.moneyValue(sum.gross),
@@ -8833,7 +8843,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     //   this.salesInvoiceDocumentRows(record, lineIsInterstate)
     // );
     // Previous: const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate);
-    const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate, true);
+    // Previous: const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate, true);
+    const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate, true, true);
     const columns = ['S.No', 'Product Description', 'HSN/SAC Code', 'Qty', 'Rate', 'Amount', 'Disc.', 'Taxable Value',
       ...(lineIsInterstate ? ['Rate %', 'Amount'] : ['Rate %', 'Amount', 'Rate %', 'Amount']), 'TOTAL'];
     const columnGroups: Array<[string, number]> = [
