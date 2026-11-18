@@ -12181,6 +12181,41 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return { value: fmt(value), discount: fmt(discount), gst: fmt(gst) };
   }
 
+  // Purchase Invoice entry grid: CGST + SGST (or IGST) under the GST Total in
+  // the Total row. Same rule as the PI print (purchaseInvoiceFinancials):
+  // our branch/company GSTIN vs the vendor's GSTIN/state, CGST/SGST halves as
+  // the backend posts them (gstHalves). Unknown states -> CGST + SGST.
+  lineFooterGstSplit(): { isInterstate: boolean; cgst: string; sgst: string; igst: string } | null {
+    if (this.config?.key !== 'purchaseInvoice') return null;
+    let tax = 0;
+    this.directEntryLineRows().forEach((row, rowIndex) => {
+      const preview = this.transactionLineAmountPreview(row, rowIndex);
+      if (preview) tax += this.roundLineAmount(preview.taxAmount);
+    });
+    tax = this.roundLineAmount(tax);
+    const form = this.formValues();
+    const warehouse = this.findWarehouseBySelection(form['receivingLocation'] || form['warehouse'] || form['warehouseId']);
+    const record = {
+      branch_id: this.optionalNumber(form['branchId']),
+      warehouse_id: warehouse?.id ?? this.optionalNumber(form['warehouseId']),
+      vendor_id: this.optionalNumber(form['vendorId']),
+      vendor_name: form['vendor']
+    };
+    const vendor = this.vendorForRecord(record);
+    const origin = this.ourGstOrigin(record);
+    const isInterstate = !!this.isInterstateTransaction(
+      origin.gstin, origin.state, this.partyPrimaryGstin(vendor), this.partyPrimaryState(vendor)
+    );
+    const halves = this.gstHalves(tax);
+    const fmt = (n: number) => `Rs. ${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return {
+      isInterstate,
+      cgst: fmt(isInterstate ? 0 : halves.cgst),
+      sgst: fmt(isInterstate ? 0 : halves.sgst),
+      igst: fmt(isInterstate ? tax : 0)
+    };
+  }
+
   // Sales / Purchase Invoice: the whole-rupee Grand Total under the line grid
   // and the Round Off that gets there. Lines are summed at paise the way the
   // server does (migration 275 stores the same round off on save).
