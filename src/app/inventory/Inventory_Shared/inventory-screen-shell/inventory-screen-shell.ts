@@ -11519,18 +11519,44 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const discountAmount = gross * discountPct / 100;
     const discountedGross = gross - discountAmount;
     const gstIncluded = gstIncludedOverride ?? (rowIndex !== undefined ? this.lineGstIncluded(rowIndex) : false);
+    // Previous:
+    // if (gstIncluded && gstPct > 0) {
+    //   const taxableAmount = discountedGross / (1 + gstPct / 100);
+    //   return {
+    //     gross,
+    //     discountAmount,
+    //     taxableAmount,
+    //     taxAmount: discountedGross - taxableAmount,
+    //     total: discountedGross,
+    //     gstIncluded
+    //   };
+    // }
+    // const taxAmount = discountedGross * gstPct / 100;
+
+    // Entry grids of SI / PI / SR / PR, intrastate: CGST = SGST =
+    // ROUND(taxable x gst%/2, 2) and GST = CGST + SGST, so the saved line
+    // tax is always an even number of paise and the backend's
+    // ROUND(tax/2) split (sp_post_sales_invoice etc.) gives equal halves.
+    // Interstate (IGST) lines and saved-record fallbacks keep the old rule.
+    const equalHalves = rowIndex !== undefined && gstPct > 0 && this.entryLineGstEqualHalves();
     if (gstIncluded && gstPct > 0) {
-      const taxableAmount = discountedGross / (1 + gstPct / 100);
+      const rawTaxableAmount = discountedGross / (1 + gstPct / 100);
+      const taxAmount = equalHalves
+        ? this.gstEqualHalvesTax(rawTaxableAmount, gstPct)
+        : discountedGross - rawTaxableAmount;
+      const taxableAmount = equalHalves ? discountedGross - taxAmount : rawTaxableAmount;
       return {
         gross,
         discountAmount,
         taxableAmount,
-        taxAmount: discountedGross - taxableAmount,
+        taxAmount,
         total: discountedGross,
         gstIncluded
       };
     }
-    const taxAmount = discountedGross * gstPct / 100;
+    const taxAmount = equalHalves
+      ? this.gstEqualHalvesTax(discountedGross, gstPct)
+      : discountedGross * gstPct / 100;
     return {
       gross,
       discountAmount,
@@ -11544,6 +11570,53 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private roundLineAmount(value: number): number {
     return Math.round((Number(value) || 0) * 100) / 100;
   }
+
+  // GST of one line as CGST + SGST, each ROUND(taxable x gst%/2, 2), half
+  // away from zero like PostgreSQL. Worked in paise; toFixed(6) strips float
+  // noise (419.50 x 9 = 3775.4999… would otherwise round down).
+  private gstEqualHalvesTax(taxable: number, gstPct: number): number {
+    const halfPaise = Number(((Number(taxable) || 0) * (Number(gstPct) || 0) / 2).toFixed(6));
+    const roundedHalf = Math.sign(halfPaise) * Math.round(Math.abs(halfPaise));
+    return (roundedHalf * 2) / 100;
+  }
+
+  // Equal CGST/SGST halves apply on the SI / PI / SR / PR entry screens unless
+  // the document is clearly interstate (IGST). Unknown state = intrastate,
+  // same as the backend (COALESCE(fn_is_interstate_transaction, false)).
+  private entryLineGstEqualHalves(): boolean {
+    const key = this.config?.key;
+    if (key !== 'salesInvoice' && key !== 'purchaseInvoice' && key !== 'salesReturn' && key !== 'purchaseReturn') return false;
+    return !this.entryFormIsInterstate();
+  }
+
+  // Party + our location from the entry form -> CGST/SGST vs IGST, by the same
+  // rule as the print (salesInvoiceFinancials / purchaseInvoiceFinancials).
+  // Cached on the form/master signals so the grid can call it per row.
+  private readonly entryFormIsInterstate = computed(() => {
+    const v = this.formValues();
+    const key = this.config?.key;
+    const sales = key === 'salesInvoice' || key === 'salesReturn';
+    const picked = this.resolveMergedLocation(v['warehouse'] || v['receivingLocation'] || v['location'] || '');
+    const warehouseId = picked?.warehouse?.id ?? this.optionalNumber(v['warehouseId']);
+    const branchId = picked?.warehouse ? null : (picked?.branch ? this.branchResolvedId(picked.branch) : this.optionalNumber(v['branchId']));
+    const origin = this.ourGstOrigin({ branch_id: branchId, warehouse_id: warehouseId });
+    if (sales) {
+      const customer = this.findCustomerBySelection(v['customer'])
+        || this.customerForRecord({ customer_id: v['customerId'], customer_name: v['customer'] });
+      if (!customer) return false;
+      const placeOfSupply = String(v['placeOfSupply'] || '').trim();
+      return !!this.isInterstateTransaction(
+        origin.gstin, origin.state,
+        this.partyPrimaryGstin(customer), this.partyPrimaryState(customer),
+        placeOfSupply || null
+      );
+    }
+    const vendor = this.vendorForRecord({ vendor_id: this.optionalNumber(v['vendorId']), vendor_name: v['vendor'] });
+    if (!vendor) return false;
+    return !!this.isInterstateTransaction(
+      origin.gstin, origin.state, this.partyPrimaryGstin(vendor), this.partyPrimaryState(vendor)
+    );
+  });
 
   private transactionLineTaxPayload(row: string[], rowIndex: number, qty: number, rate?: number, discountPct?: number, gstPct?: number): {
     gst_inclusive: boolean;
@@ -12802,6 +12875,118 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   dismissPriceHint(rowIndex: number, fingerprint: string): void {
     this.dismissedPriceHints.update(map => ({ ...map, [rowIndex]: fingerprint }));
+  }
+
+  // Rate calculation hint is hidden once the user moves on to that row's
+  // Disc % cell (it would otherwise sit over the Disc input), and shown
+  // again when they click back into the Rate cell.
+  private readonly priceHintHiddenByFocus = signal<Record<number, boolean>>({});
+
+  isPriceHintHiddenByFocus(rowIndex: number): boolean {
+    return !!this.priceHintHiddenByFocus()[rowIndex];
+  }
+
+  onLineCellFocus(rowIndex: number, column: string): void {
+    const key = this.compactKey(column);
+    if (key !== 'rate' && this.rateHistoryRowIndex() !== null) {
+      this.closeRateHistory();
+    }
+    if (key.includes('disc')) {
+      this.priceHintHiddenByFocus.update(map => ({ ...map, [rowIndex]: true }));
+    } else if (key === 'rate') {
+      this.priceHintHiddenByFocus.update(map => ({ ...map, [rowIndex]: false }));
+    }
+  }
+
+  // Purchase Invoice Rate cell "i" button — shows the latest three Purchase
+  // Invoices (newest first) that bought the row's product, so the user can
+  // compare the rate being entered with what was paid before. Cancelled
+  // invoices and the invoice currently being edited are left out.
+  readonly rateHistoryRowIndex = signal<number | null>(null);
+  readonly rateHistoryLoading = signal(false);
+  readonly rateHistoryProductName = signal('');
+  readonly rateHistoryPosition = signal<{ top: number; left: number }>({ top: 0, left: 0 });
+  readonly rateHistoryRows = signal<Array<{
+    piNumber: string;
+    piDate: string;
+    vendorName: string;
+    qty: number;
+    uomName: string;
+    rate: number;
+    discountPct: number;
+    gstRate: number;
+  }>>([]);
+
+  isRateColumn(column: string): boolean {
+    return this.compactKey(column) === 'rate';
+  }
+
+  closeRateHistory(): void {
+    this.rateHistoryRowIndex.set(null);
+    this.rateHistoryRows.set([]);
+    this.rateHistoryLoading.set(false);
+  }
+
+  toggleRateHistory(rowIndex: number, row: string[], event?: Event): void {
+    event?.stopPropagation();
+    if (this.rateHistoryRowIndex() === rowIndex) {
+      this.closeRateHistory();
+      return;
+    }
+    const product = this.lineRowProduct(row);
+    // The grid sits in a scrolling wrapper that would clip a dropdown, so the
+    // panel is fixed-positioned just under the clicked "i" button.
+    const anchor = (event?.currentTarget as HTMLElement | null)?.getBoundingClientRect?.();
+    if (anchor) {
+      const width = 520;
+      const left = Math.max(8, Math.min(anchor.right - width, window.innerWidth - width - 8));
+      this.rateHistoryPosition.set({ top: anchor.bottom + 4, left });
+    }
+    this.rateHistoryRowIndex.set(rowIndex);
+    this.rateHistoryRows.set([]);
+    this.rateHistoryProductName.set(product?.product_name || '');
+    if (!product?.id) {
+      this.rateHistoryLoading.set(false);
+      return;
+    }
+    const productId = Number(product.id);
+    const currentId = Number(this.editingId() || 0);
+    this.rateHistoryLoading.set(true);
+    this.txService.getPurchaseInvoices().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: res => {
+        if (this.rateHistoryRowIndex() !== rowIndex) return;
+        const lines: Array<{ sortDate: string; id: number; view: any }> = [];
+        for (const pi of res?.data || []) {
+          if (this.normalizeKey(pi?.status || 'draft') === 'cancelled') continue;
+          if (currentId && Number(pi?.id) === currentId) continue;
+          for (const item of pi?.items || []) {
+            if (Number(item?.product_id) !== productId) continue;
+            lines.push({
+              sortDate: String(pi?.pi_date || pi?.created_at || ''),
+              id: Number(pi?.id || 0),
+              view: {
+                piNumber: pi?.pi_number || '',
+                piDate: pi?.pi_date || '',
+                vendorName: pi?.vendor_name || '',
+                qty: Number(item?.qty || 0),
+                uomName: item?.uom_name || '',
+                rate: Number(item?.rate || 0),
+                discountPct: Number(item?.discount_pct || 0),
+                gstRate: Number(item?.gst_rate || 0)
+              }
+            });
+          }
+        }
+        lines.sort((a, b) => b.sortDate.localeCompare(a.sortDate) || b.id - a.id);
+        this.rateHistoryRows.set(lines.slice(0, 3).map(l => l.view));
+        this.rateHistoryLoading.set(false);
+      },
+      error: () => {
+        if (this.rateHistoryRowIndex() !== rowIndex) return;
+        this.rateHistoryRows.set([]);
+        this.rateHistoryLoading.set(false);
+      }
+    });
   }
 
   transactionPriceHintClass(hint: PriceHintView | null | undefined): string {
