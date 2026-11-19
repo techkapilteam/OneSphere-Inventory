@@ -111,6 +111,15 @@
               </span>
             </label>
           </div>
+          <!-- Customer GSTIN (read-only): from the customer master; change it via + beside Party / Customer -->
+          @if (formValues()['customer']) {
+            <div class="erp-form-group">
+              <label class="erp-label">Customer GSTIN</label>
+              <input class="erp-input" type="text" readonly
+                [value]="salesInvoiceCustomerGstin() || 'Unregistered (B2C)'"
+                title="From the customer master. To change it, use + beside Party / Customer." />
+            </div>
+          }
           @if (referralBusinessEnabled() && bodyFieldByKey('channelPartner'); as field) {
             <div class="erp-form-group inventory-header-col-6">
               <label class="erp-label">{{ field.label }} <span class="text-danger">*</span></label>
