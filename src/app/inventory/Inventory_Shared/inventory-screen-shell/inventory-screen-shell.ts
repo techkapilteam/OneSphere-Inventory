@@ -18676,6 +18676,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (customerChanged) {
         next['shipSameAsDelivery'] = 'Yes';
         next['shipAddress'] = '';
+        this.deliveryAddressOverride.set(null); 
       }
       Object.assign(next, this.deliveryFromCustomer(customer));
     }
@@ -18726,15 +18727,21 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       || v['deliveryCity'] || v['deliveryPincode'] || v['deliveryAddress']);
   }
 
-  toggleDeliveryAddress(checked: boolean): void {
+    toggleDeliveryAddress(checked: boolean): void {
     this.deliveryAddressOverride.set(checked);
     if (!checked) {
       this.formValues.update(v => ({
         ...v,
         deliveryHouseNo: '', deliveryStreet: '', deliveryState: '',
         deliveryDistrict: '', deliveryCity: '', deliveryPincode: '', deliveryAddress: '',
-        shipSameAsDelivery: 'Yes', shipAddress: ''
+        shipSameAsDelivery: 'Yes', shipAddress: '', shipState: ''
       }));
+      return;
+    }
+    // Yes again: refill from the selected customer (read-only address)
+    const customer = this.findCustomerBySelection(this.formValues()['customer']);
+    if (customer) {
+      this.formValues.update(v => ({ ...v, ...this.deliveryFromCustomer(customer) }));
     }
   }
 
@@ -26178,7 +26185,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         return 'State is required in Delivery Address.';
       }
       // Ship to another address: address required, and only within the same state.
-      if (!this.shipSameAsDelivery()) {
+      if (this.deliveryAddressEnabled() &&!this.shipSameAsDelivery()) {
         if (!String(this.formValues()['shipAddress'] ?? '').trim()) return 'Ship Address is required (or set "Ship Address same as Delivery Address" to Yes).';
         const shipStateError = this.shipStateMismatchMessage();
         if (shipStateError) return shipStateError;
