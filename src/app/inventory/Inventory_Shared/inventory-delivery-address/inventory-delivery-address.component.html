@@ -1,10 +1,18 @@
 <section class="inventory-fieldset delivery-challan-fieldset">
   <!-- Delivery address = the customer's address (read-only). To change it,
        use + beside Party / Customer (Update on the customer). -->
-  <div class="inventory-fieldset-title inventory-fieldset-title-row">
+    <div class="inventory-fieldset-title inventory-fieldset-title-row">
     <span><i class="pi pi-map-marker"></i> Delivery Address</span>
-    <small class="inventory-field-hint">From the customer master. To change it, use + beside Party / Customer.</small>
+    <label class="inventory-labeled-switch yes-no" title="Deliver to the customer's address?">
+      <input type="checkbox" [checked]="host.deliveryAddressEnabled()" (change)="host.toggleDeliveryAddress($any($event.target).checked)" />
+      <span class="inventory-switch-track">
+        <span class="switch-text switch-on">Yes</span>
+        <span class="switch-text switch-off">No</span>
+      </span>
+    </label>
   </div>
+  @if (host.deliveryAddressEnabled()) {
+  <small class="inventory-field-hint">From the customer master. To change it, use + beside Party / Customer.</small>
   <div class="inventory-form-grid delivery-address-grid">
     <div class="erp-form-group span-2">
       <label class="erp-label">Address</label>
@@ -66,4 +74,5 @@
       }
     }
   </div>
+}
 </section>
