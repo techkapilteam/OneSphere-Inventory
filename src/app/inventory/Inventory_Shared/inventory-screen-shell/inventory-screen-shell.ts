@@ -82,6 +82,8 @@ interface GridExportPayload {
   boldFieldLabels?: string[];
   boxedFieldLabels?: string[];
   pdfColumnWidths?: Record<number, number>;
+  pdfBlueHead?: boolean;
+  pdfCenterColumns?: number[];
   copyType?: string;
   terms?: string[];
   bankDetails?: Array<[string, string]>;
@@ -9033,7 +9035,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       totalRow: rows.length ? totalRow : undefined,
       // Previous: summary: [...summaryRows, ['Grand Total', this.formatCurrency(totals.total)]] as Array<[string, string]>,
       // Previous: summary: [...summaryRows, ['Total', this.moneyValue(totals.total)]],
-      summary: [...summaryRows, ['Grand Total', this.invoiceGrandTotalText(totals.total)]],
+      // Previous: summary: [...summaryRows, ['Grand Total', this.invoiceGrandTotalText(totals.total)]],
+      // Grand Total always with paise, e.g. 15,207.00 (user request 2026-11-19).
+      summary: [...summaryRows, ['Grand Total', this.moneyValue(totals.total)]],
       notes: String(record.customer_notes || record.customerNotes || ''),
       notesLabel: 'Notes',
       // Test point 16: Grand Total in words (same helper as Purchase Invoice).
@@ -9076,6 +9080,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Previous: { [exportColumns.length - 1]: 24 } — Qty (index 3) also widened
       // so 3-digit quantities (100, 200) don't touch the cell border.
       pdfColumnWidths: rows.length ? { 3: 12, [exportColumns.length - 1]: 24 } : undefined,
+      // Grid headings in the Purchase Invoice blue (#0b4093, white text) and
+      // Qty (index 3) centred in its cell (user request 2026-11-19).
+      pdfBlueHead: rows.length ? true : undefined,
+      pdfCenterColumns: rows.length ? [3] : undefined,
       boldCellSegments: rows.length ? this.documentSerialSegments(record) : undefined,
       fileName: `Sales_Invoice_${docNo || 'Selected_Record'}`
     };
@@ -9442,6 +9450,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       boldFieldLabels: payload.boldFieldLabels,
       boxedFieldLabels: payload.boxedFieldLabels,
       pdfColumnWidths: payload.pdfColumnWidths,
+      pdfBlueHead: payload.pdfBlueHead,
+      pdfCenterColumns: payload.pdfCenterColumns,
       copyType: payload.copyType,
       terms: payload.terms,
       bankDetails: payload.bankDetails,

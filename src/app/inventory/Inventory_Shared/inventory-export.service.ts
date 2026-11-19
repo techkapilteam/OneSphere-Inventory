@@ -75,6 +75,11 @@ export interface InventoryExportDocument {
   pdfColumnWidths?: Record<number, number>;
   /** PDF only: table header font size (default 10) — smaller lets wide lists fit portrait. */
   pdfHeadFontSize?: number;
+  /** PDF only, tax grid (columnGroups): headings filled #0b4093 with white
+   *  text, like the Purchase Invoice grid, instead of the plain white header. */
+  pdfBlueHead?: boolean;
+  /** PDF only: body cells of these column indexes centred (Sales Invoice Qty). */
+  pdfCenterColumns?: number[];
 
   /** Invoice layout (Purchase Invoice): "Total Invoice Amount In Words" (and notes)
    *  on the left and the totals on the right, in ONE bordered block joined
@@ -113,7 +118,9 @@ const ONE_PAGE_SCALES = [1, 0.92, 0.85, 0.78, 0.7, 0.62];
 const BANK_BOX_HEIGHT = 58;
 // Previous: 32 — too little room to sign; taller box gives space for the
 // Authorised Signatory signature and the Common Seal.
-const SIGNATURE_ROW_HEIGHT = 45;
+// Previous: 45 — Purchase Invoice signature box now as tall as the Sales
+// Invoice Bank Details / Authorised Signatory box (user request 2026-11-19).
+const SIGNATURE_ROW_HEIGHT = BANK_BOX_HEIGHT;
 const NUMERIC_CELL =/^-?(rs\.?\s*|₹\s*)?-?[\d,]+(\.\d+)?\s*%?$/i;
 
 // No "Rs." / ₹ in any Inventory PDF, Print or Excel (user request 2026-11-14);
@@ -747,6 +754,9 @@ export class InventoryExportService {
         if (/%/.test(header)) columnStyles[index] = { ...columnStyles[index], halign: 'center' };
       });
     }
+    (document.pdfCenterColumns || []).forEach(index => {
+      columnStyles[index] = { ...columnStyles[index], halign: 'center' };
+    });
 
     autoTable(doc, {
       // Previous: head: [document.columns],
@@ -757,8 +767,10 @@ export class InventoryExportService {
       startY: y,
       margin: { left: L_MARGIN, right: R_MARGIN, top: 15, bottom: 15 },
       // Previous: headStyles: { fillColor: HEADER_COLOR, textColor: 255, halign: 'center', valign: 'middle', fontSize: document.pdfHeadFontSize || 10 },
+      // Previous (tax grid): always fillColor 255 / textColor 0; pdfBlueHead
+      // (Sales Invoice) now uses the Purchase Invoice blue with white text.
       headStyles: taxGrid
-        ? { fillColor: 255, textColor: 0, fontStyle: 'bold', halign: 'center', valign: 'middle', fontSize: (document.pdfHeadFontSize || 8) * gs, cellPadding: 0.8 * gs, lineColor: 0, lineWidth: 0.2 }
+        ? { fillColor: document.pdfBlueHead ? HEADER_COLOR : 255, textColor: document.pdfBlueHead ? 255 : 0, fontStyle: 'bold', halign: 'center', valign: 'middle', fontSize: (document.pdfHeadFontSize || 8) * gs, cellPadding: 0.8 * gs, lineColor: 0, lineWidth: 0.2 }
         : { fillColor: HEADER_COLOR, textColor: 255, halign: 'center', valign: 'middle', fontSize: document.pdfHeadFontSize || 10 },
       // Previous: styles: { fontSize: 8, cellPadding: 0.8, overflow: 'linebreak', valign: 'middle' } as any,
       styles: taxGrid
@@ -1317,9 +1329,10 @@ export class InventoryExportService {
     doc.text('Certified that the particulars given above are true and correct', x3 + 2, y + 4.5, { maxWidth: w3 - 4 });
     doc.line(x3, y + 6.5, x3 + w3, y + 6.5);
     if (company) {
-      doc.setFontSize(9.5);
-      doc.text(`For ${company}`, x3 + 2, y + 11.5, { maxWidth: w3 - 4 });
-      doc.line(x3, y + 13.5, x3 + w3, y + 13.5);
+      // Previous: 9.5pt at y + 11.5, rule at y + 13.5 — now 11pt like the Sales Invoice.
+      doc.setFontSize(11);
+      doc.text(`For ${company}`, x3 + 2, y + 12, { maxWidth: w3 - 4 });
+      doc.line(x3, y + 14.5, x3 + w3, y + 14.5);
     }
     doc.line(x3, bottom - 7, x3 + w3, bottom - 7);
     doc.setFontSize(10);
