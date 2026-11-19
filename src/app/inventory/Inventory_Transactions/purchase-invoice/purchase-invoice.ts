@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, ViewChild, effect, inject, signal, untracked } from '@angular/core';
+import { Component, HostListener, OnDestroy, ViewChild, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, SafeResourceUrl, SafeUrl } from '@angular/platform-browser';
 import { RouterModule } from '@angular/router';
@@ -23,6 +23,81 @@ type PendingPurchaseInvoiceAttachmentSaveContext = { existingId: number | null; 
   imports: [CommonModule, FormsModule, RouterModule, NgSelectModule, DatePickerModule, InventoryScreenShell, InventoryQuickAddModalComponent, InventorySerialPickerModalComponent, InventoryTransportDetailsComponent, PurchaseInvoiceAttachmentsComponent, InventoryLineProductPickerComponent],
   templateUrl: './purchase-invoice.html',
   styles: [`
+    .pi-rate-cell {
+      position: relative;
+    }
+    .pi-rate-cell .inventory-grid-input {
+      width: 100%;
+      padding-right: 26px;
+    }
+    .pi-rate-history-btn {
+      position: absolute;
+      top: 50%;
+      right: 6px;
+      transform: translateY(-50%);
+      border: 0;
+      background: transparent;
+      color: #1d4ed8;
+      cursor: pointer;
+      padding: 2px;
+      line-height: 1;
+      border-radius: 50%;
+    }
+    .pi-rate-history-btn:hover,
+    .pi-rate-history-btn.active {
+      background: #dbeafe;
+    }
+    .pi-rate-history-panel {
+      position: fixed;
+      z-index: 1200;
+      width: 520px;
+      max-width: calc(100vw - 16px);
+      background: #fff;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+      padding: 8px 10px;
+      font-size: 12px;
+      white-space: normal;
+    }
+    .pi-rate-history-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+      color: #1e3a8a;
+    }
+    .pi-rate-history-close {
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      color: #64748b;
+    }
+    .pi-rate-history-empty {
+      color: #64748b;
+      padding: 6px 0;
+    }
+    .pi-rate-history-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .pi-rate-history-table th,
+    .pi-rate-history-table td {
+      padding: 4px 6px;
+      border-bottom: 1px solid #e2e8f0;
+      text-align: left;
+      white-space: nowrap;
+    }
+    .pi-rate-history-table th {
+      background: #f1f5f9;
+      font-weight: 600;
+      color: #334155;
+    }
+    .pi-rate-history-table .num {
+      text-align: right;
+    }
+
     :host ::ng-deep .purchase-invoice-page .inventory-form-grid {
       align-items: start;
     }
@@ -256,6 +331,14 @@ type PendingPurchaseInvoiceAttachmentSaveContext = { existingId: number | null; 
 export class InventoryPurchaseInvoiceComponent extends InventoryScreenShell implements OnDestroy {
   override readonly config = purchaseInvoiceConfig;
   @ViewChild(PurchaseInvoiceAttachmentsComponent) private purchaseInvoiceAttachments?: PurchaseInvoiceAttachmentsComponent;
+
+  // Close the Rate "last 3 purchases" popup on any click outside it (e.g.
+  // in or near the Disc % cell). The "i" button and the panel itself stop
+  // propagation, so clicks on them don't reach here.
+  @HostListener('document:click')
+  onDocumentClickCloseRateHistory(): void {
+    if (this.rateHistoryRowIndex() !== null) this.closeRateHistory();
+  }
 
   private readonly sanitizer = inject(DomSanitizer);
   private pendingAttachmentResolveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -567,13 +650,60 @@ export class InventoryPurchaseInvoiceComponent extends InventoryScreenShell impl
   }
 
   override savePurchaseInvoiceDraft(): void {
+    if (!this.ensurePurchaseInvoiceAttachmentPresent()) return;
     this.pendingAttachmentFallbackContext = this.preparePendingAttachmentSave();
     super.savePurchaseInvoiceDraft();
   }
 
   override postPurchaseInvoice(): void {
+    if (!this.ensurePurchaseInvoiceAttachmentPresent()) return;
     this.pendingAttachmentFallbackContext = this.preparePendingAttachmentSave();
     super.postPurchaseInvoice();
+  }
+
+  // Grid "Post" on a saved draft row: the draft must already have at least
+  // one Attachment PI Ref saved against it, otherwise posting is blocked.
+  override postPurchaseInvoiceRecordByRow(row: string[]): void {
+    const invoiceId = this.purchaseInvoiceIdForRow(row);
+    if (!invoiceId) {
+      super.postPurchaseInvoiceRecordByRow(row);
+      return;
+    }
+    this.txService.getPurchaseInvoiceAttachments(invoiceId).subscribe({
+      next: res => {
+        if ((res.data || []).length) {
+          super.postPurchaseInvoiceRecordByRow(row);
+          return;
+        }
+        this.saveMsg.set('');
+        this.saveError.set('Attachment PI Ref is mandatory. Click Edit, attach the PI file, then Post.');
+      },
+      error: err => {
+        this.saveMsg.set('');
+        this.saveError.set(this.apiErrorMessage(err, 'Could not verify Attachment PI Ref. Try again.'));
+      }
+    });
+  }
+
+  // Attachment PI Ref is mandatory on Purchase Invoice: Save Draft / Post are
+  // blocked until a file is picked (new PI) or one is already saved (edit).
+  private ensurePurchaseInvoiceAttachmentPresent(): boolean {
+    if (this.purchaseInvoiceIsPostedForm()) return true; // base handles posted-form messages
+    const panel = this.purchaseInvoiceAttachments;
+    if (!panel) return true;
+    if (panel.isBusy()) {
+      this.saveMsg.set('');
+      this.saveError.set('Attachment PI Ref is still loading/uploading. Please wait and try again.');
+      return false;
+    }
+    if (!panel.hasAnyAttachment()) {
+      panel.showRequiredError(true);
+      this.saveMsg.set('');
+      this.saveError.set('Attachment PI Ref is mandatory. Attach the PI file before saving.');
+      return false;
+    }
+    panel.showRequiredError(false);
+    return true;
   }
 
   private purchaseInvoiceRecordForRow(row: string[]): any | null {

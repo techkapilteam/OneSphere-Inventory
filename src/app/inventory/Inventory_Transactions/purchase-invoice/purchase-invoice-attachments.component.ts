@@ -45,6 +45,11 @@ import { InventoryTransactionsService, PurchaseInvoiceAttachment } from '../../I
       background: #fff;
     }
 
+    .purchase-invoice-attachment-box.is-required-missing {
+      border-color: #dc2626;
+      box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.12);
+    }
+
     .purchase-invoice-attachment-toolbar {
       display: flex;
       align-items: center;
@@ -225,6 +230,9 @@ export class PurchaseInvoiceAttachmentsComponent implements OnChanges {
   readonly uploadError = signal('');
   readonly deletingId = signal<number | null>(null);
   readonly pendingFileName = signal('');
+  // Attachment PI Ref is mandatory: set when Save Draft / Post is attempted
+  // with no file picked and none already saved on the PI.
+  readonly requiredError = signal(false);
 
   readonly previewOpen = signal(false);
   readonly previewLoading = signal(false);
@@ -239,6 +247,7 @@ export class PurchaseInvoiceAttachmentsComponent implements OnChanges {
 
   ngOnChanges(changes: SimpleChanges): void {
     if (!changes['purchaseInvoiceId']) return;
+    this.requiredError.set(false);
     const invoiceId = Number(this.purchaseInvoiceId || 0);
     if (invoiceId) {
       this.loadAttachments();
@@ -279,6 +288,7 @@ export class PurchaseInvoiceAttachmentsComponent implements OnChanges {
 
     this.uploadError.set('');
     this.listError.set('');
+    this.requiredError.set(false);
     if (!this.purchaseInvoiceId) {
       this.pendingFile = file;
       this.pendingFileName.set(file.name);
@@ -291,6 +301,19 @@ export class PurchaseInvoiceAttachmentsComponent implements OnChanges {
 
   hasPendingAttachment(): boolean {
     return !!this.pendingFile;
+  }
+
+  /** True when a file is picked (new PI) or at least one ref is already saved on this PI. */
+  hasAnyAttachment(): boolean {
+    return !!this.pendingFile || this.attachments().length > 0;
+  }
+
+  isBusy(): boolean {
+    return this.loading() || this.uploadPending();
+  }
+
+  showRequiredError(show: boolean): void {
+    this.requiredError.set(show);
   }
 
   attachPendingToPurchaseInvoice(purchaseInvoiceId: number): void {
@@ -307,6 +330,7 @@ export class PurchaseInvoiceAttachmentsComponent implements OnChanges {
 
   resetForNewInvoice(): void {
     this.purchaseInvoiceId = 0;
+    this.requiredError.set(false);
     this.clearPendingAttachment();
     this.clearCurrentAttachmentView();
     this.closePreview();

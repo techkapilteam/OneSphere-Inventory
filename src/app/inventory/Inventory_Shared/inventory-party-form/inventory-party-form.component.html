@@ -104,15 +104,30 @@
               placeholder="Leave blank if same as Address"></textarea>
           </div>
         }
-      } @else {
+        } @else {
         <div class="erp-form-group">
-          <!-- Previous: <label class="erp-label">State @if (taxIdsRequired) {<span class="text-danger">*</span>}</label> -->
+          <label class="erp-label">Pincode</label>
+          <input class="erp-input" type="text" maxlength="6"
+            [ngModel]="host.formValues()[pfx('pincode')] || ''"
+            (ngModelChange)="host.onPartyPincodeChange($event, keyPrefix)"
+            placeholder="6-digit pincode (fills State, District, City)" />
+        </div>
+        <div class="erp-form-group">
           <label class="erp-label">State @if (stateRequired) {<span class="text-danger">*</span>}</label>
           <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
             [items]="host.dcAddressStates" [searchable]="true" [clearable]="true"
             [ngModel]="host.formValues()[pfx('state')] || ''"
-            (ngModelChange)="host.collectFormField(pfx('state'), $event)"
+            (ngModelChange)="host.onPartyStateChange($event, keyPrefix)"
             placeholder="Select state">
+          </ng-select>
+        </div>
+        <div class="erp-form-group">
+          <label class="erp-label">District</label>
+          <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+            [items]="host.partyDistrictOptions(keyPrefix)" [searchable]="true" [clearable]="true"
+            [ngModel]="host.formValues()[pfx('district')] || ''"
+            (ngModelChange)="host.collectFormField(pfx('district'), $event)"
+            placeholder="Select district">
           </ng-select>
         </div>
         <div class="erp-form-group">
@@ -122,13 +137,11 @@
             (ngModelChange)="host.collectFormField(pfx('city'), $event)"
             placeholder="City or town" />
         </div>
-        <div class="erp-form-group">
-          <label class="erp-label">Pincode</label>
-          <input class="erp-input" type="text" maxlength="6"
-            [ngModel]="host.formValues()[pfx('pincode')] || ''"
-            (ngModelChange)="host.collectFormField(pfx('pincode'), $event)"
-            placeholder="6-digit pincode" />
-        </div>
+        @if (host.partyPincodeStateMismatch(keyPrefix); as mismatch) {
+          <div class="erp-form-group span-2">
+            <div class="erp-field-error"><i class="pi pi-exclamation-triangle"></i> {{ mismatch }}</div>
+          </div>
+        }
       }
     </div>
   </div>
