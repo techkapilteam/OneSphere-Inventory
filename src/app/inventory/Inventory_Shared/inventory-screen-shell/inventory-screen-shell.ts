@@ -9013,7 +9013,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // using the same check as the item grid columns.
       ...(totals.isInterstate
         ? [['IGST', this.moneyValue(totals.igst)]]
-        : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]]) as Array<[string, string]>
+        : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]]) as Array<[string, string]>,
+      // Round off row removed again from the SI PDF (user request 2026-11-19).
+      // Previous: ['Round off', this.moneyValue(totals.roundOff)]
+      // Round off back above Grand Total (user request 2026-11-19, later), signed
+      // like the screen footer: +0.40 / -0.40 (0.00 when none).
+      ['Round off', totals.roundOff
+        ? `${totals.roundOff < 0 ? '-' : '+'}${this.moneyValue(Math.abs(totals.roundOff))}`
+        : this.moneyValue(0)]
     ];
     return {
       // Previous: title: `Sales Invoice - ${docNo || 'Selected Record'}`,
@@ -12363,8 +12370,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // our branch/company GSTIN vs the vendor's GSTIN/state, CGST/SGST halves as
   // the backend posts them (gstHalves). Shown only once a vendor is selected;
   // a selected vendor whose state cannot be determined -> CGST + SGST.
+  // Sales Invoice: same footer, decided against the customer (state/GSTIN and
+  // Place of Supply) by entryFormIsInterstate — the same rule as the SI print.
   lineFooterGstSplit(): { isInterstate: boolean; cgst: string; sgst: string; igst: string } | null {
-    if (this.config?.key !== 'purchaseInvoice') return null;
+    const key = this.config?.key;
+    if (key !== 'purchaseInvoice' && key !== 'salesInvoice') return null;
+    if (key === 'salesInvoice') return this.salesInvoiceFooterGstSplit();
     let tax = 0;
     this.directEntryLineRows().forEach((row, rowIndex) => {
       const preview = this.transactionLineAmountPreview(row, rowIndex);
@@ -12387,6 +12398,31 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const isInterstate = !!this.isInterstateTransaction(
       origin.gstin, origin.state, this.partyPrimaryGstin(vendor), this.partyPrimaryState(vendor)
     );
+    const halves = this.gstHalves(tax);
+    const fmt = (n: number) => `Rs. ${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return {
+      isInterstate,
+      cgst: fmt(isInterstate ? 0 : halves.cgst),
+      sgst: fmt(isInterstate ? 0 : halves.sgst),
+      igst: fmt(isInterstate ? tax : 0)
+    };
+  }
+
+  // Sales Invoice footer split: CGST + SGST for a same-state customer, IGST
+  // for another state. Shown only once a customer is picked; a customer whose
+  // state cannot be determined -> CGST + SGST (as the backend posts it).
+  private salesInvoiceFooterGstSplit(): { isInterstate: boolean; cgst: string; sgst: string; igst: string } | null {
+    const v = this.formValues();
+    const customer = this.findCustomerBySelection(v['customer'])
+      || this.customerForRecord({ customer_id: v['customerId'], customer_name: v['customer'] });
+    if (!customer) return null;
+    let tax = 0;
+    this.directEntryLineRows().forEach((row, rowIndex) => {
+      const preview = this.transactionLineAmountPreview(row, rowIndex);
+      if (preview) tax += this.roundLineAmount(preview.taxAmount);
+    });
+    tax = this.roundLineAmount(tax);
+    const isInterstate = this.entryFormIsInterstate();
     const halves = this.gstHalves(tax);
     const fmt = (n: number) => `Rs. ${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     return {

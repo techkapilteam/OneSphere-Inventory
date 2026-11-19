@@ -465,6 +465,7 @@
                             [type]="cellView?.inputType"
                             [ngModel]="cellView?.controlValue"
                             (ngModelChange)="setEntryLineCell(rowIndex, columnIndex, $event)"
+                            (focus)="onLineCellFocus(rowIndex, column)"
                             [placeholder]="cellView?.placeholder || ''" />
                         }
                         @if (cellApplies && salesInvoiceWarrantyHint(rowIndex, row, column); as warrantyHint) {
@@ -478,7 +479,7 @@
                           </small>
                         }
                         @if (cellApplies && cellView?.priceHint; as priceHint) {
-                          @if (!isPriceHintDismissed(rowIndex, priceHint.fingerprint)) {
+                          @if (!isPriceHintDismissed(rowIndex, priceHint.fingerprint) && !isPriceHintHiddenByFocus(rowIndex)) {
                             <small [class]="transactionPriceHintClass(priceHint)">
                               <i class="pi" [class.pi-exclamation-triangle]="priceHint.severity !== 'info'" [class.pi-info-circle]="priceHint.severity === 'info'" style="font-size:9px"></i>
                               {{ priceHint.message }}
@@ -495,6 +496,7 @@
               </tbody>
               <tfoot>
                 @let footerTotals = lineFooterTotals();
+                @let gstSplit = lineFooterGstSplit();
                 <tr class="inventory-line-total-row">
                   <td class="text-center"></td>
                   <td></td>
@@ -508,6 +510,16 @@
                         <strong [title]="'Total Discount'">{{ footerTotals.discount }}</strong>
                       } @else if (column === 'GST') {
                         <strong [title]="'GST Total'">{{ footerTotals.gst }}</strong>
+                        @if (gstSplit) {
+                          <div style="display: flex; flex-direction: column; gap: 2px; margin-top: 4px; font-size: 11px; font-weight: 600;">
+                            @if (gstSplit.isInterstate) {
+                              <span>IGST: {{ gstSplit.igst }}</span>
+                            } @else {
+                              <span>CGST: {{ gstSplit.cgst }}</span>
+                              <span>SGST: {{ gstSplit.sgst }}</span>
+                            }
+                          </div>
+                        }
                       } @else if (column === 'Amount') {
                         <strong>{{ lineColumnTotalByColumn(column) }}</strong>
                       }

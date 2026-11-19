@@ -650,13 +650,60 @@ export class InventoryPurchaseInvoiceComponent extends InventoryScreenShell impl
   }
 
   override savePurchaseInvoiceDraft(): void {
+    if (!this.ensurePurchaseInvoiceAttachmentPresent()) return;
     this.pendingAttachmentFallbackContext = this.preparePendingAttachmentSave();
     super.savePurchaseInvoiceDraft();
   }
 
   override postPurchaseInvoice(): void {
+    if (!this.ensurePurchaseInvoiceAttachmentPresent()) return;
     this.pendingAttachmentFallbackContext = this.preparePendingAttachmentSave();
     super.postPurchaseInvoice();
+  }
+
+  // Grid "Post" on a saved draft row: the draft must already have at least
+  // one Attachment PI Ref saved against it, otherwise posting is blocked.
+  override postPurchaseInvoiceRecordByRow(row: string[]): void {
+    const invoiceId = this.purchaseInvoiceIdForRow(row);
+    if (!invoiceId) {
+      super.postPurchaseInvoiceRecordByRow(row);
+      return;
+    }
+    this.txService.getPurchaseInvoiceAttachments(invoiceId).subscribe({
+      next: res => {
+        if ((res.data || []).length) {
+          super.postPurchaseInvoiceRecordByRow(row);
+          return;
+        }
+        this.saveMsg.set('');
+        this.saveError.set('Attachment PI Ref is mandatory. Click Edit, attach the PI file, then Post.');
+      },
+      error: err => {
+        this.saveMsg.set('');
+        this.saveError.set(this.apiErrorMessage(err, 'Could not verify Attachment PI Ref. Try again.'));
+      }
+    });
+  }
+
+  // Attachment PI Ref is mandatory on Purchase Invoice: Save Draft / Post are
+  // blocked until a file is picked (new PI) or one is already saved (edit).
+  private ensurePurchaseInvoiceAttachmentPresent(): boolean {
+    if (this.purchaseInvoiceIsPostedForm()) return true; // base handles posted-form messages
+    const panel = this.purchaseInvoiceAttachments;
+    if (!panel) return true;
+    if (panel.isBusy()) {
+      this.saveMsg.set('');
+      this.saveError.set('Attachment PI Ref is still loading/uploading. Please wait and try again.');
+      return false;
+    }
+    if (!panel.hasAnyAttachment()) {
+      panel.showRequiredError(true);
+      this.saveMsg.set('');
+      this.saveError.set('Attachment PI Ref is mandatory. Attach the PI file before saving.');
+      return false;
+    }
+    panel.showRequiredError(false);
+    return true;
   }
 
   private purchaseInvoiceRecordForRow(row: string[]): any | null {
