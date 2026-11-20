@@ -357,11 +357,62 @@
                             (ngModelChange)="setEntryLineCell(rowIndex, columnIndex, $event)"
                             [placeholder]="cellView?.placeholder || ''">
                           </ng-select>
+                        } @else if (isRateColumn(column)) {
+                          <div class="pi-rate-cell">
+                            <input class="erp-input inventory-grid-input"
+                              [type]="cellView?.inputType"
+                              [ngModel]="cellView?.controlValue"
+                              (ngModelChange)="setEntryLineCell(rowIndex, columnIndex, $event)"
+                              (focus)="onLineCellFocus(rowIndex, column)"
+                              [placeholder]="cellView?.placeholder || ''" />
+                            <button type="button" class="pi-rate-history-btn" title="Last 3 purchases of this product"
+                              aria-label="Last 3 purchases of this product"
+                              [class.active]="rateHistoryRowIndex() === rowIndex"
+                              (click)="toggleRateHistory(rowIndex, row, $event)">
+                              <i class="pi pi-info-circle"></i>
+                            </button>
+                            @if (rateHistoryRowIndex() === rowIndex) {
+                              <div class="pi-rate-history-panel" (click)="$event.stopPropagation()"
+                                [style.top.px]="rateHistoryPosition().top" [style.left.px]="rateHistoryPosition().left">
+                                <div class="pi-rate-history-head">
+                                  <strong>Last 3 Purchases{{ rateHistoryProductName() ? ' - ' + rateHistoryProductName() : '' }}</strong>
+                                  <button type="button" class="pi-rate-history-close" title="Close" (click)="closeRateHistory()"><i class="pi pi-times"></i></button>
+                                </div>
+                                @if (rateHistoryLoading()) {
+                                  <div class="pi-rate-history-empty"><i class="pi pi-spin pi-spinner"></i> Loading...</div>
+                                } @else if (!rateHistoryProductName()) {
+                                  <div class="pi-rate-history-empty">Select a product first.</div>
+                                } @else if (!rateHistoryRows().length) {
+                                  <div class="pi-rate-history-empty">No previous purchases for this product.</div>
+                                } @else {
+                                  <table class="pi-rate-history-table">
+                                    <thead>
+                                      <tr><th>PI No</th><th>Date</th><th>Vendor</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Disc %</th><th class="num">GST %</th></tr>
+                                    </thead>
+                                    <tbody>
+                                      @for (h of rateHistoryRows(); track $index) {
+                                        <tr>
+                                          <td>{{ h.piNumber }}</td>
+                                          <td>{{ h.piDate | date:'dd-MM-yyyy' }}</td>
+                                          <td>{{ h.vendorName }}</td>
+                                          <td class="num">{{ h.qty }} {{ h.uomName }}</td>
+                                          <td class="num">{{ h.rate | number:'1.2-2' }}</td>
+                                          <td class="num">{{ h.discountPct }}</td>
+                                          <td class="num">{{ h.gstRate }}</td>
+                                        </tr>
+                                      }
+                                    </tbody>
+                                  </table>
+                                }
+                              </div>
+                            }
+                          </div>
                         } @else {
                           <input class="erp-input inventory-grid-input"
                             [type]="cellView?.inputType"
                             [ngModel]="cellView?.controlValue"
                             (ngModelChange)="setEntryLineCell(rowIndex, columnIndex, $event)"
+                            (focus)="onLineCellFocus(rowIndex, column)"
                             [placeholder]="cellView?.placeholder || ''" />
                         }
                         @if (cellApplies && cellView?.stockHint; as stockHint) {
@@ -370,7 +421,7 @@
                           </small>
                         }
                         @if (cellApplies && cellView?.priceHint; as priceHint) {
-                          @if (!isPriceHintDismissed(rowIndex, priceHint.fingerprint)) {
+                          @if (!isPriceHintDismissed(rowIndex, priceHint.fingerprint) && !isPriceHintHiddenByFocus(rowIndex)) {
                             <small [class]="transactionPriceHintClass(priceHint)">
                               <i class="pi" [class.pi-exclamation-triangle]="priceHint.severity !== 'info'" [class.pi-info-circle]="priceHint.severity === 'info'" style="font-size:9px"></i>
                               {{ priceHint.message }}
@@ -387,6 +438,7 @@
               </tbody>
               <tfoot>
                 @let footerTotals = lineFooterTotals();
+                @let gstSplit = lineFooterGstSplit();
                 <tr class="inventory-line-total-row">
                   <td class="text-center"></td>
                   <td class="text-center"></td>
@@ -400,6 +452,16 @@
                         <strong [title]="'Total Discount'">{{ footerTotals.discount }}</strong>
                       } @else if (column === 'GST') {
                         <strong [title]="'GST Total'">{{ footerTotals.gst }}</strong>
+                        @if (gstSplit) {
+                          <div style="display: flex; flex-direction: column; gap: 2px; margin-top: 4px; font-size: 11px; font-weight: 600;">
+                            @if (gstSplit.isInterstate) {
+                              <span>IGST: {{ gstSplit.igst }}</span>
+                            } @else {
+                              <span>CGST: {{ gstSplit.cgst }}</span>
+                              <span>SGST: {{ gstSplit.sgst }}</span>
+                            }
+                          </div>
+                        }
                       } @else if (column === 'Accepted Qty' || column === 'Amount') {
                         <strong>{{ lineColumnTotalByColumn(column) }}</strong>
                       }

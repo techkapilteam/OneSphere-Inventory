@@ -409,6 +409,21 @@ export const inventoryRoutes: Routes = [
     ]
   },
   {
+    // Lease & Meter Billing (always available)
+    path: 'lease',
+    children: [
+      { path: 'contracts', canActivate: [screenPermissionGuard('INV_LEASE_CONTRACT')],
+        loadComponent: () => import('./Inventory_Lease/lease-contracts/lease-contracts').then(m => m.InventoryLeaseContractsComponent) },
+      { path: 'readings', canActivate: [screenPermissionGuard('INV_LEASE_READINGS')],
+        loadComponent: () => import('./Inventory_Lease/meter-readings/meter-readings').then(m => m.InventoryMeterReadingsComponent) },
+      { path: 'billing', canActivate: [screenPermissionGuard('INV_LEASE_BILLING')],
+        loadComponent: () => import('./Inventory_Lease/lease-billing/lease-billing').then(m => m.InventoryLeaseBillingComponent) },
+      { path: 'reports', canActivate: [screenPermissionGuard('INV_LEASE_REPORTS')],
+        loadComponent: () => import('./Inventory_Lease/lease-reports/lease-reports').then(m => m.InventoryLeaseReportsComponent) },
+      { path: '', redirectTo: 'contracts', pathMatch: 'full' }
+    ]
+  },
+  {
     path: 'reports',
     children: [
       {

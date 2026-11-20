@@ -12,7 +12,10 @@
       <div class="inventory-modal" [class.inventory-modal--wide]="host.activeAddMaster() === 'Variant'">
         <div class="inventory-modal-header">
           <div>
-            <h3>{{ host.activeAddMaster() === 'New Segment' ? 'Add New Segment' : host.activeAddMaster() === 'Serial Number Policy' ? 'Add Policy' : 'Add ' + host.activeAddMaster() }}</h3>
+              <h3>{{ host.activeAddMaster() === 'Customer' && host.quickCustomerEditingId() ? 'Update Customer'
+                 : host.activeAddMaster() === 'New Segment' ? 'Add New Segment'
+                 : host.activeAddMaster() === 'Serial Number Policy' ? 'Add Policy'
+                 : 'Add ' + host.activeAddMaster() }}</h3>
             <p>
               @if (host.activeAddMaster() === 'HSN / SAC') {
                 Search the uploaded HSN/SAC tax master while you type, or enter a new code manually.
@@ -48,8 +51,9 @@
         </div>
 
         <!-- Duplicate / suggestions — shown when typing a name in any quick-add that uses quickAddName -->
-        @if (host.quickAddName().trim().length > 0 && (host.quickAddSuggestions().length > 0 || host.quickAddIsDuplicate())) {
-          <div class="inventory-duplicate-advice inventory-modal-advice" [class.inventory-duplicate-warn]="host.quickAddIsDuplicate()">
+        @if (host.quickAddName().trim().length > 0 && (host.quickAddSuggestions().length > 0 || host.quickAddIsDuplicate())
+             && !(host.activeAddMaster() === 'Customer' && host.quickCustomerEditingId())) {
+              <div class="inventory-duplicate-advice inventory-modal-advice" [class.inventory-duplicate-warn]="host.quickAddIsDuplicate()">
             @if (host.quickAddIsDuplicate()) {
               <strong><i class="pi pi-exclamation-triangle"></i> Already exists —</strong>
               <span>"{{ host.quickAddName() }}" is already in the {{ host.activeAddMaster() }} list. Save anyway only if it is a genuinely different entry.</span>
@@ -704,7 +708,13 @@
         } @else if (host.activeAddMaster() === 'Vendor') {
           <app-inventory-party-form [host]="host" partyKind="vendor" partyLabel="Vendor" keyPrefix="quickVendor" nameCodeMode="quickAddSignals"></app-inventory-party-form>
           @if (host.quickAddError()) { <p class="inventory-error-msg">{{ host.quickAddError() }}</p> }
-        } @else if (host.activeAddMaster() === 'Customer') {
+                } @else if (host.activeAddMaster() === 'Customer') {
+          @if (host.quickCustomerEditingId()) {
+            <div class="inventory-duplicate-advice inventory-modal-advice">
+              <strong><i class="pi pi-info-circle"></i> Existing customer</strong>
+              <span>This contact is already a customer ({{ host.quickAddCode() }}). Changes will update it.</span>
+            </div>
+          }
           <app-inventory-party-form [host]="host" partyKind="customer" partyLabel="Customer" keyPrefix="quickCustomer" nameCodeMode="quickAddSignals"></app-inventory-party-form>
           @if (host.quickAddError()) { <p class="inventory-error-msg">{{ host.quickAddError() }}</p> }
         } @else if (host.activeAddMaster() === 'Channel Partner') {
@@ -808,8 +818,9 @@
                        host.reportQuickAddUnavailable()"
               [disabled]="host.isSavingQuickAdd()">
               <i [class]="host.isSavingQuickAdd() ? 'pi pi-spin pi-spinner' : 'pi pi-check'"></i>
-              {{ host.activeAddMaster() === 'UOM Conversion' ? 'Add Row' : (host.isSavingQuickAdd() ? 'Saving...' : (host.activeAddMaster() === 'UOM' && host.isQuickUomMappingContext() ? 'Save & Map' : 'Save')) }}
-            </button>
+              {{ host.activeAddMaster() === 'UOM Conversion' ? 'Add Row'
+                 : host.activeAddMaster() === 'Customer' && host.quickCustomerEditingId() ? (host.isSavingQuickAdd() ? 'Updating...' : 'Update')
+                 : (host.isSavingQuickAdd() ? 'Saving...' : (host.activeAddMaster() === 'UOM' && host.isQuickUomMappingContext() ? 'Save & Map' : 'Save')) }}            </button>
           </div>
         }
       </div>

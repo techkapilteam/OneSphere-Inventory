@@ -1,4 +1,5 @@
-<p-toast position="top-right" />
+<!-- Notifications, errors and confirmations: bottom-right, timed, with an X to close (kept above the sticky footer). -->
+<p-toast position="bottom-right" [style]="{ bottom: toastBottom() }" />
 <div class="module-page inventory-page pay-receipt-page">
   <div class="inventory-shell">
     <app-inventory-screen-shell [config]="guideConfig()"></app-inventory-screen-shell>
@@ -52,19 +53,6 @@
         </section>
       }
     </section>
-
-    @if (saveError()) {
-      <div class="inventory-save-error">
-        <span>{{ saveError() }}</span>
-        <button type="button" class="inventory-alert-close" (click)="saveError.set('')" aria-label="Dismiss"><i class="pi pi-times"></i></button>
-      </div>
-    }
-    @if (saveMsg()) {
-      <div class="inventory-save-msg">
-        <span>{{ saveMsg() }}</span>
-        <button type="button" class="inventory-alert-close" (click)="saveMsg.set('')" aria-label="Dismiss"><i class="pi pi-times"></i></button>
-      </div>
-    }
 
     @if (hasParty()) {
       <section class="inventory-section">
@@ -187,6 +175,29 @@
         </section>
       }
 
+      @if (settlementMode()) {
+        <section class="inventory-section">
+          <div class="inventory-line-title">
+            <div>
+              <strong>Settlement</strong>
+              <span>The ticked {{ docLabel() }}s are netted off against the ticked {{ mode() === 'pay' ? 'Debit' : 'Credit' }} Notes. No cash or bank entry is made.</span>
+            </div>
+          </div>
+          <div class="pay-mode-total">
+            <span>{{ docLabel() }}s ticked: <b>{{ fmt(totalAllocated()) }}</b></span>
+            <span>{{ mode() === 'pay' ? 'Debit' : 'Credit' }} Notes applied: <b>{{ fmt(totalNotesApplied()) }}</b></span>
+            @if (totalAllocated() > 0 && totalNotesApplied() > 0) {
+              @if (Math.abs(totalAllocated() - totalNotesApplied()) < 0.5) {
+                <span class="pay-ok">✓ Fully settled</span>
+              } @else if (totalNotesApplied() < totalAllocated()) {
+                <span class="pay-warn">Notes fall short by {{ fmt(totalAllocated() - totalNotesApplied()) }}</span>
+              } @else {
+                <span class="pay-warn">Notes exceed the invoices by {{ fmt(totalNotesApplied() - totalAllocated()) }} — reduce the Apply Amount</span>
+              }
+            }
+          </div>
+        </section>
+      } @else {
       <section class="inventory-section">
         <div class="inventory-line-title">
           <div>
@@ -281,6 +292,7 @@
           </div>
         }
       </section>
+      }
 
       <section class="inventory-section">
         <div class="inventory-line-title"><div><strong>Other Details</strong></div></div>
@@ -425,10 +437,23 @@
       <div class="pay-f-item"><div class="pay-f-k">{{ mode() === 'pay' ? 'Net Payment' : 'Net Receipt' }}</div><div class="pay-f-v g">{{ fmt(netAmount()) }}</div></div>
       <div class="pay-footer-actions">
         <button type="button" class="erp-btn btn-white" (click)="clearAllocations()">Reset</button>
+        @if (availableNotes().length > 0) {
+          <button type="button" class="erp-btn" [class.btn-primary]="settlementMode()" [class.btn-white]="!settlementMode()"
+            [title]="settlementMode() ? 'Back to ' + (mode() === 'pay' ? 'payment' : 'receipt') : 'Settle invoices against notes, no cash or bank'" (click)="toggleSettlement()">
+            <i class="pi pi-sync"></i> Settlement
+          </button>
+        }
+        @if (settlementMode()) {
+          <button type="button" class="erp-btn btn-primary" [disabled]="!canSave()" (click)="settle()">
+            <i [class]="isSaving() ? 'pi pi-spin pi-spinner' : 'pi pi-check-circle'"></i>
+            {{ isSaving() ? 'Settling...' : 'Confirm Settlement' }}
+          </button>
+        } @else {
         <button type="button" class="erp-btn btn-primary" [disabled]="!canSave()" (click)="save()">
           <i [class]="isSaving() ? 'pi pi-spin pi-spinner' : 'pi pi-check-circle'"></i>
           {{ isSaving() ? 'Posting...' : ('Save & Post ' + (mode() === 'pay' ? 'Payment' : 'Receipt')) }}
         </button>
+        }
       </div>
     </div>
   </div>

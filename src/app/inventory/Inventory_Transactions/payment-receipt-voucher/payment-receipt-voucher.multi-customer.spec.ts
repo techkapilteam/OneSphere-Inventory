@@ -49,9 +49,9 @@ describe('PaymentReceiptVoucherComponent — multiple customers on Customer Rece
 
   afterEach(() => TestBed.resetTestingModule());
 
-  it('uses a multi-select only on Customer Receipt', () => {
+  it('is single selection on both Customer Receipt and Vendor Payment', () => {
     build('receipt');
-    expect(component.multiPartySelect()).toBe(true);
+    expect(component.multiPartySelect()).toBe(false);
     TestBed.resetTestingModule();
     build('pay');
     expect(component.multiPartySelect()).toBe(false);
