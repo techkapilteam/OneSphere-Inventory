@@ -49,6 +49,21 @@ describe('InventoryMeterReadingsComponent', () => {
     expect(c.usageOf(c.rows()[0])).toBe('150');
   });
 
+  it('a usage-quantity entry needs no counter: previous is ignored, usage is the quantity, and the meter remembers the mode', () => {
+    c.rows()[1].type = 'usage';
+    c.rows()[1].value = 12;
+    expect(c.usageOf(c.rows()[1])).toBe('12');
+    const save = vi.spyOn(api, 'saveReading').mockImplementation((b: any) => of({ success: true, message: '', data: { id: 7 } } as any));
+    vi.spyOn(api, 'verifyReadings').mockReturnValue(of({ success: true, message: '', data: { verified: 1, requested: 1 } }));
+    c.save();
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ lease_meter_id: 2, reading_value: 12, reading_type: 'usage' }));
+    // usage entries do not become the "previous" counter value; the next entry defaults to usage for that meter
+    c.readings.set([{ id: 60, lease_meter_id: 2, reading_date: '2026-11-20', reading_value: 12, reading_type: 'usage', status: 'verified' }]);
+    expect(c.previousOf(c.rows()[1].meter)).toBe(0);
+    expect(c.defaultTypeOf(c.rows()[1].meter)).toBe('usage');
+    expect(c.defaultTypeOf(c.rows()[0].meter)).toBe('normal');
+  });
+
   it('saves all filled rows and verifies them; refuses a lower reading', () => {
     const save = vi.spyOn(api, 'saveReading').mockImplementation((b: any) => of({ success: true, message: '', data: { id: b.lease_meter_id * 10 } } as any));
     const verify = vi.spyOn(api, 'verifyReadings').mockReturnValue(of({ success: true, message: '', data: { verified: 2, requested: 2 } }));

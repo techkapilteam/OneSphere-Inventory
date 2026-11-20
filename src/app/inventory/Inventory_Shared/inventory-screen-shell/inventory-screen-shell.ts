@@ -18748,7 +18748,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // Delivery Challan, Sales Order, Sales Invoice: the Delivery Address IS the
     // customer's address (read-only on the document; changed only through
     // + / Update on the customer). A different customer replaces it completely.
-    const deliveryFromCustomerScreens = ['deliveryChallan', 'salesOrder', 'salesInvoice'];
+    const deliveryFromCustomerScreens = ['deliveryChallan', 'salesOrder', 'salesInvoice', 'leaseContract'];
     if (deliveryFromCustomerScreens.includes(this.config?.key || '')) {
       const customerChanged = !this.optionEquals(this.formValues()[key], value);
       if (customerChanged) {

@@ -1,3 +1,4 @@
+import { createInventoryToast } from '../../Inventory_Shared/inventory-save-toast/inventory-save-toast.component';
 import { CommonModule } from '@angular/common';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -12,6 +13,7 @@ import { LeaseContract, LeaseMeter, LeaseMeterService, MeterReading } from '../l
 const TYPE_OPTIONS = [
   { value: 'normal', label: 'Normal' },
   { value: 'estimated', label: 'Estimated' },
+  { value: 'usage', label: 'Usage quantity (no counter)' },
   { value: 'reset', label: 'Meter reset (restarted)' },
   { value: 'replacement', label: 'Meter replaced' }
 ];
@@ -66,7 +68,7 @@ function today(): string {
                 <td><strong>{{ meterName(r.meter) }}</strong>
                   @if (r.meter.asset_ref) { <br><small class="text-muted">{{ r.meter.asset_ref }}</small> }</td>
                 <td>{{ r.meter.unit_name }}</td>
-                <td>{{ previousOf(r.meter) }}</td>
+                <td>{{ r.type === 'usage' ? '-' : previousOf(r.meter) }}</td>
                 <td>
                   <input class="erp-input" type="number" min="0" [(ngModel)]="r.value" [attr.aria-label]="'Reading for ' + meterName(r.meter)" />
                   @if (r.type === 'reset' || r.type === 'replacement') {
@@ -85,14 +87,6 @@ function today(): string {
         </table>
       </div>
 
-      @if (error()) {
-        <div class="inventory-save-error"><span>{{ error() }}</span>
-          <button type="button" class="inventory-alert-close" (click)="error.set('')" aria-label="Dismiss"><i class="pi pi-times"></i></button></div>
-      }
-      @if (message()) {
-        <div class="inventory-save-msg"><span>{{ message() }}</span>
-          <button type="button" class="inventory-alert-close" (click)="message.set('')" aria-label="Dismiss"><i class="pi pi-times"></i></button></div>
-      }
 
       <div class="inventory-form-actions">
         <button type="button" class="erp-btn btn-white" (click)="resetRows()"><i class="pi pi-times"></i> Clear</button>
@@ -148,6 +142,11 @@ export class InventoryMeterReadingsComponent implements OnInit {
   readonly error = signal('');
   readonly message = signal('');
 
+  // Messages are raised as the shared bottom-right toast (timed, with an X) and kept in the signals.
+  private readonly pageToast = createInventoryToast();
+  private pageFail(m: string): void { this.error.set(m); this.pageToast.error(m); }
+  private pageNote(m: string): void { this.message.set(m); this.pageToast.success(m); }
+
   readonly contractOptions = computed(() => this.contracts().map(c => ({
     id: c.id, label: `${c.contract_no} - ${c.customer_name}${c.site_name ? ' (' + c.site_name + ')' : ''}`
   })));
@@ -157,7 +156,7 @@ export class InventoryMeterReadingsComponent implements OnInit {
   ngOnInit(): void {
     this.api.getContracts().subscribe({
       next: res => this.contracts.set((res.data ?? []).filter(c => c.status === 'active' || c.status === 'suspended' || c.status === 'draft')),
-      error: err => this.error.set(LeaseMeterService.errorMessage(err))
+      error: err => this.pageFail(LeaseMeterService.errorMessage(err))
     });
   }
 
@@ -169,15 +168,24 @@ export class InventoryMeterReadingsComponent implements OnInit {
 
   /** Counter value this meter continues from: the latest non-void reading, else its opening reading. */
   previousOf(m: LeaseMeter): number {
-    const list = this.readings().filter(r => r.lease_meter_id === m.id && r.status !== 'void');
+    const list = this.readings().filter(r => r.lease_meter_id === m.id && r.status !== 'void' && r.reading_type !== 'usage');
     if (!list.length) return Number(m.opening_reading ?? 0);
     const last = list.reduce((a, b) => (String(a.reading_date) >= String(b.reading_date) ? a : b));
     return Number(last.reading_value);
   }
 
+  /** A meter whose last entry was a usage quantity keeps asking for a usage quantity. */
+  defaultTypeOf(m: LeaseMeter): string {
+    const list = this.readings().filter(r => r.lease_meter_id === m.id && r.status !== 'void');
+    if (!list.length) return 'normal';
+    const last = list.reduce((a, b) => (String(a.reading_date) >= String(b.reading_date) ? a : b));
+    return last.reading_type === 'usage' ? 'usage' : 'normal';
+  }
+
   /** Live usage for a normal / estimated reading; a reset or replaced meter is worked out on save. */
   usageOf(r: ReadingRow): string {
     if (r.value === null || r.value === undefined || (r.value as any) === '') return '';
+    if (r.type === 'usage') return String(Number(r.value));
     if (r.type === 'reset' || r.type === 'replacement') return 'on save';
     const u = Number(r.value) - this.previousOf(r.meter);
     return u < 0 ? 'lower than previous' : String(u);
@@ -190,8 +198,8 @@ export class InventoryMeterReadingsComponent implements OnInit {
     if (!id) return;
     this.api.getContract(id).subscribe({
       next: res => this.rows.set((res.data?.meters ?? []).filter(m => m.status !== 'inactive')
-        .map(m => ({ meter: m, value: null, type: 'normal', baseline: null, remarks: '' }))),
-      error: err => this.error.set(LeaseMeterService.errorMessage(err))
+        .map(m => ({ meter: m, value: null, type: this.defaultTypeOf(m), baseline: null, remarks: '' }))),
+      error: err => this.pageFail(LeaseMeterService.errorMessage(err))
     });
     this.loadReadings();
   }
@@ -200,13 +208,16 @@ export class InventoryMeterReadingsComponent implements OnInit {
     const id = this.contractId();
     if (!id) return;
     this.api.getReadings({ contractId: id }).subscribe({
-      next: res => this.readings.set(res.data ?? []),
-      error: err => this.error.set(LeaseMeterService.errorMessage(err))
+      next: res => {
+        this.readings.set(res.data ?? []);
+        this.rows.update(list => list.map(r => (r.value === null || r.value === undefined) ? { ...r, type: this.defaultTypeOf(r.meter) } : r));
+      },
+      error: err => this.pageFail(LeaseMeterService.errorMessage(err))
     });
   }
 
   resetRows(): void {
-    this.rows.update(list => list.map(r => ({ ...r, value: null, type: 'normal', baseline: null, remarks: '' })));
+    this.rows.update(list => list.map(r => ({ ...r, value: null, type: this.defaultTypeOf(r.meter), baseline: null, remarks: '' })));
     this.error.set(''); this.message.set(''); this.date = today();
   }
 
@@ -214,11 +225,11 @@ export class InventoryMeterReadingsComponent implements OnInit {
   save(): void {
     this.error.set(''); this.message.set('');
     const filled = this.rows().filter(r => r.value !== null && r.value !== undefined && (r.value as any) !== '');
-    if (!filled.length) { this.error.set('Enter at least one meter reading.'); return; }
+    if (!filled.length) { this.pageFail('Enter at least one meter reading.'); return; }
     for (const r of filled) {
       const prev = this.previousOf(r.meter);
       if ((r.type === 'normal' || r.type === 'estimated') && Number(r.value) < prev) {
-        this.error.set(`${this.meterName(r.meter)}: the reading ${r.value} is lower than the previous ${prev}. Choose "Meter reset" or "Meter replaced" if the counter restarted.`);
+        this.pageFail(`${this.meterName(r.meter)}: the reading ${r.value} is lower than the previous ${prev}. Choose "Meter reset" or "Meter replaced" if the counter restarted.`);
         return;
       }
     }
@@ -233,16 +244,16 @@ export class InventoryMeterReadingsComponent implements OnInit {
         const done = () => {
           this.busy.set(false);
           this.resetRows();
-          this.message.set(`${ids.length} reading(s) saved and verified. They are ready for billing.`);
+          this.pageNote(`${ids.length} reading(s) saved and verified. They are ready for billing.`);
           this.loadReadings();
         };
         if (!ids.length) { done(); return; }
         this.api.verifyReadings(ids).subscribe({
           next: () => done(),
-          error: err => { this.busy.set(false); this.error.set('Saved, but verification failed: ' + LeaseMeterService.errorMessage(err)); this.loadReadings(); }
+          error: err => { this.busy.set(false); this.pageFail('Saved, but verification failed: ' + LeaseMeterService.errorMessage(err)); this.loadReadings(); }
         });
       },
-      error: err => { this.busy.set(false); this.error.set(LeaseMeterService.errorMessage(err)); this.loadReadings(); }
+      error: err => { this.busy.set(false); this.pageFail(LeaseMeterService.errorMessage(err)); this.loadReadings(); }
     });
   }
 
@@ -257,8 +268,8 @@ export class InventoryMeterReadingsComponent implements OnInit {
     this.error.set(''); this.message.set('');
     this.busy.set(true);
     this.api.verifyReadings(this.selectedIds()).subscribe({
-      next: res => { this.busy.set(false); this.message.set(`${res.data?.verified ?? 0} reading(s) verified.`); this.selectedIds.set([]); this.loadReadings(); },
-      error: err => { this.busy.set(false); this.error.set(LeaseMeterService.errorMessage(err)); }
+      next: res => { this.busy.set(false); this.pageNote(`${res.data?.verified ?? 0} reading(s) verified.`); this.selectedIds.set([]); this.loadReadings(); },
+      error: err => { this.busy.set(false); this.pageFail(LeaseMeterService.errorMessage(err)); }
     });
   }
 
@@ -266,8 +277,8 @@ export class InventoryMeterReadingsComponent implements OnInit {
     if (!confirm(`Void the reading of ${r.reading_value} dated ${r.reading_date}?`)) return;
     this.error.set(''); this.message.set('');
     this.api.voidReading(r.id).subscribe({
-      next: () => { this.message.set('Reading voided.'); this.loadReadings(); },
-      error: err => this.error.set(LeaseMeterService.errorMessage(err))
+      next: () => { this.pageNote('Reading voided.'); this.loadReadings(); },
+      error: err => this.pageFail(LeaseMeterService.errorMessage(err))
     });
   }
 }

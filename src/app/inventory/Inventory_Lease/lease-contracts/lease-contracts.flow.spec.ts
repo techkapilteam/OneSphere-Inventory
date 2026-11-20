@@ -113,6 +113,27 @@ describe('InventoryLeaseContractsComponent flows', () => {
     expect(c.leaseUnitPickerFor()).toBeNull();
   });
 
+
+  it('site address: the customer address by default, or a separate installation address with its state', () => {
+    c.leaseDraft.customer_id = 1;
+    expect(c.deliveryAddressEnabled()).toBe(true);   // address block is shown once a customer is chosen
+    c.formValues.update((v: any) => ({ ...v, deliveryStreet: 'Plot 1, Station Road', deliveryState: 'Telangana', deliveryCity: 'Warangal', deliveryPincode: '506002' }));
+    let site = c.leaseSiteFields();
+    expect(site.site_address).toBe('Plot 1, Station Road');
+    expect(site.site_state).toBe('Telangana');
+    expect(site.site_city).toBe('Warangal');
+
+    c.formValues.update((v: any) => ({ ...v, shipSameAsDelivery: 'No', shipAddress: '3rd Floor, MG Road, Bengaluru 560001', shipState: 'Karnataka' }));
+    site = c.leaseSiteFields();
+    expect(site.site_address).toBe('3rd Floor, MG Road, Bengaluru 560001');
+    expect(site.site_state).toBe('Karnataka');
+    // no Karnataka GSTIN on this customer: a notice that the bill uses the customer's own state
+    expect(c.shipStateMismatchMessage()).toContain('no GSTIN registered in Karnataka');
+    // the installation address and state are mandatory when it differs from the customer's address
+    c.formValues.update((v: any) => ({ ...v, shipAddress: '' }));
+    expect(c.leaseValidate()).toContain('installation address');
+  });
+
   it('rent applicable without a rental unit / rate is refused', () => {
     c.leaseDraft.customer_id = 1;
     c.leaseAddAssetRow();

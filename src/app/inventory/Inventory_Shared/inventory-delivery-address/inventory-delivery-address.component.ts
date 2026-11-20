@@ -26,4 +26,11 @@ export class InventoryDeliveryAddressComponent {
   @Input() showShipAddress = false;
   // Sales Invoice only: State asterisk; enforced in the host's save validation.
   @Input() stateRequired = false;
+  // Optional wording / switch for other screens (Lease contract); defaults are the Sales screens' own.
+  @Input() title = 'Delivery Address';
+  @Input() showToggle = true;
+  @Input() shipSameLabel = 'Ship Address same as Delivery Address';
+  @Input() shipStateLabel = 'Ship State';
+  @Input() shipAddressLabel = 'Ship Address';
+  @Input() shipPlaceholder = 'Another branch of the same customer, in the same state';
 }
