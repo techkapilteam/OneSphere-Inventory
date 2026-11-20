@@ -790,6 +790,14 @@ export interface ProductTypeItem {
   is_system: boolean;
   sort_order: number;
   status: string;
+  is_bundle_parent?: boolean;
+  allowed_in_bundle?: boolean;
+  consumes_stock_in_bundle?: boolean;
+  supports_pricing_type?: boolean;
+  allowed_in_package?: boolean;
+  allowed_as_package_header?: boolean;
+  is_leasable?: boolean;
+  is_lease_charge?: boolean;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -2297,7 +2305,15 @@ export class InventoryConfigService {
       requires_hsn_sac: this.value(item, 'requires_hsn_sac', 'requiresHsnSac', true),
       is_system: this.value(item, 'is_system', 'isSystem', false),
       sort_order: this.value(item, 'sort_order', 'sortOrder', 100),
-      status: this.value(item, 'status', 'status', 'active')
+      status: this.value(item, 'status', 'status', 'active'),
+      is_bundle_parent: this.value(item, 'is_bundle_parent', 'isBundleParent', false),
+      allowed_in_bundle: this.value(item, 'allowed_in_bundle', 'allowedInBundle', false),
+      consumes_stock_in_bundle: this.value(item, 'consumes_stock_in_bundle', 'consumesStockInBundle', false),
+      supports_pricing_type: this.value(item, 'supports_pricing_type', 'supportsPricingType', false),
+      allowed_in_package: this.value(item, 'allowed_in_package', 'allowedInPackage', false),
+      allowed_as_package_header: this.value(item, 'allowed_as_package_header', 'allowedAsPackageHeader', false),
+      is_leasable: this.value(item, 'is_leasable', 'isLeasable', false),
+      is_lease_charge: this.value(item, 'is_lease_charge', 'isLeaseCharge', false)
     };
   }
 
