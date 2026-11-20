@@ -302,6 +302,12 @@ export const inventoryRoutes: Routes = [
         loadComponent: () => import('./Inventory_Transactions/sales-return/sales-return')
           .then(m => m.InventorySalesReturnComponent)
       },
+      {
+        path: 'e-invoice',
+        canActivate: [screenPermissionGuard('INV_T_EINVOICE')],
+        loadComponent: () => import('./Inventory_Transactions/e-invoice/e-invoice')
+          .then(m => m.InventoryEInvoiceComponent)
+      },
       // Inventory
       {
         path: 'stock-transfer',
