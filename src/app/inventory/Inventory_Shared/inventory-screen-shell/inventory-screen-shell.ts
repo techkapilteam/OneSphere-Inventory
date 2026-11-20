@@ -31,6 +31,15 @@ import {
   workCenterMasterConfig
 } from '../inventory-screen.model';
 
+
+function tidyAddressLines(value: string): string {
+  return String(value ?? '')
+    .split(/\r?\n/)
+    .map(line => line.replace(/[ \t]+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
 export interface VariantAttrSelection {
   name: string;
   value: string;
@@ -38,11 +47,7 @@ export interface VariantAttrSelection {
   isAuto: boolean;
 }
 
-// One physical serial unit's warranty, resolved at the moment it was
-// captured on the serial picker (GRN / Direct PI) — either computed from a
-// manufacturing date + term, or entered straight as a warranty-upto date.
-// Mirrors inv_serial_units' own manufacturing_date/warranty_term_months/
-// warranty_upto/warranty_mode columns (migration 237).
+
 export interface SerialWarrantyEntry {
   mode: 'term' | 'straight';
   manufacturing_date: string | null;
@@ -81,9 +86,11 @@ interface GridExportPayload {
   pdfFixedGridScale?: boolean;
   boldFieldLabels?: string[];
   boxedFieldLabels?: string[];
+  pdfRuleAboveGrid?: boolean;
   pdfColumnWidths?: Record<number, number>;
   pdfBlueHead?: boolean;
   pdfCenterColumns?: number[];
+  pdfPageFrame?: boolean;
   copyType?: string;
   terms?: string[];
   bankDetails?: Array<[string, string]>;
@@ -1555,8 +1562,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
 
     const idSet = new Set(cachedIds);
+    // Service / Service Bundle / Digital natures never hold stock, so the
+    // in-stock id list can never contain them — on Sales Invoice keep every
+    // non-stock product alongside the in-stock ones, otherwise they vanish
+    // from the picker as soon as a warehouse is chosen.
+    const keepWithoutStock = (product: ProductItem) => key === 'salesInvoice' && !this.productTracksStock(product);
     const scopedNames = this.loadedProductObjects()
-      .filter(product => this.productAllowedForTransaction(product, key) && product.id != null && idSet.has(Number(product.id)))
+      .filter(product => this.productAllowedForTransaction(product, key) && product.id != null
+        && (idSet.has(Number(product.id)) || keepWithoutStock(product)))
       .map(product => product.product_name)
       .filter(Boolean) as string[];
     return scopedNames.length ? scopedNames : allNames;
@@ -3088,6 +3101,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         ? this.productIsManufacturingFinished(product)
         : this.productIsManufacturingRawMaterial(product);
     }
+    // Sales Invoice offers products of EVERY Product Nature (Raw Material,
+    // Semi-Finished, Consumable, Fixed Asset, Service ...) — the nature's
+    // "Allows Sale" flag no longer hides them here (client request 2026-11-20).
+    // Other sales screens (Sales Order, DC, Sales Return) keep the flag.
+    if (key === 'salesInvoice') return true;
     const usage = this.transactionUomUsageForKey(key);
     if (usage === 'purchase') return product.allows_purchase !== false;
     if (usage === 'sales') return product.allows_sale !== false;
@@ -8986,8 +9004,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['Vehicle No', String(record.vehicle_no || record.vehicleNo || '')],
       // Previous: ['Ship Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
       // Previous: ['Ship To Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
-      ['Bill To Address', toInventoryTitleCase(deliveryAddress) || '-'],
-      ['Ship To Address', toInventoryTitleCase(String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress) || '-']
+      // Previous: ['Bill To Address', toInventoryTitleCase(deliveryAddress) || '-'],
+      // Previous: ['Ship To Address', toInventoryTitleCase(String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress) || '-']
+      // Each address line trimmed: a saved line starting with a space
+      // (" 8466999698, Hyd, …") printed indented in the box.
+      ['Bill To Address', tidyAddressLines(toInventoryTitleCase(deliveryAddress)) || '-'],
+      ['Ship To Address', tidyAddressLines(toInventoryTitleCase(String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress)) || '-']
       // Previous: ['SO Reference', soReference] (moved up beside Customer Phone)
       // Payment Terms not required on the print.
       // ['Payment Terms', String(record.payment_terms || record.paymentTerms || '')]
@@ -9075,15 +9097,23 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       pdfFixedGridScale: true,
       boldFieldLabels: ['Customer', 'GSTIN No'],
       // Square box around Bill To Address and Ship To Address (only these two).
-      boxedFieldLabels: ['Bill To Address', 'Ship To Address'],
+      // Previous: boxedFieldLabels: ['Bill To Address', 'Ship To Address'],
+      // Boxes removed (user request 2026-11-20); instead a full-width rule
+      // above the grid, like the one under "Branch : …".
+      pdfRuleAboveGrid: true,
       // Wider TOTAL column (last) so amounts like 29,145.86 never crowd/wrap.
       // Previous: { [exportColumns.length - 1]: 24 } — Qty (index 3) also widened
       // so 3-digit quantities (100, 200) don't touch the cell border.
-      pdfColumnWidths: rows.length ? { 3: 12, [exportColumns.length - 1]: 24 } : undefined,
+      // Previous: { 3: 12, [exportColumns.length - 1]: 24 } — TOTAL narrowed by
+      // ~2 digits and the room given to Rate (index 4) (2026-11-20).
+      pdfColumnWidths: rows.length ? { 3: 12, 4: 14, [exportColumns.length - 1]: 20 } : undefined,
       // Grid headings in the Purchase Invoice blue (#0b4093, white text) and
       // Qty (index 3) centred in its cell (user request 2026-11-19).
       pdfBlueHead: rows.length ? true : undefined,
       pdfCenterColumns: rows.length ? [3] : undefined,
+      // 10mm side margins + a border round each page, like the old Crystal
+      // sale invoice report (user request 2026-11-20).
+      pdfPageFrame: true,
       boldCellSegments: rows.length ? this.documentSerialSegments(record) : undefined,
       fileName: `Sales_Invoice_${docNo || 'Selected_Record'}`
     };
@@ -9449,9 +9479,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       pdfFixedGridScale: payload.pdfFixedGridScale,
       boldFieldLabels: payload.boldFieldLabels,
       boxedFieldLabels: payload.boxedFieldLabels,
+      pdfRuleAboveGrid: payload.pdfRuleAboveGrid,
       pdfColumnWidths: payload.pdfColumnWidths,
       pdfBlueHead: payload.pdfBlueHead,
       pdfCenterColumns: payload.pdfCenterColumns,
+      pdfPageFrame: payload.pdfPageFrame,
       copyType: payload.copyType,
       terms: payload.terms,
       bankDetails: payload.bankDetails,
