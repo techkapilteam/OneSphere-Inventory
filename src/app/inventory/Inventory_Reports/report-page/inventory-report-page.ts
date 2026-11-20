@@ -6,6 +6,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Observable } from 'rxjs';
 import { NgSelectModule } from '@ng-select/ng-select';
 import { DatePickerModule } from 'primeng/datepicker';
+import { isCompanyAdmin } from '../../../core/host/host-bridge';
 import {
   INVENTORY_COMMON_REPORT_FILTERS,
   INVENTORY_REPORT_PRIMARY_FILTERS,
@@ -103,8 +104,6 @@ export class InventoryReportPageComponent implements OnInit {
   }
 
   private readReportLocationScope(): ReportLocationScope {
-    const user = this.readStorageObject<{ isSuperAdmin?: boolean }>('authUser', {});
-    const roles = this.readStorageObject<Array<{ roleType?: string }>>('authRoles', []);
     const companyDetails = this.readStorageObject<{ branchName?: string }>('CompanyDetails', {});
     const branches = this.readStorageObject<Array<{ id?: number; branchName?: string }>>('authBranches', []);
     const branchId = this.positiveNumber(sessionStorage.getItem('branchId'));
@@ -114,8 +113,7 @@ export class InventoryReportPageComponent implements OnInit {
       '';
 
     return {
-      isCompanyAdmin: user.isSuperAdmin === true ||
-        roles.some(role => String(role.roleType ?? '').toLowerCase() === 'company_admin'),
+      isCompanyAdmin: isCompanyAdmin(),
       branchId,
       branchName,
       warehouseId,
@@ -725,6 +723,18 @@ export class InventoryReportPageComponent implements OnInit {
       const totals = this.totals();
       groupRowIndexes.push(rows.length);
       rows.push(columns.map((column, index) => index === 0 ? 'Grand Total' : (column.total ? totals[column.key] ?? '' : '')));
+    }
+
+    // Stock Summary: Grand Total line at the end of PDF / Print / Excel, only for
+    // Stock Value and GST Amount (user request 2026-11-14).
+    if (this.report().key === 'stockSummary' && rows.length) {
+      const grandTotalKeys = ['stockValue', 'gstAmount'];
+      const sumOf = (key: string) => this.sortedRows().reduce((acc, row) => acc + this.numberValue(row[key]), 0);
+      groupRowIndexes.push(rows.length);
+      rows.push(columns.map((column, index) => {
+        if (index === 0) return 'Grand Total';
+        return grandTotalKeys.includes(column.key) ? this.formatCell(sumOf(column.key), column) : '';
+      }));
     }
 
     return {

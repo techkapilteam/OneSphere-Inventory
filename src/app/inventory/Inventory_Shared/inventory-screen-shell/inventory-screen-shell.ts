@@ -10,11 +10,13 @@ import { Observable, Subject, catchError, concatMap, debounceTime, distinctUntil
 import { ApiResponse, AttributeItem, BomItem, BomLineItem, PriceListItem, WorkCenterItem, AttributeValueItem, BranchInvItem, CategoryItem, ChannelPartnerItem, ContactItem, CustomerItem, GstRateGuide, HsnSacItem, InventoryConfigService, PaymentTermItem, ProductApplicableVariant, ProductBundleItem, ProductItem, ProductTypeItem, ProductUomConversion, ProductVariantStockAttribute, ProductVariantStockControl, SegmentItem, SerialPolicyItem, TaxCodeSuggestion, UomItem, VariantCombinationRow, VariantItem, VendorItem, WarehouseItem } from '../inventory-config.service';
 import { AvailableStock, InventoryTransactionsService, PurchaseRefDoc, ServiceBundleConsumption, TransportDetails, UinRegistrationRow, UinRegistrationSaveItem, IdentifierRegistrationRow, IdentifierRegistrationSaveItem, RegistrationPolicyOption } from '../inventory-transactions.service';
 import { applyInventoryTextCase, inventoryTextCaseForField, inventoryTextCaseForLineColumn, toInventoryTitleCase } from '../inventory-text-case.util';
-import { InventoryExportService } from '../inventory-export.service';
+// Previous: import { InventoryExportService } from '../inventory-export.service';
+import { InventoryExportDocument, InventoryExportService } from '../inventory-export.service';
 import { rupeesInWords } from '../inventory-amount-in-words';
 import { InvoiceBankDetails, PaymentsService } from '../payments.service';
 import { CommonService } from '../../../core/services/Common/common.service';
 import { attachInventorySaveToast } from '../inventory-save-toast/inventory-save-toast.component';
+import { isCompanyAdmin } from '../../../core/host/host-bridge';
 import {
   INVENTORY_KPIS,
   INVENTORY_OPTIONS,
@@ -75,6 +77,13 @@ interface GridExportPayload {
   columnGroups?: Array<[string, number]>;
   totalRow?: string[];
   fitOnePage?: boolean;
+  pdfMaxScale?: number;
+  pdfFixedGridScale?: boolean;
+  boldFieldLabels?: string[];
+  boxedFieldLabels?: string[];
+  pdfColumnWidths?: Record<number, number>;
+  pdfBlueHead?: boolean;
+  pdfCenterColumns?: number[];
   copyType?: string;
   terms?: string[];
   bankDetails?: Array<[string, string]>;
@@ -83,6 +92,7 @@ interface GridExportPayload {
   gstInvoiceLayout?: boolean;
   signatureBlock?: boolean;
   signatures?: string[];
+  boldCellSegments?: { column: number; byRow: Array<string | undefined> };
 }
 
 export interface PriceHintView {
@@ -402,6 +412,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // that nested quick-add flow.
   readonly quickVendorLinkedContact = signal<GlobalContactOption | null>(null);
   readonly quickCustomerLinkedContact = signal<GlobalContactOption | null>(null);
+    /** Existing customer being edited in the quick-add popup (null = new customer). */
+  readonly quickCustomerEditingId = signal<number | null>(null);
   readonly quickChannelPartnerLinkedContact = signal<GlobalContactOption | null>(null);
   readonly consumptionApprovalRequired = signal(false);
   readonly approvalLevel = signal('Single Level');
@@ -420,6 +432,73 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // is disabled; the backend enforces the same rule on the save endpoint
   // regardless, so this is UX only, never the sole guard.
   readonly isCurrentProductLocked = signal(false);
+
+    /** Margin information of the product being edited (migration 283), for the hint. */
+  readonly productMarginInfo = signal<{
+    categoryPct: number | null; effectivePct: number | null;
+    suggestedRate: number | null; cost: number | null; categoryName: string;
+  } | null>(null);
+  readonly isSavingProductMargin = signal(false);
+
+  /** Hint under the margin field, e.g. "Effective 15% (from category CARTRIDGE) · Suggested rate Rs. 628.60 (cost Rs. 546.61)". */
+  productMarginHint(): string {
+    const info = this.productMarginInfo();
+    if (!info) return 'Leave empty to use the category margin.';
+    const fmt = (n: number) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+    const parts: string[] = [];
+    const own = String(this.formValues()['salesMarginPct'] ?? '').trim();
+    if (info.effectivePct !== null && info.effectivePct !== undefined) {
+      parts.push(`Effective ${fmt(info.effectivePct)}% (${own ? 'this product' : `from category ${info.categoryName || ''}`.trim()})`);
+    } else {
+      parts.push('No margin (category has none)');
+    }
+    if (info.suggestedRate) parts.push(`Suggested rate Rs. ${fmt(info.suggestedRate)}${info.cost ? ` (cost Rs. ${fmt(info.cost)})` : ''}`);
+    return parts.join(' · ');
+  }
+
+  /** Saves only the margin of the product being edited; works for locked products too. */
+  saveCurrentProductSalesMargin(): void {
+    const id = this.editingId();
+    if (!id || this.isSavingProductMargin()) return;
+    const raw = String(this.formValues()['salesMarginPct'] ?? '').trim();
+    if (raw !== '' && (!Number.isFinite(Number(raw)) || Number(raw) < 0 || Number(raw) > 1000)) {
+      this.saveError.set('Sales margin must be a number between 0 and 1000.');
+      return;
+    }
+    this.isSavingProductMargin.set(true);
+    this.inventoryConfigService.saveProductSalesMargin(Number(id), raw)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: res => {
+          this.isSavingProductMargin.set(false);
+          if (!res?.success) { this.saveError.set(res?.message || 'Failed to save the sales margin.'); return; }
+          const d: any = res.data || {};
+          const pick = (snake: string, camel: string) => d[snake] ?? d[camel] ?? null;
+          this.productMarginInfo.update(info => ({
+            categoryPct: pick('category_sales_margin_pct', 'categorySalesMarginPct'),
+            effectivePct: pick('effective_sales_margin_pct', 'effectiveSalesMarginPct'),
+            suggestedRate: pick('suggested_sales_rate', 'suggestedSalesRate'),
+            cost: pick('suggested_rate_cost', 'suggestedRateCost'),
+            categoryName: info?.categoryName || ''
+          }));
+          this.saveMsg.set('Sales margin updated.');
+        },
+        error: (err: any) => {
+          this.isSavingProductMargin.set(false);
+          this.saveError.set(this.apiErrorMessage(err, 'Failed to save the sales margin.'));
+        }
+      });
+  }
+
+    /** Opens a saved product read-only so only its Sales Margin can be changed
+   *  (migration 283). Saved master records stay locked for normal edits. */
+  openProductForMargin(row: string[]): void {
+    this.editRecordByRow(row);
+    // Always read-only here, whether or not the product has stock movement:
+    // the locked fieldset disables the form and the normal Save.
+    this.isCurrentProductLocked.set(true);
+  }
+
   readonly productTaxUomRequired = signal(false);
   readonly productBrandRequired = signal(false);
   readonly productVariantRequired = signal(false);
@@ -481,6 +560,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       : null;
     const editingRow = editingRecord ? this.mapToGridRows([editingRecord])[0] : null;
 
+    // Product / Service Master rows are [code, sku, name, category, ...]: match
+    // code, SKU, name and Product Category so typing a category name lists the
+    // products already under it.
+    if (this.config?.key === 'productServiceMaster') {
+      return this.liveRows()
+        .filter(row => !(editingRow && row[0] === editingRow[0]))
+        .filter(row => [row[0], row[1], row[2], row[3]].some(cell => String(cell ?? '').toLowerCase().includes(q)))
+        .slice(0, 6);
+    }
+
     // Match on what the hint shows (code and name), not on every column:
     // text like "Not used yet" in other columns would match almost anything.
     return this.liveRows()
@@ -496,6 +585,58 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const q = this.genericNameValue().trim().toLowerCase();
     return !!q && row.some(cell => String(cell ?? '').trim().toLowerCase() === q);
   }
+
+  // Product / Service Master hint text: name/code/SKU exact → "Already exists",
+  // Product Category exact → "Category already exists", otherwise similar.
+  productExistingHint(row: string[]): string {
+    const norm = (s: any) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const q = norm(this.genericNameValue());
+    if (q && [row[0], row[1], row[2]].some(c => norm(c) === q)) return 'Already exists · click to edit';
+    if (q && norm(row[3]) === q) return 'Category already exists · click to edit';
+    return 'Similar name · click to edit';
+  }
+
+  // Product / Service Master: a product whose name exactly matches (ignoring
+  // case and extra spaces) another saved product in this segment, or another
+  // row already in the pending list, is a duplicate and must not be saved.
+  // The record currently open for edit is left out of the comparison.
+  productNameDuplicateOf(name: string): string {
+    if (this.config?.key !== 'productServiceMaster') return '';
+    const norm = (s: any) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const q = norm(name);
+    if (!q) return '';
+    const editingId = this.editingId();
+    const saved = this.savedRecordObjects().find((r: any) =>
+      norm(r?.product_name ?? r?.productName) === q
+      && !(editingId !== null && Number(r?.id) === Number(editingId)));
+    if (saved) return String(saved?.product_name ?? saved?.productName ?? name).trim();
+    const editingPending = this.editingPendingIndex();
+    const pending = this.pendingRows().find((r, i) =>
+      i !== editingPending && norm(r?.payload?.['product_name']) === q);
+    return pending ? String(pending.payload['product_name']).trim() : '';
+  }
+
+  readonly productNameDuplicate = computed(() => this.productNameDuplicateOf(this.productName()));
+
+  // Same rule for Product / Service Code: an exact match (ignoring case and
+  // spaces) against another saved product or a pending row blocks the save.
+  productCodeDuplicateOf(code: string): string {
+    if (this.config?.key !== 'productServiceMaster') return '';
+    const norm = (s: any) => String(s ?? '').replace(/\s+/g, '').toLowerCase();
+    const q = norm(code);
+    if (!q) return '';
+    const editingId = this.editingId();
+    const saved = this.savedRecordObjects().find((r: any) =>
+      norm(r?.product_code ?? r?.productCode) === q
+      && !(editingId !== null && Number(r?.id) === Number(editingId)));
+    if (saved) return String(saved?.product_code ?? saved?.productCode ?? code).trim();
+    const editingPending = this.editingPendingIndex();
+    const pending = this.pendingRows().find((r, i) =>
+      i !== editingPending && norm(r?.payload?.['product_code']) === q);
+    return pending ? String(pending.payload['product_code']).trim() : '';
+  }
+
+  readonly productCodeDuplicate = computed(() => this.productCodeDuplicateOf(this.formValues()['productCode']));
 
   readonly formValues = signal<Record<string, any>>({});
   readonly savedRecordObjects = signal<any[]>([]);
@@ -1702,6 +1843,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (this.config?.key === 'salesInvoice' || this.config?.key === 'salesReturn') {
       this.loadGstStateCodes();
     }
+    // Admin = Company Admin (or Super Admin), decided by OneSphere-Accounts.
+    // This used to decode a token from sessionStorage, but inside the shell the
+    // token lives only in memory, so it always fell back to "admin" for everyone.
+    this.isAdmin.set(isCompanyAdmin());
     // Item 26: must run before directEntryLineRows() below (and before the
     // rest of ngOnInit touches formValues/entryLineRows) — it restores a
     // snapshot taken just before this same GRN/PI in-progress document was
@@ -5917,10 +6062,6 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return Math.max(0, this.displayFields().length - this.guideFields().length);
   }
 
-  guideVideoUrl(): string {
-    return (this.config?.guideVideoUrl || '').trim();
-  }
-
   shortText(value: string | null | undefined, maxLength = 120): string {
     const text = String(value || '').replace(/\s+/g, ' ').trim();
     if (text.length <= maxLength) return text;
@@ -6183,6 +6324,19 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           .forEach(key => delete next[key]);
         return next;
       });
+      this.quickCustomerEditingId.set(null);
+      // + beside Party / Customer with a customer already selected: open that
+      // customer for Update instead of an empty form.
+      const selectedValue = sourceFieldKey ? this.formValues()[sourceFieldKey] : null;
+      const selectedCustomer = selectedValue ? this.findCustomerBySelection(selectedValue) : null;
+      if (selectedCustomer) {
+        const contactId = (selectedCustomer as any).contact_id ?? (selectedCustomer as any).contactId;
+        const contact = contactId != null
+          ? (this.partyContactOptions() || []).find((c: any) => Number(c?.id) === Number(contactId)) ?? null
+          : null;
+        this.quickCustomerLinkedContact.set(contact);
+        this.loadCustomerIntoQuickAdd(selectedCustomer);
+      }
     }
 
     if (master === 'Channel Partner') {
@@ -7034,7 +7188,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return '';
   }
 
-  saveQuickCustomer(): void {
+   saveQuickCustomer(): void {
     const name = this.quickAddName().trim();
     if (!name) { this.quickAddError.set('Customer name is required.'); return; }
     const quickCustomerPanError = this.panValidationMessage(this.formValues()['quickCustomerPan']);
@@ -7042,8 +7196,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (!String(this.formValues()['quickCustomerState'] ?? '').trim()) { this.quickAddError.set('State is required.'); return; }
     if (this.isSavingQuickAdd()) return;
     const v = this.formValues();
-  const code = this.quickAddCode().trim() || this.nextCustomerCode(name) || null; 
-   const linkedContact = this.quickCustomerLinkedContact();
+    const editingId = this.quickCustomerEditingId();                       
+    const code = this.quickAddCode().trim() || this.nextCustomerCode(name) || null;
+    const linkedContact = this.quickCustomerLinkedContact();
     this.isSavingQuickAdd.set(true);
     this.quickAddError.set('');
     this.saveCustomerWithContactWriteback({
@@ -7059,6 +7214,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       email: v['quickCustomerEmail'] || null,
       address: v['quickCustomerAddress'] || null,
       state: v['quickCustomerState'] || null,
+      district: v['quickCustomerDistrict'] || null,
       city: v['quickCustomerCity'] || null,
       pincode: v['quickCustomerPincode'] || null,
       shipping_address: v['quickCustomerShippingAddress'] || null,
@@ -7072,18 +7228,28 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       status: v['quickCustomerStatus'] === 'Inactive' ? 'inactive' : 'active',
       contact_id: linkedContact?.id ?? null,
       contact_source: linkedContact?.source ?? null
-    }, null).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    }, editingId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({   
       next: (res: ApiResponse<any>) => {
         this.isSavingQuickAdd.set(false);
         if (res.success && res.data) {
           const saved = res.data;
           const savedName = saved.customer_name || name;
-          this.loadedCustomerObjects.update(list => [...list, saved]);
+          if (editingId) {                                                
+            this.loadedCustomerObjects.update(list =>
+              list.map((c: any) => Number(c?.id) === Number(editingId) ? saved : c));
+          } else {
+            this.loadedCustomerObjects.update(list => [...list, saved]);
+          }
           if (!this.customerOptionList().includes(savedName)) {
             this.customerOptionList.update(opts => [...opts, savedName]);
           }
           const sourceKey = this.addMasterSourceFieldKey();
           if (sourceKey) this.collectFormField(sourceKey, savedName);
+          // ← NEW: refresh the document's Delivery Address from the saved customer
+          if (['deliveryChallan', 'salesOrder', 'salesInvoice'].includes(this.config?.key || '')) {
+            this.formValues.update(fv => ({ ...fv, ...this.deliveryFromCustomer(saved) }));
+          }
+          this.quickCustomerEditingId.set(null);                           
           this.quickCustomerLinkedContact.set(null);
           this.restoreParentModal();
         } else {
@@ -7448,11 +7614,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }));
   }
 
-  // Same auto-fill as selectQuickVendorContact(), but targets the "Customer"
-  // quick-add modal's own fields (used when that modal is opened from any
-  // transaction screen) instead of a Customer Master top-level form.
-  selectQuickCustomerContact(contact: GlobalContactOption | null): void {
+
+   selectQuickCustomerContact(contact: GlobalContactOption | null): void {
     this.quickCustomerLinkedContact.set(contact);
+    // A contact that is already a customer of this segment: load it (Update mode).
+    const existing = this.existingCustomerForContact(contact);
+    if (existing) {
+      this.loadCustomerIntoQuickAdd(existing);
+      return;
+    }
+    this.quickCustomerEditingId.set(null);
     this.quickAddName.set(contact?.name || '');
     if (!this._quickAddCodeManuallySet) {
       this.quickAddCode.set(contact?.name ? this.nextCustomerCode(contact.name) : '');
@@ -7464,6 +7635,67 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       quickCustomerGstin: contact?.gstin || '',
       quickCustomerPan: contact?.pan || '',
       quickCustomerAddress: contact?.address || ''
+    }));
+  }
+
+
+    /** The active customer of this segment that belongs to this contact (same contact id, else same name). */
+  private existingCustomerForContact(contact: GlobalContactOption | null): any | null {
+    if (!contact) return null;
+    const segmentId = this.selectedSegmentId();
+    const sameSegment = (c: any) => {
+      const s = c?.segment_id ?? c?.segmentId ?? null;
+      return segmentId == null || s == null || Number(s) === Number(segmentId);
+    };
+    const active = (this.loadedCustomerObjects() || [])
+      .filter((c: any) => (c?.status || 'active') === 'active' && sameSegment(c));
+    const contactId = (contact as any)?.id;
+    return active.find((c: any) => contactId != null && Number(c?.contact_id ?? c?.contactId) === Number(contactId))
+      || active.find((c: any) => this.optionEquals(c?.customer_name ?? c?.customerName, contact.name))
+      || null;
+  }
+
+  /** Fills the quick-add popup with a saved customer's values (Update mode). */
+  private loadCustomerIntoQuickAdd(customer: any): void {
+    const pick = (snake: string, camel: string) => customer?.[snake] ?? customer?.[camel] ?? '';
+    this.quickCustomerEditingId.set(Number(customer?.id) || null);
+    this.quickAddName.set(pick('customer_name', 'customerName'));
+    this.quickAddCode.set(pick('customer_code', 'customerCode'));
+    this._quickAddCodeManuallySet = true;          // keep the existing code
+    const gstins = (pick('gstins', 'gstins') || []).map((g: any) => ({
+      id: g?.id,
+      stateName: g?.stateName ?? g?.state_name ?? '',
+      state_name: g?.state_name ?? g?.stateName ?? '',
+      stateCode: g?.stateCode ?? g?.state_code ?? null,
+      state_code: g?.state_code ?? g?.stateCode ?? null,
+      gstin: g?.gstin ?? '',
+      isPrimary: !!(g?.isPrimary ?? g?.is_primary),
+      is_primary: !!(g?.is_primary ?? g?.isPrimary)
+    }));
+    const state = pick('state', 'state');
+    this.formValues.update(fv => ({
+      ...fv,
+      quickCustomerType: pick('customer_type', 'customerType') || 'Company',
+      quickCustomerCategory: pick('customer_category', 'customerCategory'),
+      quickCustomerPan: pick('pan', 'pan'),
+      quickCustomerMobile: pick('mobile', 'mobile'),
+      quickCustomerEmail: pick('email', 'email'),
+      quickCustomerAddress: pick('address', 'address'),
+      quickCustomerPincode: pick('pincode', 'pincode'),
+      quickCustomerState: state,
+      quickCustomerDistrict: pick('district', 'district'),
+      quickCustomerCity: pick('city', 'city'),
+      quickCustomerPincodeState: '',               // set again if the pincode is retyped
+      quickCustomerShippingAddress: pick('shipping_address', 'shippingAddress'),
+      quickCustomerCreditLimit: pick('credit_limit', 'creditLimit') || 0,
+      quickCustomerPaymentTerms: pick('payment_term_name', 'paymentTermName'),
+      quickCustomerBankPayeeName: pick('bank_payee_name', 'bankPayeeName'),
+      quickCustomerBankAccountNo: pick('bank_account_no', 'bankAccountNo'),
+      quickCustomerBankIfscCode: pick('bank_ifsc_code', 'bankIfscCode'),
+      quickCustomerBankName: pick('bank_name', 'bankName'),
+      quickCustomerBankBranchName: pick('bank_branch_name', 'bankBranchName'),
+      quickCustomerStatus: (pick('status', 'status') || 'active') === 'inactive' ? 'Inactive' : 'Active',
+      quickCustomerGstins: gstins
     }));
   }
 
@@ -8281,14 +8513,43 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       discount: computed.discount,
       taxable,
       tax,
-      cgst: isInterstate ? 0 : tax / 2,
-      sgst: isInterstate ? 0 : tax / 2,
+      // Previous: cgst: isInterstate ? 0 : tax / 2,
+      // Previous: sgst: isInterstate ? 0 : tax / 2,
+      cgst: isInterstate ? 0 : this.gstHalves(tax).cgst,
+      sgst: isInterstate ? 0 : this.gstHalves(tax).sgst,
       igst: isInterstate ? tax : 0,
       isInterstate,
       total,
       transport,
       // Previous: roundOff: total - (taxable + tax)
       roundOff: total - (taxable + tax + transport)
+    };
+  }
+
+  // CGST/SGST exactly as the backend posts them (sp_post_sales_invoice and
+  // taxation.tbl_trans_gst): CGST = ROUND(tax / 2, 2) (half away from zero,
+  // like PostgreSQL), SGST = tax - CGST. Worked in whole paise so float noise
+  // cannot lose a paisa (tax / 2 = 4711.335 used to print 4711.33 twice).
+  private gstHalves(tax: number): { cgst: number; sgst: number } {
+    const paise = Math.round((Number(tax) || 0) * 100);
+    const cgstPaise = Math.sign(paise) * Math.ceil(Math.abs(paise) / 2);
+    return { cgst: cgstPaise / 100, sgst: (paise - cgstPaise) / 100 };
+  }
+
+  // Line-wise CGST/SGST for the print grid. The odd paisa of each line goes
+  // to CGST and SGST in turn (not always CGST), so the CGST and SGST column
+  // totals equal gstHalves(total tax), i.e. the backend posting, and the
+  // summary rows below the grid.
+  private gstLineSplitter(): (tax: number) => { cgst: number; sgst: number } {
+    let oddLines = 0;
+    return (tax: number) => {
+      const paise = Math.round((Number(tax) || 0) * 100);
+      const half = Math.trunc(paise / 2);
+      if (paise % 2 === 0) return { cgst: half / 100, sgst: half / 100 };
+      const extra = Math.sign(paise);
+      const toCgst = oddLines++ % 2 === 0;
+      const cgstPaise = toCgst ? half + extra : half;
+      return { cgst: cgstPaise / 100, sgst: (paise - cgstPaise) / 100 };
     };
   }
 
@@ -8321,8 +8582,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       discount: computed.discount,
       taxable: computed.taxable,
       tax: computed.tax,
-      cgst: isInterstate ? 0 : computed.tax / 2,
-      sgst: isInterstate ? 0 : computed.tax / 2,
+      // Previous: cgst: isInterstate ? 0 : computed.tax / 2,
+      // Previous: sgst: isInterstate ? 0 : computed.tax / 2,
+      cgst: isInterstate ? 0 : this.gstHalves(computed.tax).cgst,
+      sgst: isInterstate ? 0 : this.gstHalves(computed.tax).sgst,
       igst: isInterstate ? computed.tax : 0,
       isInterstate,
       total,
@@ -8333,6 +8596,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   // Previous: private purchaseInvoiceDocumentRows(record: any): string[][] {
   private purchaseInvoiceDocumentRows(record: any, isInterstate = false): string[][] {
+    const splitGst = this.gstLineSplitter();
     return (record?.items || []).map((item: any, index: number) => {
       // Test point 39: line-wise Taxable Amt and CGST/SGST (or IGST) — same
       // saved-value-first / computed-fallback rule documentFinancials() uses,
@@ -8348,7 +8612,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       const lineTax = savedTax || this.transactionLineTaxBreakup(qty, rate, discPct, gstPct, undefined, this.itemGstIncluded(item) ?? false).taxAmount;
       return [
         String(index + 1),
-        this.purchaseInvoiceItemName(item),
+        // Serial nos (bold, in brackets) on the line under the product name.
+        // Previous: this.purchaseInvoiceItemName(item),
+        [this.purchaseInvoiceItemName(item), this.documentSerialText(item)].filter(Boolean).join('\n'),
         this.purchaseInvoiceItemHsn(item),
         this.moneyValue(item?.qty ?? 0),
         this.grnExpandedValue(item, 'uom_name', 'uomName'),
@@ -8361,7 +8627,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         this.moneyValue(lineTaxable),
         ...(isInterstate
           ? [this.moneyValue(lineTax)]
-          : [this.moneyValue(lineTax / 2), this.moneyValue(lineTax / 2)]),
+          // Previous: : [this.moneyValue(lineTax / 2), this.moneyValue(lineTax / 2)]),
+          : (({ cgst, sgst }) => [this.moneyValue(cgst), this.moneyValue(sgst)])(splitGst(lineTax))),
         this.moneyValue(item?.amount ?? 0)
       ];
     });
@@ -8476,6 +8743,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Common Seal / Authorised Signatory row (old printed invoice layout).
       gstInvoiceLayout: true,
       signatureBlock: true,
+      boldCellSegments: rows.length ? this.documentSerialSegments(record) : undefined,
       fileName: `Purchase_Invoice_${docNo || 'Selected_Record'}`
     };
   }
@@ -8496,14 +8764,27 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // Previous columns: S.No | Product / Service | HSN/SAC Code | Qty | UOM |
   // Rate (Rs.) | MRP | Selling Price | Disc % | Taxable Value | GST % |
   // CGST Amt | SGST Amt (or IGST Amt) | Amount (Rs.)
-  private salesInvoiceDocumentRows(record: any, isInterstate = false): { rows: string[][]; totalRow: string[] } {
+  // withSerials: the line's serial nos print (bold, in brackets) under the
+  // product name — Sales Invoice only; Sales Return shares these rows without.
+  // sortByName: lines print A→Z by product name with S.No renumbered 1..n
+  // (Sales Invoice only, user request 2026-11-18). The CGST/SGST split is still
+  // worked out in entry order first so each line's odd paisa matches the DB.
+  // Previous: private salesInvoiceDocumentRows(record: any, isInterstate = false, withSerials = false): { rows: string[][]; totalRow: string[] } {
+  private salesInvoiceDocumentRows(record: any, isInterstate = false, withSerials = false, sortByName = false): { rows: string[][]; totalRow: string[] } {
     const sum = { gross: 0, discount: 0, taxable: 0, cgst: 0, sgst: 0, total: 0 };
-    const rows = (record?.items || []).map((item: any, index: number) => {
+    const splitGst = this.gstLineSplitter();
+    const builtRows: string[][] = (record?.items || []).map((item: any, index: number) => {
       // Product-wise GST: taxable value and CGST/SGST (or IGST) amount per line.
       // SGST = tax - CGST so the two halves always add up to the line tax.
       const { taxable, tax } = this.salesInvoiceLineTax(item);
-      const cgst = isInterstate ? tax : Math.round((tax / 2) * 100) / 100;
-      const sgst = isInterstate ? 0 : tax - cgst;
+      // Previous: const cgst = isInterstate ? tax : Math.round((tax / 2) * 100) / 100;
+      // Previous: const sgst = isInterstate ? 0 : tax - cgst;
+      // Odd paisa alternates between CGST and SGST so the column totals match
+      // the backend CGST/SGST posting (was always CGST: INV-CP-00045 printed
+      // 4,711.35 / 4,711.32 against 4,711.34 / 4,711.33 in the database).
+      const lineGst = isInterstate ? { cgst: tax, sgst: 0 } : splitGst(tax);
+      const cgst = lineGst.cgst;
+      const sgst = lineGst.sgst;
       const qty = Number(item?.qty ?? 0) || 0;
       const gross = qty * (Number(item?.rate ?? 0) || 0);
       const discount = gross * (Number(item?.discount_pct ?? item?.discountPct ?? 0) || 0) / 100;
@@ -8520,7 +8801,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       return [
         String(index + 1),
         // Previous: [this.purchaseInvoiceItemName(item), batchNo ? `BATCH NUMBER : ${batchNo}` : ''].filter(Boolean).join('\n'),
-        [this.salesInvoicePrintItemName(this.purchaseInvoiceItemName(item)), batchNo ? `BATCH NUMBER : ${batchNo}` : ''].filter(Boolean).join('\n'),
+        // Previous: [this.salesInvoicePrintItemName(this.purchaseInvoiceItemName(item)), batchNo ? `BATCH NUMBER : ${batchNo}` : ''].filter(Boolean).join('\n'),
+        [
+          this.salesInvoicePrintItemName(this.purchaseInvoiceItemName(item)),
+          withSerials ? this.documentSerialText(item) : '',
+          batchNo ? `BATCH NUMBER : ${batchNo}` : ''
+        ].filter(Boolean).join('\n'),
         this.purchaseInvoiceItemHsn(item),
         Number.isInteger(qty) ? String(qty) : this.moneyValue(qty),
         this.moneyValue(item?.rate ?? 0),
@@ -8533,6 +8819,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         this.moneyValue(lineTotal)
       ];
     });
+    const productName = (row: string[]) => String(row[1] || '').split('\n')[0].trim();
+    const rows = sortByName
+      ? [...builtRows]
+          .sort((a, b) => productName(a).localeCompare(productName(b), undefined, { sensitivity: 'base', numeric: true }))
+          .map((row, index) => [String(index + 1), ...row.slice(1)])
+      : builtRows;
     const totalRow = [
       'Total', '', '', '', '',
       this.moneyValue(sum.gross),
@@ -8555,6 +8847,25 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     };
     const key = String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
     return printNames[key] ?? name;
+  }
+
+  // Sold serials of DC-linked Sales Invoice lines, by SI item id. Those lines
+  // never store serial_numbers themselves (see
+  // hydrateSoldSerialsForDcLinkedSalesInvoiceLines), so the print fetches them
+  // once (printInvoiceWithCopyType) and the rows read them from here.
+  private readonly printSoldSerialsByItemId = new Map<number, string[]>();
+
+  // "(S.No: SN1, SN2)" for a PI / SI print line, or '' when the line has no serials.
+  private documentSerialText(item: any): string {
+    let serials = this.serialNumbersFromRecordItem(item);
+    if (!serials.length) serials = this.printSoldSerialsByItemId.get(Number(item?.id)) || [];
+    return serials.length ? `(S.No: ${serials.join(', ')})` : '';
+  }
+
+  // Per row, the serial line to print bold in the Product column (index 1).
+  private documentSerialSegments(record: any): { column: number; byRow: Array<string | undefined> } | undefined {
+    const byRow = (record?.items || []).map((item: any) => this.documentSerialText(item) || undefined);
+    return byRow.some(Boolean) ? { column: 1, byRow } : undefined;
   }
 
   // Same per-line taxable/tax rule as documentFinancials(): saved values first,
@@ -8626,7 +8937,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     //     ...(lineIsInterstate ? ['IGST Amt'] : ['CGST Amt', 'SGST Amt']), 'Amount (Rs.)'],
     //   this.salesInvoiceDocumentRows(record, lineIsInterstate)
     // );
-    const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate);
+    // Previous: const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate);
+    // Previous: const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate, true);
+    const { rows, totalRow } = this.salesInvoiceDocumentRows(record, lineIsInterstate, true, true);
     const columns = ['S.No', 'Product Description', 'HSN/SAC Code', 'Qty', 'Rate', 'Amount', 'Disc.', 'Taxable Value',
       ...(lineIsInterstate ? ['Rate %', 'Amount'] : ['Rate %', 'Amount', 'Rate %', 'Amount']), 'TOTAL'];
     const columnGroups: Array<[string, number]> = [
@@ -8647,11 +8960,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Previous: ['Invoice Date', this.gridDateDisplay(String(record.doc_date || record.docDate || ''))],
       // Previous: ['Due Date', this.gridDateDisplay(String(record.due_date || record.dueDate || ''))],
       ['Invoice Date', this.fullYearDateDisplay(record.doc_date || record.docDate) || '-'],
-      ['Due Date', this.fullYearDateDisplay(record.due_date || record.dueDate) || '-'],
+      // Due Date removed from the PDF (user request 2026-11-16); the fields are
+      // re-paired so Bill To / Ship To and State / State Code stay side by side.
+      // Previous: ['Due Date', this.fullYearDateDisplay(record.due_date || record.dueDate) || '-'],
+      // Previous order: Customer, Customer Phone, GSTIN No, ..., SO Reference last.
       ['Customer', customerName || '-'],
-      ['Customer Phone', String(customer?.mobile || '').trim() || '-'],
-      // Previous position: after State.
       ['GSTIN No', customerGstin || '-'],
+      ['Customer Phone', String(customer?.mobile || '').trim() || '-'],
+      ['SO Reference', soReference],
       // Previous: ['Customer Address', this.partyFullAddress(customer)],
       // Delivery Address entered on the invoice (customer master address when
       // none was entered); Ship Address falls back to the delivery address.
@@ -8659,10 +8975,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Addresses print in Title Case so the address line and City / District
       // don't mix small and capital letters.
       // Previous: ['Bill To Address', deliveryAddress || '-'],
-      ['Bill To Address', toInventoryTitleCase(deliveryAddress) || '-'],
-      // Previous: ['Ship Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
-      // Previous: ['Ship To Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
-      ['Ship To Address', toInventoryTitleCase(String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress) || '-'],
+      // Previous position of Bill To / Ship To: here, before State (2026-11-17:
+      // moved to the end so the boxed addresses sit just above the grid).
       // Previous position: after GSTIN No.
       // Place of Supply not required on the print.
       // ['Place of Supply', String(record.place_of_supply || record.placeOfSupply || '').trim() || '-'],
@@ -8670,7 +8984,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['State Code', customerStateCode || '-'],
       ['Warehouse', warehouseName],
       ['Vehicle No', String(record.vehicle_no || record.vehicleNo || '')],
-      ['SO Reference', soReference]
+      // Previous: ['Ship Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
+      // Previous: ['Ship To Address', String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress || '-'],
+      ['Bill To Address', toInventoryTitleCase(deliveryAddress) || '-'],
+      ['Ship To Address', toInventoryTitleCase(String(record.ship_address || record.shipAddress || '').trim() || deliveryAddress) || '-']
+      // Previous: ['SO Reference', soReference] (moved up beside Customer Phone)
       // Payment Terms not required on the print.
       // ['Payment Terms', String(record.payment_terms || record.paymentTerms || '')]
       // Header 'Status' removed from the Sales Invoice print.
@@ -8697,7 +9015,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // using the same check as the item grid columns.
       ...(totals.isInterstate
         ? [['IGST', this.moneyValue(totals.igst)]]
-        : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]]) as Array<[string, string]>
+        : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]]) as Array<[string, string]>,
+      // Round off row removed again from the SI PDF (user request 2026-11-19).
+      // Previous: ['Round off', this.moneyValue(totals.roundOff)]
+      // Round off back above Grand Total (user request 2026-11-19, later), signed
+      // like the screen footer: +0.40 / -0.40 (0.00 when none).
+      ['Round off', totals.roundOff
+        ? `${totals.roundOff < 0 ? '-' : '+'}${this.moneyValue(Math.abs(totals.roundOff))}`
+        : this.moneyValue(0)]
     ];
     return {
       // Previous: title: `Sales Invoice - ${docNo || 'Selected Record'}`,
@@ -8710,7 +9035,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       totalRow: rows.length ? totalRow : undefined,
       // Previous: summary: [...summaryRows, ['Grand Total', this.formatCurrency(totals.total)]] as Array<[string, string]>,
       // Previous: summary: [...summaryRows, ['Total', this.moneyValue(totals.total)]],
-      summary: [...summaryRows, ['Grand Total', this.invoiceGrandTotalText(totals.total)]],
+      // Previous: summary: [...summaryRows, ['Grand Total', this.invoiceGrandTotalText(totals.total)]],
+      // Grand Total always with paise, e.g. 15,207.00 (user request 2026-11-19).
+      summary: [...summaryRows, ['Grand Total', this.moneyValue(totals.total)]],
       notes: String(record.customer_notes || record.customerNotes || ''),
       notesLabel: 'Notes',
       // Test point 16: Grand Total in words (same helper as Purchase Invoice).
@@ -8739,6 +9066,25 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // The whole invoice (grid, totals, terms, bank box) prints on one page;
       // text and spacing shrink as needed for longer invoices.
       fitOnePage: true,
+      // Previous: pdfMaxScale: 0.85 — every invoice at the INV-CP-00004 size;
+      // user found that too small and prefers the full-size INV-CP-00007 look.
+      // Now: full size, stepping down 2% at a time only as far as needed to
+      // keep the invoice on one page.
+      pdfMaxScale: 1,
+      // Items grid always at the INV-CP-00007 (full) size, however many lines.
+      pdfFixedGridScale: true,
+      boldFieldLabels: ['Customer', 'GSTIN No'],
+      // Square box around Bill To Address and Ship To Address (only these two).
+      boxedFieldLabels: ['Bill To Address', 'Ship To Address'],
+      // Wider TOTAL column (last) so amounts like 29,145.86 never crowd/wrap.
+      // Previous: { [exportColumns.length - 1]: 24 } — Qty (index 3) also widened
+      // so 3-digit quantities (100, 200) don't touch the cell border.
+      pdfColumnWidths: rows.length ? { 3: 12, [exportColumns.length - 1]: 24 } : undefined,
+      // Grid headings in the Purchase Invoice blue (#0b4093, white text) and
+      // Qty (index 3) centred in its cell (user request 2026-11-19).
+      pdfBlueHead: rows.length ? true : undefined,
+      pdfCenterColumns: rows.length ? [3] : undefined,
+      boldCellSegments: rows.length ? this.documentSerialSegments(record) : undefined,
       fileName: `Sales_Invoice_${docNo || 'Selected_Record'}`
     };
   }
@@ -8978,13 +9324,47 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // Recipient" on every print after it. The count is kept on the invoice
   // (migrations 272 / 274) so it holds across users, refreshes and machines.
   // Drafts, or a failed call, print without a copy type and are not counted.
-  private printInvoiceWithCopyType(kind: 'salesInvoice' | 'purchaseInvoice', record: any, payload: GridExportPayload, mode: 'Pdf' | 'Print' | 'Open'): void {
+  // forceCopyType: Accounts > Re-Print always prints "Duplicate for Recipient",
+  // whatever the stored print count says.
+  // Previous: private printInvoiceWithCopyType(kind: 'salesInvoice' | 'purchaseInvoice', record: any, payload: GridExportPayload, mode: 'Pdf' | 'Print' | 'Open'): void {
+  private printInvoiceWithCopyType(kind: 'salesInvoice' | 'purchaseInvoice', record: any, payload: GridExportPayload, mode: 'Pdf' | 'Print' | 'Open', forceCopyType?: string): void {
+    // DC-linked SI lines: fetch their sold serials first so they print under
+    // the product name, then rebuild the payload from the expanded record.
+    if (kind === 'salesInvoice') {
+      const pending = (record?.items || []).filter((item: any) => item?.dc_item_id && item?.id
+        && !this.serialNumbersFromRecordItem(item).length
+        && !this.printSoldSerialsByItemId.has(Number(item.id)));
+      if (pending.length) {
+        forkJoin(pending.map((item: any) => this.txService.getSoldSerialsForSiItem(item.id).pipe(
+          map(res => ({ id: Number(item.id), serials: (res?.data || []).map((s: any) => s?.serial_no).filter((s: any): s is string => !!s) })),
+          catchError(() => of({ id: Number(item.id), serials: [] as string[] }))
+        )))
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe((results: any) => {
+            (results as Array<{ id: number; serials: string[] }>).forEach(r => this.printSoldSerialsByItemId.set(r.id, r.serials));
+            const docNo = String(record?.doc_number || record?.docNumber || '');
+            const rebuilt = this.salesInvoiceDocumentExportPayload(record, docNo, [], payload.columns, payload.rows);
+            this.printInvoiceWithCopyType(kind, record, { ...rebuilt, copyType: payload.copyType }, mode, forceCopyType);
+          });
+        return;
+      }
+    }
     if (kind === 'salesInvoice' && !this.hasPreviousBalanceRow(payload)) {
       this.withSalesInvoicePreviousBalance(record, payload, withBalance =>
-        this.printInvoiceWithCopyType(kind, record, withBalance, mode));
+        this.printInvoiceWithCopyType(kind, record, withBalance, mode, forceCopyType));
       return;
     }
-    const output = (copyType?: string) => this.exportService.pdf(this.exportDocument({ ...payload, copyType }), mode);
+    // Previous: const output = (copyType?: string) => this.exportService.pdf(this.exportDocument({ ...payload, copyType }), mode);
+    // invoiceDocumentSink (Accounts Re-Print page) takes the finished document
+    // instead of it being downloaded/printed here.
+    const output = (copyType?: string) => {
+      const exportDoc = this.exportDocument({ ...payload, copyType: forceCopyType || copyType });
+      if (this.invoiceDocumentSink) {
+        this.invoiceDocumentSink(exportDoc);
+        return;
+      }
+      this.exportService.pdf(exportDoc, mode);
+    };
     const id = Number(record?.id);
     const status = this.normalizeKey(record?.status || '');
     if (!id || (status !== 'posted' && status !== 'paid')) {
@@ -9065,6 +9445,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       columnGroups: payload.columnGroups,
       totalRow: payload.totalRow,
       fitOnePage: payload.fitOnePage,
+      pdfMaxScale: payload.pdfMaxScale,
+      pdfFixedGridScale: payload.pdfFixedGridScale,
+      boldFieldLabels: payload.boldFieldLabels,
+      boxedFieldLabels: payload.boxedFieldLabels,
+      pdfColumnWidths: payload.pdfColumnWidths,
+      pdfBlueHead: payload.pdfBlueHead,
+      pdfCenterColumns: payload.pdfCenterColumns,
       copyType: payload.copyType,
       terms: payload.terms,
       bankDetails: payload.bankDetails,
@@ -9072,6 +9459,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       gstInvoiceLayout: payload.gstInvoiceLayout,
       signatureBlock: payload.signatureBlock,
       signatures: payload.signatures,
+      boldCellSegments: payload.boldCellSegments,
       fileName: payload.fileName || payload.title
     };
   }
@@ -9331,13 +9719,17 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       return;
     }
     const docType = this.config?.key || '';
+    // Sales Invoice is numbered per branch with the branch code in it
+    // (INV-CP-00001/26-27, migration 290): preview for the location picked.
+    const location = docType === 'salesInvoice' ? this.salesInvoiceNumberLocation() : undefined;
     // Keyed on the saved-record count too, so the preview refreshes once a
-    // save lands in the grid instead of showing the number just used.
-    const previewKey = `${docType}:${this.savedRecordObjects().length}`;
+    // save lands in the grid instead of showing the number just used; and on
+    // the picked location, so changing the branch refreshes the code.
+    const previewKey = `${docType}:${this.savedRecordObjects().length}:${location?.branchId ?? ''}:${location?.warehouseId ?? ''}`;
     if (!docType || this.previewDocNumberKey === previewKey) return;
 
     this.previewDocNumberKey = previewKey;
-    this.txService.peekNextDocNumber(docType)
+    this.txService.peekNextDocNumber(docType, location)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: res => this.previewDocNumber.set(String(res?.data ?? '')),
@@ -9345,6 +9737,20 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         // field just stays blank and the server still numbers correctly.
         error: () => this.previewDocNumber.set('')
       });
+  }
+
+  // The Sales Invoice location exactly as buildPayload() sends it
+  // (branch_id / warehouse_id are mutually exclusive), so the previewed
+  // INV-CP-…/26-27 number matches the one the save assigns.
+  private salesInvoiceNumberLocation(): { branchId: number | null; warehouseId: number | null } {
+    const v = this.formValues();
+    const picked = this.resolveMergedLocation(v['warehouse']);
+    const warehouse = picked.warehouse;
+    const branch = warehouse ? null : picked.branch;
+    return {
+      branchId: branch ? this.branchResolvedId(branch) : null,
+      warehouseId: warehouse?.id ?? (branch ? null : this.optionalNumber(v['warehouseId']))
+    };
   }
 
   transactionNumberValue(field: InventoryField): string {
@@ -9371,7 +9777,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (this.serverAssignsDocNumber() && this.editingId() === null) {
       // Only seen in the moment before the preview lands, or if it failed.
       // Financial-year numbered server-side (migration 249).
-      const fyServerPrefix: Record<string, string> = { salesInvoice: 'INV', salesReturn: 'SRT' };
+      // Sales Invoice also carries the branch code (migration 290).
+      const fyServerPrefix: Record<string, string> = { salesInvoice: 'INV-XX-', salesReturn: 'SRT' };
       const fyPrefix = fyServerPrefix[this.config?.key || ''];
       if (fyPrefix) return `Auto (${fyPrefix}…/YY-YY) — assigned on save`;
       return `Auto (${this.transactionDocPrefix(field)}-YY-…) — assigned on save`;
@@ -11222,18 +11629,44 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const discountAmount = gross * discountPct / 100;
     const discountedGross = gross - discountAmount;
     const gstIncluded = gstIncludedOverride ?? (rowIndex !== undefined ? this.lineGstIncluded(rowIndex) : false);
+    // Previous:
+    // if (gstIncluded && gstPct > 0) {
+    //   const taxableAmount = discountedGross / (1 + gstPct / 100);
+    //   return {
+    //     gross,
+    //     discountAmount,
+    //     taxableAmount,
+    //     taxAmount: discountedGross - taxableAmount,
+    //     total: discountedGross,
+    //     gstIncluded
+    //   };
+    // }
+    // const taxAmount = discountedGross * gstPct / 100;
+
+    // Entry grids of SI / PI / SR / PR, intrastate: CGST = SGST =
+    // ROUND(taxable x gst%/2, 2) and GST = CGST + SGST, so the saved line
+    // tax is always an even number of paise and the backend's
+    // ROUND(tax/2) split (sp_post_sales_invoice etc.) gives equal halves.
+    // Interstate (IGST) lines and saved-record fallbacks keep the old rule.
+    const equalHalves = rowIndex !== undefined && gstPct > 0 && this.entryLineGstEqualHalves();
     if (gstIncluded && gstPct > 0) {
-      const taxableAmount = discountedGross / (1 + gstPct / 100);
+      const rawTaxableAmount = discountedGross / (1 + gstPct / 100);
+      const taxAmount = equalHalves
+        ? this.gstEqualHalvesTax(rawTaxableAmount, gstPct)
+        : discountedGross - rawTaxableAmount;
+      const taxableAmount = equalHalves ? discountedGross - taxAmount : rawTaxableAmount;
       return {
         gross,
         discountAmount,
         taxableAmount,
-        taxAmount: discountedGross - taxableAmount,
+        taxAmount,
         total: discountedGross,
         gstIncluded
       };
     }
-    const taxAmount = discountedGross * gstPct / 100;
+    const taxAmount = equalHalves
+      ? this.gstEqualHalvesTax(discountedGross, gstPct)
+      : discountedGross * gstPct / 100;
     return {
       gross,
       discountAmount,
@@ -11247,6 +11680,53 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private roundLineAmount(value: number): number {
     return Math.round((Number(value) || 0) * 100) / 100;
   }
+
+  // GST of one line as CGST + SGST, each ROUND(taxable x gst%/2, 2), half
+  // away from zero like PostgreSQL. Worked in paise; toFixed(6) strips float
+  // noise (419.50 x 9 = 3775.4999… would otherwise round down).
+  private gstEqualHalvesTax(taxable: number, gstPct: number): number {
+    const halfPaise = Number(((Number(taxable) || 0) * (Number(gstPct) || 0) / 2).toFixed(6));
+    const roundedHalf = Math.sign(halfPaise) * Math.round(Math.abs(halfPaise));
+    return (roundedHalf * 2) / 100;
+  }
+
+  // Equal CGST/SGST halves apply on the SI / PI / SR / PR entry screens unless
+  // the document is clearly interstate (IGST). Unknown state = intrastate,
+  // same as the backend (COALESCE(fn_is_interstate_transaction, false)).
+  private entryLineGstEqualHalves(): boolean {
+    const key = this.config?.key;
+    if (key !== 'salesInvoice' && key !== 'purchaseInvoice' && key !== 'salesReturn' && key !== 'purchaseReturn') return false;
+    return !this.entryFormIsInterstate();
+  }
+
+  // Party + our location from the entry form -> CGST/SGST vs IGST, by the same
+  // rule as the print (salesInvoiceFinancials / purchaseInvoiceFinancials).
+  // Cached on the form/master signals so the grid can call it per row.
+  private readonly entryFormIsInterstate = computed(() => {
+    const v = this.formValues();
+    const key = this.config?.key;
+    const sales = key === 'salesInvoice' || key === 'salesReturn';
+    const picked = this.resolveMergedLocation(v['warehouse'] || v['receivingLocation'] || v['location'] || '');
+    const warehouseId = picked?.warehouse?.id ?? this.optionalNumber(v['warehouseId']);
+    const branchId = picked?.warehouse ? null : (picked?.branch ? this.branchResolvedId(picked.branch) : this.optionalNumber(v['branchId']));
+    const origin = this.ourGstOrigin({ branch_id: branchId, warehouse_id: warehouseId });
+    if (sales) {
+      const customer = this.findCustomerBySelection(v['customer'])
+        || this.customerForRecord({ customer_id: v['customerId'], customer_name: v['customer'] });
+      if (!customer) return false;
+      const placeOfSupply = String(v['placeOfSupply'] || '').trim();
+      return !!this.isInterstateTransaction(
+        origin.gstin, origin.state,
+        this.partyPrimaryGstin(customer), this.partyPrimaryState(customer),
+        placeOfSupply || null
+      );
+    }
+    const vendor = this.vendorForRecord({ vendor_id: this.optionalNumber(v['vendorId']), vendor_name: v['vendor'] });
+    if (!vendor) return false;
+    return !!this.isInterstateTransaction(
+      origin.gstin, origin.state, this.partyPrimaryGstin(vendor), this.partyPrimaryState(vendor)
+    );
+  });
 
   private transactionLineTaxPayload(row: string[], rowIndex: number, qty: number, rate?: number, discountPct?: number, gstPct?: number): {
     gst_inclusive: boolean;
@@ -11370,6 +11850,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   lineGridCellReadonly(rowIndex: number, row: string[], column: string): boolean {
+    // Sales Invoice: Amount is always calculated from Qty x Rate (- Disc + GST);
+    // the user can change Qty and Rate, never the Amount itself.
+    if (this.config?.key === 'salesInvoice' && this.compactKey(column) === 'amount') {
+      return true;
+    }
     // 259: Purchase Return may return part of the invoice - Return Qty stays editable
     // (any quantity up to what is still returnable; the server enforces the limit).
     if ((this.config?.key === 'salesInvoice' || this.config?.key === 'deliveryChallan') && this.normalizeKey(column) === 'warehouse') {
@@ -11608,6 +12093,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       colKey.includes('product') || colKey.includes('item') || colKey.includes('sku') ||
       colKey.includes('material') || colKey.includes('variant')
     );
+    if (this.config?.kind === 'transaction' && !productionCostColumn &&
+      (colKey.includes('product') || colKey.includes('item') || colKey.includes('sku'))) {
+      const duplicateRow = this.salesInvoiceDuplicateProductRow(rowIndex, columnIndex, value);
+      if (duplicateRow >= 0) {
+        this.saveError.set(`"${String(value).trim()}" is already added on S.No ${duplicateRow + 1}. Increase the Qty on that line instead of adding the product again.`);
+        return;
+      }
+    }
     if (resetsAttr) {
       this.lineAttrValueMap.update(map => {
         const next = { ...map };
@@ -11704,7 +12197,17 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             // New rows now start with Qty empty (blankLineRow), so give it the
             // old default of 1 once an item is picked. Purchase screens keep
             // their own blank-Qty behavior.
-            if (!this.isPurchaseTransactionKey(this.config?.key || '')) {
+            // if (!this.isPurchaseTransactionKey(this.config?.key || '')) {
+            //   (this.config?.lineColumns || []).forEach((qtyCol, qtyIdx) => {
+            //     if (qtyCol.toLowerCase().includes('qty') && !nextRow[qtyIdx]) nextRow[qtyIdx] = '1';
+            //   });
+            // }
+            // New rows now start with Qty empty (blankLineRow), so give it the
+            // old default of 1 once an item is picked. Purchase screens and the
+            // Sales Invoice keep Qty blank: the user must enter the quantity.
+            const keepQtyBlank = this.isPurchaseTransactionKey(this.config?.key || '')
+              || this.config?.key === 'salesInvoice';
+            if (!keepQtyBlank) {
               (this.config?.lineColumns || []).forEach((qtyCol, qtyIdx) => {
                 if (qtyCol.toLowerCase().includes('qty') && !nextRow[qtyIdx]) nextRow[qtyIdx] = '1';
               });
@@ -11715,11 +12218,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
             }
             if (this.isGstAutoFillLineGrid() && product.gst_rate != null) {
               // Auto-bind GST from the product's own mapped rate (Product Master /
-              // HSN-SAC) instead of leaving it for manual re-entry on every inward line.
+              // HSN-SAC). This runs only when the row's product changes, so the
+              // previous product's (or a default) GST is REPLACED.
               const gstIdx = (this.config?.lineColumns || []).findIndex(c => c.toLowerCase().includes('gst'));
-              if (gstIdx >= 0 && !nextRow[gstIdx]) {
-                const gstValue = `${Number(product.gst_rate)}%`;
-                nextRow[gstIdx] = gstValue;
+              if (gstIdx >= 0) {
+                nextRow[gstIdx] = `${Number(product.gst_rate)}%`;
               }
             }
             this.applyProductPricingDefaults(nextRow, product);
@@ -11870,6 +12373,74 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     });
     const fmt = (n: number) => `Rs. ${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     return { value: fmt(value), discount: fmt(discount), gst: fmt(gst) };
+  }
+
+  // Purchase Invoice entry grid: CGST + SGST (or IGST) under the GST Total in
+  // the Total row. Same rule as the PI print (purchaseInvoiceFinancials):
+  // our branch/company GSTIN vs the vendor's GSTIN/state, CGST/SGST halves as
+  // the backend posts them (gstHalves). Shown only once a vendor is selected;
+  // a selected vendor whose state cannot be determined -> CGST + SGST.
+  // Sales Invoice: same footer, decided against the customer (state/GSTIN and
+  // Place of Supply) by entryFormIsInterstate — the same rule as the SI print.
+  lineFooterGstSplit(): { isInterstate: boolean; cgst: string; sgst: string; igst: string } | null {
+    const key = this.config?.key;
+    if (key !== 'purchaseInvoice' && key !== 'salesInvoice') return null;
+    if (key === 'salesInvoice') return this.salesInvoiceFooterGstSplit();
+    let tax = 0;
+    this.directEntryLineRows().forEach((row, rowIndex) => {
+      const preview = this.transactionLineAmountPreview(row, rowIndex);
+      if (preview) tax += this.roundLineAmount(preview.taxAmount);
+    });
+    tax = this.roundLineAmount(tax);
+    const form = this.formValues();
+    const warehouse = this.findWarehouseBySelection(form['receivingLocation'] || form['warehouse'] || form['warehouseId']);
+    const record = {
+      branch_id: this.optionalNumber(form['branchId']),
+      warehouse_id: warehouse?.id ?? this.optionalNumber(form['warehouseId']),
+      vendor_id: this.optionalNumber(form['vendorId']),
+      vendor_name: form['vendor']
+    };
+    const vendor = this.vendorForRecord(record);
+    // No vendor selected yet -> show only the GST Total; the CGST/SGST or
+    // IGST lines appear once a vendor is picked, by that vendor's state.
+    if (!vendor) return null;
+    const origin = this.ourGstOrigin(record);
+    const isInterstate = !!this.isInterstateTransaction(
+      origin.gstin, origin.state, this.partyPrimaryGstin(vendor), this.partyPrimaryState(vendor)
+    );
+    const halves = this.gstHalves(tax);
+    const fmt = (n: number) => `Rs. ${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return {
+      isInterstate,
+      cgst: fmt(isInterstate ? 0 : halves.cgst),
+      sgst: fmt(isInterstate ? 0 : halves.sgst),
+      igst: fmt(isInterstate ? tax : 0)
+    };
+  }
+
+  // Sales Invoice footer split: CGST + SGST for a same-state customer, IGST
+  // for another state. Shown only once a customer is picked; a customer whose
+  // state cannot be determined -> CGST + SGST (as the backend posts it).
+  private salesInvoiceFooterGstSplit(): { isInterstate: boolean; cgst: string; sgst: string; igst: string } | null {
+    const v = this.formValues();
+    const customer = this.findCustomerBySelection(v['customer'])
+      || this.customerForRecord({ customer_id: v['customerId'], customer_name: v['customer'] });
+    if (!customer) return null;
+    let tax = 0;
+    this.directEntryLineRows().forEach((row, rowIndex) => {
+      const preview = this.transactionLineAmountPreview(row, rowIndex);
+      if (preview) tax += this.roundLineAmount(preview.taxAmount);
+    });
+    tax = this.roundLineAmount(tax);
+    const isInterstate = this.entryFormIsInterstate();
+    const halves = this.gstHalves(tax);
+    const fmt = (n: number) => `Rs. ${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return {
+      isInterstate,
+      cgst: fmt(isInterstate ? 0 : halves.cgst),
+      sgst: fmt(isInterstate ? 0 : halves.sgst),
+      igst: fmt(isInterstate ? tax : 0)
+    };
   }
 
   // Sales / Purchase Invoice: the whole-rupee Grand Total under the line grid
@@ -12259,13 +12830,24 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // selling rate, while PI's Rate is
     // the vendor purchase rate (must NOT be overwritten from selling price)
     // — only MRP/Selling Price are safe to auto-bind on both.
-    if (this.config?.key === 'salesInvoice') {
+        if (this.config?.key === 'salesInvoice') {
       const mrp = this.productSalesPriceForLineUom(product, row, this.productMrp(product));
       const selling = this.productSalesPriceForLineUom(product, row, this.productSellingPrice(product, row));
+      // Rate = closing stock (FIFO) cost + product / category margin (migration 283).
+      // Selling Price / MRP are NOT used for the rate any more (they were a temporary workaround).
+      const suggested = this.productSalesPriceForLineUom(product, row, this.productSuggestedSalesRate(product));
+      const cost = this.productSalesPriceForLineUom(product, row, this.productSuggestedRateCost(product));
       this.setLineColumnDefault(row, ['mrp'], mrp, true);
       this.setLineColumnDefault(row, ['selling'], selling, true);
-      this.setLineColumnDefault(row, ['rate'], mrp > 0 ? mrp : selling, true);
-    } else if (this.config?.key === 'salesOrder' || this.config?.key === 'purchaseInvoice') {
+      // This runs only when the row's product changes, so the previous product's
+      // rate must be REPLACED (not kept, as a "default" would do).
+      const rateIdx = (this.config?.lineColumns || []).findIndex(c => this.compactKey(c) === 'rate');
+      if (rateIdx >= 0) {
+        const newRate = suggested > 0 ? suggested : cost;
+        row[rateIdx] = newRate > 0 ? String(Math.round(newRate * 100) / 100) : '';
+      }
+    }
+    else if (this.config?.key === 'salesOrder' || this.config?.key === 'purchaseInvoice') {
       const mrp = this.productSalesPriceForLineUom(product, row, this.productMrp(product));
       const selling = this.productSalesPriceForLineUom(product, row, this.productSellingPrice(product, row));
       // Previous: MRP / Selling Price were always defaulted from the product,
@@ -12279,6 +12861,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (this.config?.key === 'salesOrder') {
       this.setLineColumnDefault(row, ['rate'], this.productSalesPriceForLineUom(product, row, this.productSellingPrice(product, row)), true);
     }
+  }
+
+    /** Suggested selling rate (cost + margin) from the product list; 0 = none. */
+  private productSuggestedSalesRate(product: any): number {
+    const value = Number(product?.suggested_sales_rate ?? product?.suggestedSalesRate ?? 0);
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  }
+
+  /** Cost behind the suggested rate (for the below-cost warning); 0 = unknown. */
+  private productSuggestedRateCost(product: any): number {
+    const value = Number(product?.suggested_rate_cost ?? product?.suggestedRateCost ?? 0);
+    return Number.isFinite(value) && value > 0 ? value : 0;
   }
 
   private syncPurchaseInvoiceSellingPrice(row: string[], mrpValue: string, previousMrpValue: string): void {
@@ -12422,6 +13016,118 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.dismissedPriceHints.update(map => ({ ...map, [rowIndex]: fingerprint }));
   }
 
+  // Rate calculation hint is hidden once the user moves on to that row's
+  // Disc % cell (it would otherwise sit over the Disc input), and shown
+  // again when they click back into the Rate cell.
+  private readonly priceHintHiddenByFocus = signal<Record<number, boolean>>({});
+
+  isPriceHintHiddenByFocus(rowIndex: number): boolean {
+    return !!this.priceHintHiddenByFocus()[rowIndex];
+  }
+
+  onLineCellFocus(rowIndex: number, column: string): void {
+    const key = this.compactKey(column);
+    if (key !== 'rate' && this.rateHistoryRowIndex() !== null) {
+      this.closeRateHistory();
+    }
+    if (key.includes('disc')) {
+      this.priceHintHiddenByFocus.update(map => ({ ...map, [rowIndex]: true }));
+    } else if (key === 'rate') {
+      this.priceHintHiddenByFocus.update(map => ({ ...map, [rowIndex]: false }));
+    }
+  }
+
+  // Purchase Invoice Rate cell "i" button — shows the latest three Purchase
+  // Invoices (newest first) that bought the row's product, so the user can
+  // compare the rate being entered with what was paid before. Cancelled
+  // invoices and the invoice currently being edited are left out.
+  readonly rateHistoryRowIndex = signal<number | null>(null);
+  readonly rateHistoryLoading = signal(false);
+  readonly rateHistoryProductName = signal('');
+  readonly rateHistoryPosition = signal<{ top: number; left: number }>({ top: 0, left: 0 });
+  readonly rateHistoryRows = signal<Array<{
+    piNumber: string;
+    piDate: string;
+    vendorName: string;
+    qty: number;
+    uomName: string;
+    rate: number;
+    discountPct: number;
+    gstRate: number;
+  }>>([]);
+
+  isRateColumn(column: string): boolean {
+    return this.compactKey(column) === 'rate';
+  }
+
+  closeRateHistory(): void {
+    this.rateHistoryRowIndex.set(null);
+    this.rateHistoryRows.set([]);
+    this.rateHistoryLoading.set(false);
+  }
+
+  toggleRateHistory(rowIndex: number, row: string[], event?: Event): void {
+    event?.stopPropagation();
+    if (this.rateHistoryRowIndex() === rowIndex) {
+      this.closeRateHistory();
+      return;
+    }
+    const product = this.lineRowProduct(row);
+    // The grid sits in a scrolling wrapper that would clip a dropdown, so the
+    // panel is fixed-positioned just under the clicked "i" button.
+    const anchor = (event?.currentTarget as HTMLElement | null)?.getBoundingClientRect?.();
+    if (anchor) {
+      const width = 520;
+      const left = Math.max(8, Math.min(anchor.right - width, window.innerWidth - width - 8));
+      this.rateHistoryPosition.set({ top: anchor.bottom + 4, left });
+    }
+    this.rateHistoryRowIndex.set(rowIndex);
+    this.rateHistoryRows.set([]);
+    this.rateHistoryProductName.set(product?.product_name || '');
+    if (!product?.id) {
+      this.rateHistoryLoading.set(false);
+      return;
+    }
+    const productId = Number(product.id);
+    const currentId = Number(this.editingId() || 0);
+    this.rateHistoryLoading.set(true);
+    this.txService.getPurchaseInvoices().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: res => {
+        if (this.rateHistoryRowIndex() !== rowIndex) return;
+        const lines: Array<{ sortDate: string; id: number; view: any }> = [];
+        for (const pi of res?.data || []) {
+          if (this.normalizeKey(pi?.status || 'draft') === 'cancelled') continue;
+          if (currentId && Number(pi?.id) === currentId) continue;
+          for (const item of pi?.items || []) {
+            if (Number(item?.product_id) !== productId) continue;
+            lines.push({
+              sortDate: String(pi?.pi_date || pi?.created_at || ''),
+              id: Number(pi?.id || 0),
+              view: {
+                piNumber: pi?.pi_number || '',
+                piDate: pi?.pi_date || '',
+                vendorName: pi?.vendor_name || '',
+                qty: Number(item?.qty || 0),
+                uomName: item?.uom_name || '',
+                rate: Number(item?.rate || 0),
+                discountPct: Number(item?.discount_pct || 0),
+                gstRate: Number(item?.gst_rate || 0)
+              }
+            });
+          }
+        }
+        lines.sort((a, b) => b.sortDate.localeCompare(a.sortDate) || b.id - a.id);
+        this.rateHistoryRows.set(lines.slice(0, 3).map(l => l.view));
+        this.rateHistoryLoading.set(false);
+      },
+      error: () => {
+        if (this.rateHistoryRowIndex() !== rowIndex) return;
+        this.rateHistoryRows.set([]);
+        this.rateHistoryLoading.set(false);
+      }
+    });
+  }
+
   transactionPriceHintClass(hint: PriceHintView | null | undefined): string {
     if (!hint) return '';
     if (hint.severity === 'error') return 'inventory-stock-hint inventory-price-hint inventory-hint-error';
@@ -12519,6 +13225,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const reference: string[] = [];
     if (productMrpForLineUom > 0) reference.push(`MRP Rs. ${fmt(productMrpForLineUom)}`);
     if (sellingPrice > 0) reference.push(`Selling Rs. ${fmt(sellingPrice)}`);
+    // Margin rate (cost + category / product margin, migration 283)
+    const marginRate = this.productSalesPriceForLineUom(product, row, this.productSuggestedSalesRate(product));
+    const marginPct = Number((product as any)?.effective_sales_margin_pct ?? 0);
+    if (marginRate > 0) reference.push(`Margin rate Rs. ${fmt(marginRate)}${marginPct > 0 ? ` (${fmt(marginPct)}%)` : ''}`);
     const withReference = (message: string) =>
       reference.length ? `${message} (${reference.join(' · ')})` : message;
 
@@ -13286,7 +13996,51 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (!productName) return 'Every Sales Invoice line needs a Product selected.';
       if ((Number(item?.qty) || 0) <= 0) return `"${productName}": Qty must be greater than zero.`;
     }
+    // The same product (same variant/attribute) on two lines duplicates the
+    // invoice line — it must be one line with the combined Qty. Lines tied to
+    // different DC / SO lines stay separate (each settles its own reference).
+    const seen = new Map<string, number>();
+    for (const item of items) {
+      const key = this.salesInvoiceDuplicateLineKey(item);
+      const firstSno = seen.get(key);
+      if (firstSno !== undefined) {
+        const productName = String(item?.product_name || '').trim();
+        return `"${productName}" is added more than once (S.No ${firstSno} and ${item?.sno}). Remove the duplicate line and increase the Qty on S.No ${firstSno} instead.`;
+      }
+      seen.set(key, Number(item?.sno) || 0);
+    }
     return '';
+  }
+
+  private salesInvoiceDuplicateLineKey(item: any): string {
+    const norm = (v: any) => String(v ?? '').trim().toLowerCase();
+    return [
+      item?.product_id ?? norm(item?.product_name),
+      item?.variant_id ?? norm(item?.variant_name),
+      norm(item?.attribute_value),
+      item?.dc_item_id ?? '',
+      item?.so_item_id ?? ''
+    ].join('|');
+  }
+
+  // Pick-time half of the duplicate check above: choosing a product that is
+  // already on another Sales Invoice line is refused straight away. Products
+  // with variants are left to the save-time check, since two lines of the
+  // same product with different variants are legitimate.
+  private salesInvoiceDuplicateProductRow(rowIndex: number, columnIndex: number, value: any): number {
+    if (this.config?.key !== 'salesInvoice') return -1;
+    const text = String(value ?? '').trim();
+    if (!text) return -1;
+    const product = this.findProductBySelection(text);
+    if (!product) return -1;
+    if ((this.productVariantOptionObjects(product) || []).length) return -1;
+    const refMap = this.lineRefItemIdMap();
+    return this.entryLineRows().findIndex((row, index) => {
+      if (index === rowIndex) return false;
+      if (refMap[index]?.dcItemId || refMap[index]?.soItemId) return false;
+      const other = this.findProductBySelection(String(row?.[columnIndex] ?? '').trim());
+      return !!other && other.id === product.id;
+    });
   }
 
   private isInwardStockControlQtyColumn(column: string): boolean {
@@ -13601,7 +14355,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (this.config?.kind === 'transaction' && (key.includes('qty') || key === 'uom')) return '';
       if (key.includes('qty')) return '1';
       if (key.includes('disc')) return '0';
-      if (key.includes('gst') || key.includes('tax')) return '18%';
+      // if (key.includes('gst') || key.includes('tax')) return '18%';
+      // Previous: if (key.includes('gst') || key.includes('tax')) return '18%';
+      // Transaction rows: GST stays empty until an item is picked (then it comes
+      // from the product). Other grids keep the 18% default.
+      if (key.includes('gst') || key.includes('tax')) return this.config?.kind === 'transaction' ? '' : '18%';
       if (key.includes('rate') || key.includes('amount')) return '0';
       if (key.includes('warehouse')) return this.locationOptions[0] || '';
       if (key.includes('remark')) return '';
@@ -17955,23 +18713,34 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (customer?.payment_term_name) {
       next['paymentTerms'] = customer.payment_term_name;
     }
-    if (this.config?.key === 'deliveryChallan') {
-      Object.assign(next, this.dcAddressPatchFromSource(customer, false, next));
-    }
-    // Sales Invoice: fill the Delivery / Ship Address from the customer master.
-    // A different customer clears the previous customer's address first, so
-    // the new one is not left behind the old values.
-    if (this.config?.key === 'salesInvoice') {
+    // Delivery Challan, Sales Order, Sales Invoice: the Delivery Address IS the
+    // customer's address (read-only on the document; changed only through
+    // + / Update on the customer). A different customer replaces it completely.
+    const deliveryFromCustomerScreens = ['deliveryChallan', 'salesOrder', 'salesInvoice'];
+    if (deliveryFromCustomerScreens.includes(this.config?.key || '')) {
       const customerChanged = !this.optionEquals(this.formValues()[key], value);
       if (customerChanged) {
-        Object.assign(next, {
-          deliveryHouseNo: '', deliveryStreet: '', deliveryState: '', deliveryDistrict: '',
-          deliveryCity: '', deliveryPincode: '', deliveryAddress: '',
-          shipSameAsDelivery: 'Yes', shipAddress: ''
-        });
+        next['shipSameAsDelivery'] = 'Yes';
+        next['shipAddress'] = '';
+        this.deliveryAddressOverride.set(null); 
       }
-      Object.assign(next, this.dcAddressPatchFromSource(customer, false, next));
+      Object.assign(next, this.deliveryFromCustomer(customer));
     }
+  }
+
+    /** Delivery fields of a sales document, taken as-is from the customer master. */
+  private deliveryFromCustomer(customer: any): Record<string, any> {
+    const patch: Record<string, any> = {
+      deliveryHouseNo: '',
+      deliveryStreet: String(customer?.address || '').trim(),   // the customer's address text
+      deliveryState: String(customer?.state || '').trim(),
+      deliveryDistrict: String(customer?.district || '').trim(),
+      deliveryCity: String(customer?.city || '').trim(),
+      deliveryPincode: String(customer?.pincode || '').trim()
+    };
+    // Full address for print / saving: "address, city, district, state, pincode"
+    patch['deliveryAddress'] = this.composeDcDeliveryAddress(patch);
+    return patch;
   }
 
   private applySalesTransactionPaymentDefaults(next: Record<string, any>, key: string): void {
@@ -18004,15 +18773,21 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       || v['deliveryCity'] || v['deliveryPincode'] || v['deliveryAddress']);
   }
 
-  toggleDeliveryAddress(checked: boolean): void {
+    toggleDeliveryAddress(checked: boolean): void {
     this.deliveryAddressOverride.set(checked);
     if (!checked) {
       this.formValues.update(v => ({
         ...v,
         deliveryHouseNo: '', deliveryStreet: '', deliveryState: '',
         deliveryDistrict: '', deliveryCity: '', deliveryPincode: '', deliveryAddress: '',
-        shipSameAsDelivery: 'Yes', shipAddress: ''
+        shipSameAsDelivery: 'Yes', shipAddress: '', shipState: ''
       }));
+      return;
+    }
+    // Yes again: refill from the selected customer (read-only address)
+    const customer = this.findCustomerBySelection(this.formValues()['customer']);
+    if (customer) {
+      this.formValues.update(v => ({ ...v, ...this.deliveryFromCustomer(customer) }));
     }
   }
 
@@ -18023,11 +18798,40 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return this.formValues()['shipSameAsDelivery'] !== 'No';
   }
 
-  toggleShipSameAsDelivery(checked: boolean): void {
+    /** Ship-to state differs from the delivery state: the GST type would change, so it is not allowed. */
+  shipStateMismatchMessage(): string {
+    if (this.shipSameAsDelivery()) return '';
+    const v = this.formValues();
+    const deliveryState = String(v['deliveryState'] || '').trim();
+    const shipState = String(v['shipState'] || '').trim();
+    if (!deliveryState || !shipState || this.optionEquals(deliveryState, shipState)) return '';
+    return `Shipping to ${shipState} is not allowed: the customer's address is in ${deliveryState}, `
+      + `and another state changes the GST. Ship only within ${deliveryState}, or use the customer's branch in ${shipState}.`;
+  }
+
+    /** Customer GSTIN for the invoice header: the GSTIN registered in the delivery state,
+   *  else the primary one, else the single one; '' when the customer has none. */
+  salesInvoiceCustomerGstin(): string {
+    const v = this.formValues();
+    const customer: any = this.findCustomerBySelection(v['customer']);
+    if (!customer) return '';
+    const rows: any[] = Array.isArray(customer.gstins) ? customer.gstins : [];
+    const deliveryState = String(v['deliveryState'] || '').trim();
+    const gstinOf = (r: any) => String(r?.gstin || '').trim();
+    const stateOf = (r: any) => String(r?.stateName ?? r?.state_name ?? '').trim();
+    const inDeliveryState = deliveryState ? rows.find(r => gstinOf(r) && this.optionEquals(stateOf(r), deliveryState)) : null;
+    const primary = rows.find(r => gstinOf(r) && (r?.isPrimary ?? r?.is_primary));
+    const any = rows.find(r => gstinOf(r));
+    return gstinOf(inDeliveryState) || gstinOf(primary) || gstinOf(any) || String(customer.gstin || '').trim();
+  }
+
+    toggleShipSameAsDelivery(checked: boolean): void {
     this.formValues.update(v => ({
       ...v,
       shipSameAsDelivery: checked ? 'Yes' : 'No',
-      shipAddress: checked ? '' : (v['shipAddress'] || '')
+      shipAddress: checked ? '' : (v['shipAddress'] || ''),
+      // ship to another branch of the same customer: same state as the delivery address
+      shipState: checked ? '' : (v['shipState'] || v['deliveryState'] || '')
     }));
   }
 
@@ -18276,39 +19080,55 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // 'district'/'city'/'pincode' keys are safe here (no 'delivery' prefix
   // needed) since Vendor Master and Customer Master are never both open at
   // once and those are exactly the backend column names already.
-  partyDistrictOptions(): string[] {
-    const state = String(this.formValues()['state'] || '').trim();
-    const current = String(this.formValues()['district'] || '').trim();
+    partyDistrictOptions(prefix = ''): string[] {
+    const state = String(this.formValues()[this.partyAddressKey(prefix, 'state')] || '').trim();
+    const current = String(this.formValues()[this.partyAddressKey(prefix, 'district')] || '').trim();
     const districts = DC_STATE_DISTRICTS[state] || [];
     return current && !districts.some(item => this.optionEquals(item, current))
       ? [current, ...districts]
       : districts;
   }
 
-  onPartyStateChange(value: any): void {
+    /** Warning when the chosen State is not the state of the entered pincode. */
+  partyPincodeStateMismatch(prefix = ''): string {
+    const state = String(this.formValues()[this.partyAddressKey(prefix, 'state')] || '').trim();
+    const pinState = String(this.formValues()[this.partyAddressKey(prefix, 'pincodeState')] || '').trim();
+    const pincode = String(this.formValues()[this.partyAddressKey(prefix, 'pincode')] || '').trim();
+    if (!state || !pinState || this.optionEquals(state, pinState)) return '';
+    return `Pincode ${pincode} is in ${pinState}, but the state is ${state}. Please check.`;
+  }
+
+    onPartyStateChange(value: any, prefix = ''): void {
     const state = toInventoryTitleCase(String(value || ''));
+    const stateKey = this.partyAddressKey(prefix, 'state');
+    const districtKey = this.partyAddressKey(prefix, 'district');
     this.formValues.update(values => {
       const districts = DC_STATE_DISTRICTS[state] || [];
-      const currentDistrict = String(values['district'] || '').trim();
+      const currentDistrict = String(values[districtKey] || '').trim();
       return {
         ...values,
-        state,
-        district: currentDistrict && districts.length && !districts.some(item => this.optionEquals(item, currentDistrict)) ? '' : currentDistrict
+        [stateKey]: state,
+        [districtKey]: currentDistrict && districts.length && !districts.some(item => this.optionEquals(item, currentDistrict)) ? '' : currentDistrict
       };
     });
   }
 
-  onPartyPincodeChange(value: any): void {
+    /** '' -> 'state'; 'quickCustomer' -> 'quickCustomerState' (same rule as the party form's pfx()). */
+  private partyAddressKey(prefix: string, field: string): string {
+    return prefix ? prefix + field[0].toUpperCase() + field.slice(1) : field;
+  }
+
+   onPartyPincodeChange(value: any, prefix = ''): void {
     const pincode = String(value || '').replace(/\D/g, '').slice(0, 6);
-    this.collectFormField('pincode', pincode);
+    this.collectFormField(this.partyAddressKey(prefix, 'pincode'), pincode);
     if (pincode.length === 6) {
-      this.lookupPartyPincode(pincode);
+      this.lookupPartyPincode(pincode, prefix);
     }
   }
 
-  private lookupPartyPincode(pincode: string): void {
+    private lookupPartyPincode(pincode: string, prefix = ''): void {
     const local = this.localDcPincodeLookup(pincode);
-    if (local) this.applyPartyPincodeLookup(local);
+    if (local) this.applyPartyPincodeLookup(local, prefix);
 
     const seq = ++this.partyPincodeLookupSeq;
     fetch(`https://api.postalpincode.in/pincode/${encodeURIComponent(pincode)}`)
@@ -18322,17 +19142,23 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           district: postOffice.District || '',
           city: postOffice.Block && postOffice.Block !== 'NA' ? postOffice.Block : (postOffice.Name || ''),
           area: postOffice.Name || ''
-        });
+        }, prefix);
       })
       .catch(() => { });
   }
 
-  private applyPartyPincodeLookup(lookup: { state: string; district: string; city: string; area: string }): void {
+    private applyPartyPincodeLookup(lookup: { state: string; district: string; city: string; area: string }, prefix = ''): void {
+    const stateKey = this.partyAddressKey(prefix, 'state');
+    const districtKey = this.partyAddressKey(prefix, 'district');
+    const cityKey = this.partyAddressKey(prefix, 'city');
+    const pinStateKey = this.partyAddressKey(prefix, 'pincodeState');
     this.formValues.update(values => ({
       ...values,
-      state: lookup.state || values['state'] || '',
-      district: lookup.district || values['district'] || '',
-      city: lookup.city || values['city'] || ''
+      [stateKey]: lookup.state || values[stateKey] || '',
+      [districtKey]: lookup.district || values[districtKey] || '',
+      [cityKey]: lookup.city || values[cityKey] || '',
+      // the pincode's own state, for the "state doesn't match pincode" warning
+      [pinStateKey]: lookup.state ? toInventoryTitleCase(String(lookup.state)) : (values[pinStateKey] || '')
     }));
   }
 
@@ -18967,6 +19793,83 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // Last document opened by printAutoGeneratedDocument(), so one post never
   // opens the same Sales Invoice twice.
   private lastAutoOpenedDocKey = '';
+
+  // Accounts > Re-Print, Transaction Type "Sales Invoice" / "Purchase Invoice"
+  // (InventoryInvoiceReprintComponent): when set, printInvoiceWithCopyType()
+  // hands the finished document here instead of downloading/printing it.
+  protected invoiceDocumentSink: ((doc: InventoryExportDocument) => void) | null = null;
+
+  // Finds the invoice by its number across all segments (SI doc no.; PI no. or
+  // the vendor's invoice no.) and builds the same document the screen's Print
+  // button prints, always as "Duplicate for Recipient". Only posted/paid
+  // invoices can be reprinted. Still counts as a print (mark*Printed).
+  protected loadInvoiceReprintDocument(
+    kind: 'salesInvoice' | 'purchaseInvoice',
+    invoiceNo: string,
+    done: (result: { doc?: InventoryExportDocument; record?: any; error?: string }) => void
+  ): void {
+    const label = kind === 'salesInvoice' ? 'Sales Invoice' : 'Purchase Invoice';
+    const wanted = String(invoiceNo || '').trim().toUpperCase();
+    if (!wanted) {
+      done({ error: `Enter the ${label} number.` });
+      return;
+    }
+    const list$: Observable<ApiResponse<any[]>> = kind === 'salesInvoice'
+      ? this.txService.getSalesInvoices()
+      : this.txService.getPurchaseInvoices();
+    list$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: res => {
+        const norm = (v: any) => String(v ?? '').trim().toUpperCase();
+        const record = (res?.data || []).find((r: any) => kind === 'salesInvoice'
+          ? norm(r?.doc_number ?? r?.docNumber) === wanted
+          : norm(r?.pi_number ?? r?.piNumber) === wanted || norm(r?.vendor_invoice_no ?? r?.vendorInvoiceNo) === wanted);
+        if (!record) {
+          done({ error: `${label} ${wanted} does not exist.` });
+          return;
+        }
+        const status = this.normalizeKey(record?.status || '');
+        if (status !== 'posted' && status !== 'paid') {
+          done({ error: `${label} ${wanted} is not posted, so it cannot be reprinted.` });
+          return;
+        }
+        // Give the lookups (bank details, GST state codes, customers/vendors)
+        // a moment to load so the reprint matches the screen's print exactly.
+        setTimeout(() => {
+          // Like the Journal Voucher reprint ("Journal Voucher (Duplicate)"):
+          // the title reads "Tax Invoice (DUPLICATE)" and the right-side
+          // "Duplicate for Recipient" copy type is dropped.
+          // Previous: this.invoiceDocumentSink = doc => { this.invoiceDocumentSink = null; done({ doc, record }); };
+          this.invoiceDocumentSink = doc => {
+            this.invoiceDocumentSink = null;
+            const fileName = doc.fileName || doc.title;
+            done({ doc: { ...doc, title: `${doc.title} (DUPLICATE)`, copyType: undefined, fileName }, record });
+          };
+          if (kind === 'purchaseInvoice') {
+            const piNo = String(record?.pi_number || record?.piNumber || '');
+            this.printInvoiceWithCopyType('purchaseInvoice', record,
+              this.purchaseInvoiceDocumentExportPayload(record, piNo, [], [], []), 'Pdf', 'Duplicate for Recipient');
+          } else {
+            const docNo = String(record?.doc_number || record?.docNumber || '');
+            this.printInvoiceWithCopyType('salesInvoice', record,
+              this.salesInvoiceDocumentExportPayload(record, docNo, [], [], []), 'Pdf', 'Duplicate for Recipient');
+          }
+        }, 1500);
+      },
+      error: () => done({ error: `Could not load ${label} ${wanted}.` })
+    });
+  }
+
+  // PDF / Print of an already-built document (the Re-Print page's buttons).
+  protected outputInvoiceDocument(doc: InventoryExportDocument, mode: 'Pdf' | 'Print'): void {
+    this.exportService.pdf(doc, mode);
+  }
+
+  // Company letterhead (name, address, CIN/GST, logo, branch) the PDF prints,
+  // for the Re-Print page's on-screen header.
+  // Previous: protected invoiceDocumentPreviewUrl(doc) { return this.exportService.pdfBlobUrl(doc); } (PDF iframe preview)
+  protected invoiceCompanyDetails(): any {
+    return this.exportService.companyDetails();
+  }
 
   saveConfigRecord(forceDocumentStatus?: 'draft' | 'posted' | 'sent'): void {
     if (this.isSaving()) return;
@@ -21438,6 +22341,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           categoryCode: record.category_code || '',
           categoryName: record.category_name || '',
           description: record.description || '',
+          salesMarginPct: record.sales_margin_pct ?? '',
           batchPolicyName: record.batch_policy_name || '',
           applicableUoms: (record.uoms || []).map((u: any) => u.uom_symbol || u.uom_name || u.uom_code).filter(Boolean),
           status: cap(record.status || 'active')
@@ -21657,6 +22561,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         break;
       case 'productServiceMaster':
         this.isCurrentProductLocked.set(!!record.locked_for_edit);
+        this.productMarginInfo.set({
+          categoryPct: record.category_sales_margin_pct ?? null,
+          effectivePct: record.effective_sales_margin_pct ?? null,
+          suggestedRate: record.suggested_sales_rate ?? null,
+          cost: record.suggested_rate_cost ?? null,
+          categoryName: record.category_name || ''
+        });
         this.genericNameValue.set(record.product_name || '');
         this.productName.set(record.product_name || '');
         this.selectedProductCategory.set(record.category_name || '');
@@ -21708,6 +22619,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           reorderLevel: record.reorder_level ?? 0,
           reorderQty: record.reorder_qty ?? 0,
           description: record.description || '',
+          salesMarginPct: record.sales_margin_pct ?? '',
           status: cap(record.item_status || record.status || 'active')
         });
         {
@@ -22602,31 +23514,6 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           usage_note: v['usageNote'] || null,
           status: lc(v['status'] || 'active')
         };
-      // case 'bomMaster':
-      //   return {
-      //     id: this.editingId(),
-      //     segment_id: selectedSegmentId,
-      //     bom_code: String(v['bomCode'] || '').trim() || null,
-      //     bom_version: String(v['version'] || '').trim() || null,
-      //     finished_product_id: this.findProductBySelection(v['finishedProduct'])?.id ?? null,
-      //     finished_product_name: String(v['finishedProduct'] || '').trim(),
-      //     quantity: this.parseCurrency(v['quantity']) || 1,
-      //     wastage_percent: this.parseCurrency(v['wastagePercent']) || 0,
-      //     production_cost: this.parseCurrency(v['productionCost']) || 0,
-      //     status: lc(v['status'] || 'active'),
-      //     // Raw materials are rows now, not a comma-joined string, so a BOM can
-      //     // be queried and costed. sp_upsert_bom replaces them wholesale.
-      //     items: this.rawMaterialNamesFromBomValue(v['rawMaterials']).map(name => {
-      //       const product = this.findProductBySelection(name);
-      //       return {
-      //         product_id: product?.id ?? null,
-      //         product_name: name,
-      //         quantity: 1,
-      //         uom_id: null,
-      //         uom_name: this.productBaseUomLabel(product) || null
-      //       };
-      //     })
-      //   };
       case 'bomMaster':
         return {
           id: this.editingId(),
@@ -22744,6 +23631,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           category_code: v['categoryCode'] || '',
           category_name: v['categoryName'] || '',
           description: v['description'] || '',
+           // Sales margin on cost (migration 283): "" clears it, "15" = 15 %
+          sales_margin_pct: v['salesMarginPct'] === null || v['salesMarginPct'] === undefined || String(v['salesMarginPct']).trim() === ''
+            ? ''
+            : String(v['salesMarginPct']).trim(),
           policy_applicable: policyApplicable,
           policies,
           batch_applicable: this.categoryBatchApplicable(),
@@ -22986,6 +23877,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           qc_required: this.productQcRequired() || bool(v['qcRequired']),
           warranty_applicable: this.productWarrantyApplicable() || bool(v['warrantyApplicable']),
           description: v['description'] || null,
+          // Sales margin override (migration 283): "" = use the category, "8" = 8 %
+          sales_margin_pct: v['salesMarginPct'] === null || v['salesMarginPct'] === undefined || String(v['salesMarginPct']).trim() === ''
+            ? ''
+            : String(v['salesMarginPct']).trim(),
           pricing_type: InventoryScreenShell.PRICING_TYPE_NATURES.has(v['productNatureName']) ? (v['pricingType'] || null) : null,
           rental_unit: v['pricingType'] === 'Rental' ? (v['rentalUnit'] || null) : null,
           uom_conversions: productUomConversions,
@@ -23612,7 +24507,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         reference_no: v['referenceNo'] || v['soReference'] || null,
         customer_id: customerId,
         customer_name: customerName,
-        customer_gstin: customerGstin,
+        // the GSTIN shown on the screen (registered in the delivery state, else primary)
+        customer_gstin: this.salesInvoiceCustomerGstin() || customerGstin,
         channel_partner_id: channelPartnerId,
         channel_partner_name: channelPartnerName,
         lead_by_contact_id: String(v['leadBy'] || '').trim()
@@ -23635,7 +24531,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         internal_notes: v['internalNotes'] || null,
         // Delivery / Ship address (migration 257).
         delivery_address: v['deliveryAddress'] || this.composeDcDeliveryAddress(v) || null,
-        ship_address: this.resolvedShipAddress(v) || null,
+        // Ship to another branch: the address text plus its state (same state as delivery)
+        ship_address: this.shipSameAsDelivery()
+          ? (this.resolvedShipAddress(v) || null)
+          : ([String(v['shipAddress'] || '').trim(), String(v['shipState'] || '').trim()].filter(Boolean).join(', ') || null),
         status: status(v['status'], 'draft'),
         items
       };
@@ -25095,9 +25994,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // Mirrors the server-side guard in UpsertProductAsync (migration 236) so
     // the user sees this immediately instead of after a round trip — the
     // backend still enforces it regardless of whether this check ever runs.
-    if (this.config?.key === 'productServiceMaster' && this.editingId() !== null && this.isCurrentProductLocked()) {
-      return 'This product has already been used in a posted transaction and can no longer be edited. Deactivate it and create a new product instead.';
-    }
+    // Previous: a locked product could not be saved at all.
+    // if (this.config?.key === 'productServiceMaster' && this.editingId() !== null && this.isCurrentProductLocked()) {
+    //   return 'This product has already been used in a posted transaction and can no longer be edited. Deactivate it and create a new product instead.';
+    // }
+    // Now only Basic Product Details is locked (template fieldset); the API
+    // keeps those fields from the DB and saves Tax Details onward.
 
     // PAN format (Vendor / Customer / Channel Partner / Contact masters).
     const panMessage = this.panValidationMessage(payload['pan']);
@@ -25329,6 +26231,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (this.deliveryAddressEnabled() && !String(this.formValues()['deliveryState'] ?? '').trim()) {
         return 'State is required in Delivery Address.';
       }
+      // Ship to another address: address required, and only within the same state.
+      if (this.deliveryAddressEnabled() &&!this.shipSameAsDelivery()) {
+        if (!String(this.formValues()['shipAddress'] ?? '').trim()) return 'Ship Address is required (or set "Ship Address same as Delivery Address" to Yes).';
+        const shipStateError = this.shipStateMismatchMessage();
+        if (shipStateError) return shipStateError;
+      }
       const invoiceItemsError = this.validateSalesInvoiceLineItems(payload['items']);
       if (invoiceItemsError) return invoiceItemsError;
     }
@@ -25403,6 +26311,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
 
     if (!hasValue(payload['product_name'])) return 'Product / Service Name is required.';
+    const duplicateName = this.productNameDuplicateOf(payload['product_name']);
+    if (duplicateName) return `Product / Service Name "${duplicateName}" already exists. Please enter a different name.`;
+    const duplicateCode = this.productCodeDuplicateOf(payload['product_code']);
+    if (duplicateCode) return `Product / Service Code "${duplicateCode}" already exists. Please enter a different code.`;
     if (!hasValue(payload['category_name']) && !hasValue(payload['category_id'])) return 'Product Category is mandatory.';
     if (!hasValue(payload['base_uom_name']) && !hasValue(payload['base_uom_id'])) return 'Base UOM is mandatory.';
     if (!hasValue(payload['hsn_sac_code']) && !hasValue(payload['hsn_sac_id'])) return 'HSN/SAC tax classification is mandatory.';
@@ -25535,6 +26447,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           r.description || '',
           (r.uoms || []).map((u: any) => u.uom_symbol || u.uom_name || u.uom_code).filter(Boolean).join(', ')
           || (Array.isArray(r.applicable_uom_names) ? r.applicable_uom_names.join(', ') : ''),
+          r.sales_margin_pct !== null && r.sales_margin_pct !== undefined ? `${Number(r.sales_margin_pct)}%` : '',
           cap(r.status || 'active')
         ]);
       case 'hsnSacMapping':

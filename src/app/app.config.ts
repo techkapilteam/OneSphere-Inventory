@@ -1,22 +1,15 @@
 import { ApplicationConfig, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { provideRouter } from '@angular/router';
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { provideAnimations } from '@angular/platform-browser/animations';
-import { MessageService } from 'primeng/api';
-import { provideCharts, withDefaultRegisterables } from 'ng2-charts';
 
 import { routes } from './app.routes';
-import { DatePipe } from '@angular/common';
-import { responseInterceptor } from './core/Interceptor/Interceptor';
 
+// Only used when this remote is opened directly (dev server / remoteEntry
+// host). Inside OneSphere-Accounts the shell's own providers (HTTP
+// interceptor, MessageService, charts, animations, ...) serve every
+// Inventory screen.
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
-    provideRouter(routes),
-    provideHttpClient(withInterceptors([responseInterceptor])),
-    provideAnimations(),
-    provideCharts(withDefaultRegisterables()),
-    MessageService,
-    DatePipe
+    provideRouter(routes)
   ]
 };

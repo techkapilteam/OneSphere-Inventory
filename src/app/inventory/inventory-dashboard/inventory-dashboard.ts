@@ -140,6 +140,13 @@ export class InventoryDashboard {
   readonly lossSalesFlags = signal<LossSaleFlagRow[]>([]);
   readonly dashboardTime = signal(this.nowLabel());
   readonly activeModal = signal<GridPayload | null>(null);
+  readonly modalSearch = signal('');
+  readonly modalRows = computed(() => {
+    const rows = this.activeModal()?.rows ?? [];
+    const term = this.modalSearch().trim().toLowerCase();
+    if (!term) return rows;
+    return rows.filter(row => row.some(cell => String(cell ?? '').toLowerCase().includes(term)));
+  });
   readonly inventoryDashboardConfig = inventoryDashboardConfig;
 
   readonly sectionLayout = signal<SectionLayoutItem[]>(this.loadSectionLayout());
@@ -488,11 +495,17 @@ export class InventoryDashboard {
   }
 
   openCard(card: KpiTile): void {
+    this.modalSearch.set('');
     this.activeModal.set(this.buildPayload(card));
   }
 
   closeModal(): void {
     this.activeModal.set(null);
+    this.modalSearch.set('');
+  }
+
+  onModalSearch(event: Event): void {
+    this.modalSearch.set((event.target as HTMLInputElement)?.value ?? '');
   }
 
   exportModalCsv(): void {
@@ -501,7 +514,7 @@ export class InventoryDashboard {
     this.exportService.excel({
       title: payload.title,
       columns: payload.headers.map(header => String(header)),
-      rows: payload.rows.map(row => row.map(cell => String(cell ?? ''))),
+      rows: this.modalRows().map(row => row.map(cell => String(cell ?? ''))),
       fileName: payload.title
     });
   }

@@ -436,8 +436,10 @@
               <div class="erp-alert alert-warning">
                 <i class="pi pi-lock alert-icon"></i>
                 <div class="alert-body">
-                  <div class="alert-title">This product can no longer be edited</div>
-                  <div class="alert-msg">It has already been used in a posted transaction. Deactivate it and create a new product for any change.</div>
+                  <!-- Previous: <div class="alert-title">This product can no longer be edited</div> -->
+                  <!-- Previous: <div class="alert-msg">It has already been used in a posted transaction. Deactivate it and create a new product for any change.</div> -->
+                  <div class="alert-title">Basic Product Details can no longer be edited</div>
+                  <div class="alert-msg">This product has already been used in a posted transaction. Tax Details and the sections after it can still be changed.</div>
                 </div>
               </div>
             }
@@ -457,6 +459,8 @@
               }
               <span class="product-segment-bar-hint">Products added here belong to this segment only.</span>
             </div>
+            <!-- Lock now covers only Segment + Basic Product Details (Item Status); Tax Details onward stay editable. -->
+            </fieldset>
 
             <!-- -- Section quick-nav (horizontal tabs) ----------------------- -->
             <!-- pm-tabs-spacer keeps the layout gap when JS pins the bar with position:fixed -->
@@ -486,6 +490,7 @@
             </div>
 
             <!-- -- Fieldset 1: Basic Product Details ------------------------ -->
+            <fieldset class="inventory-locked-fieldset" [disabled]="isCurrentProductLocked()">
             <div class="inventory-fieldset" id="pm-section-basic">
               <div class="inventory-fieldset-title">Basic Product Details</div>
               <div class="inventory-form-grid inventory-config-grid">
@@ -503,14 +508,18 @@
                         @for (row of existingRowMatches(); track $index) {
                           <button type="button" class="erp-exist-item" (click)="editRecordByRow(row)">
                             <span class="erp-exist-code">{{ row[0] }}</span>
-                            <span class="erp-exist-name">{{ row[1] }}</span>
-                            <!-- Previous: <span class="erp-exist-hint">Already exists · click to edit</span> -->
-                            <span class="erp-exist-hint">{{ isExactExistingMatch(row) ? 'Already exists · click to edit' : 'Similar name · click to edit' }}</span>
+                            <!-- Previous: <span class="erp-exist-name">{{ row[1] }}</span> (row[1] is SKU; name is row[2]) -->
+                            <span class="erp-exist-name">{{ row[2] || row[1] }}@if (row[3]) { <small class="text-muted"> · {{ row[3] }}</small> }</span>
+                            <!-- Previous: <span class="erp-exist-hint">{{ isExactExistingMatch(row) ? 'Already exists · click to edit' : 'Similar name · click to edit' }}</span> -->
+                            <span class="erp-exist-hint">{{ productExistingHint(row) }}</span>
                           </button>
                         }
                       </div>
                     }
                   </div>
+                  @if (productNameDuplicate()) {
+                    <small class="text-danger d-block mt-1">Product / Service Name already exists. Enter a different name.</small>
+                  }
                 </div>
 
                 <!-- Product / Service Code -->
@@ -521,6 +530,9 @@
                     [ngModel]="formValues()['productCode'] || ''"
                     (ngModelChange)="onProductCodeManualEdit($event)"
                     placeholder="Auto / manual code" />
+                  @if (productCodeDuplicate()) {
+                    <small class="text-danger d-block mt-1">Product / Service Code already exists. Enter a different code.</small>
+                  }
                 </div>
 
                 <!-- Category -->
@@ -665,6 +677,7 @@
 
               </div>
             </div>
+            </fieldset>
 
             <!-- -- Fieldset 2: Tax Details ----------------------------------- -->
             <div class="inventory-fieldset" id="pm-section-tax">
@@ -1316,7 +1329,31 @@
                 Use this when purchase or sales UOM differs from Base UOM. Example: Base UOM KG, Alternate UOM Bag, factor 26, Purchase Yes, Sales Yes/No, Active Yes.
               </div>
             </div>
-            </fieldset>
+            <!-- Previous: </fieldset> (whole form was locked) -->
+            <!-- Sales margin override (migration 283). Outside the locked fieldset on
+     purpose: a margin does not touch cost or stock history, so it stays
+     editable on products already used in posted documents. -->
+<div class="inventory-form-grid">
+  <div class="erp-form-group">
+    <label class="erp-label">Sales Margin % (override)</label>
+    <div class="inventory-field-with-add">
+      <input class="erp-input" type="number" min="0" max="1000" step="0.01"
+        [ngModel]="formFieldValue({key:'salesMarginPct', label:'Sales Margin % (override)', type:'number'})"
+        (ngModelChange)="collectFormField('salesMarginPct', $event)"
+        placeholder="Empty = use the category margin" />
+      @if (editingId()) {
+        <button type="button" class="erp-btn btn-white btn-sm"
+          [disabled]="isSavingProductMargin()"
+          (click)="saveCurrentProductSalesMargin()"
+          title="Save only the margin (also works for locked products)">
+          <i [class]="isSavingProductMargin() ? 'pi pi-spin pi-spinner' : 'pi pi-save'"></i>
+          Save margin
+        </button>
+      }
+    </div>
+    <small class="inventory-field-hint">{{ productMarginHint() }}</small>
+  </div>
+</div>
           </div>
         } @else if (config.key === 'consumptionTypeMaster') {
           <div class="inventory-branch-form">
@@ -1914,7 +1951,8 @@
           } @else if (config.kind === 'report') {
             <button type="button" class="erp-btn btn-primary"><i class="pi pi-search"></i> Generate</button>
           } @else {
-            <button type="button" class="erp-btn btn-primary" [disabled]="isSaving() || (config.key === 'productServiceMaster' && isCurrentProductLocked())" (click)="config.key === 'productServiceMaster' ? saveConfigRecord() : null">
+            <!-- Previous: [disabled]="isSaving() || (config.key === 'productServiceMaster' && isCurrentProductLocked())" — locked products can now save Tax Details onward -->
+            <button type="button" class="erp-btn btn-primary" [disabled]="isSaving()" (click)="config.key === 'productServiceMaster' ? saveConfigRecord() : null">
               <i [class]="isSaving() ? 'pi pi-spin pi-spinner' : config.key === 'productServiceMaster' && editingId() !== null ? 'pi pi-save' : 'pi pi-plus'"></i>
               {{ config.key === 'productServiceMaster' ? (editingId() !== null ? 'Update Product' : 'Save Product') : 'Add' }}
             </button>
@@ -2021,11 +2059,11 @@
                 <tr>
                   <td class="text-center">
                     <div class="inventory-row-actions">
-                      @if (isAdmin()) {
-                        <!-- Previous: <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit"><i class="pi pi-pencil"></i></button> -->
-                        <!-- Previous: <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete"><i class="pi pi-trash"></i></button> -->
-                        <!-- Saved master records are locked: Edit/Delete always disabled. -->
-                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" disabled><i class="pi pi-pencil"></i></button>
+                          @if (isAdmin()) {
+                        <!-- Previous: <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" disabled><i class="pi pi-pencil"></i></button> -->
+                        <!-- Saved products stay locked; this only opens them read-only to change the Sales Margin (migration 283). -->
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="View / change sales margin"
+                          (click)="openProductForMargin(row)"><i class="pi pi-percentage"></i></button>
                         <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" disabled><i class="pi pi-trash"></i></button>
                       }
                     </div>

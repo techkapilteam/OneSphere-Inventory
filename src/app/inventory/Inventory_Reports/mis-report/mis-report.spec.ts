@@ -3,7 +3,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { of, throwError } from 'rxjs';
 
 import { MisReportComponent } from './mis-report';
-import { AuthService } from '../../../core/services/auth.service';
+import { AuthService } from '../../../core/host/host-bridge';
 import { InventoryReportsService, MisReport } from '../shared/inventory-reports.service';
 
 // Item: MIS Report -- Admin-only, so the component's own explicit
