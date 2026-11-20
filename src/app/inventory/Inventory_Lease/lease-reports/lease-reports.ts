@@ -11,6 +11,14 @@ interface ReportDef { key: string; label: string; hint: string; columns: { key: 
 
 const REPORTS: ReportDef[] = [
   {
+    key: 'position', label: 'Asset position', hint: 'Each leasable asset: in hand, or on lease to which customer.',
+    columns: [
+      { key: 'product_name', label: 'Asset' }, { key: 'asset_ref', label: 'Reference' }, { key: 'qty', label: 'Qty' },
+      { key: 'asset_position', label: 'Position' }, { key: 'customer_name', label: 'Customer' }, { key: 'site_name', label: 'Site / Location' },
+      { key: 'contract_no', label: 'Contract' }, { key: 'handover_date', label: 'Handed over' }, { key: 'location_name', label: 'Stored at' }
+    ]
+  },
+  {
     key: 'on_lease', label: 'Assets on lease', hint: 'Every asset currently with a customer (or under repair).',
     columns: [
       { key: 'product_name', label: 'Asset' }, { key: 'asset_ref', label: 'Reference' }, { key: 'customer_name', label: 'Customer' },
@@ -100,7 +108,7 @@ export class InventoryLeaseReportsComponent implements OnInit {
   private readonly api = inject(LeaseMeterService);
 
   readonly reports = REPORTS;
-  readonly reportKey = signal('on_lease');
+  readonly reportKey = signal('position');
   readonly rows = signal<any[]>([]);
   readonly error = signal('');
 

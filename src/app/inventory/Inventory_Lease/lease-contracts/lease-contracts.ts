@@ -33,6 +33,8 @@ const RESUME_KEY = 'lease-contract-resume';
 interface AvailableAsset {
   product_id: number; product_name: string; product_code?: string;
   serial_unit_id: number | null; asset_ref: string | null; serial_tracked: boolean;
+  /** Label of the product's serial policy: Serial No / RC No / Vehicle No / Chassis No ... */
+  identifier_label?: string; location_name?: string | null; available_qty?: number | null;
 }
 /** One line of the "Leased Assets" grid: either already handed over (saved) or new. */
 interface AssetRow {
@@ -42,6 +44,7 @@ interface AssetRow {
   serial_unit_id: number | null;
   serial_tracked: boolean;
   asset_ref: string;
+  identifier_label?: string;
   handover_date: string;
   handover_condition: string;
   return_date?: string | null;
@@ -81,10 +84,6 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
             <label class="erp-label">Contract No</label>
             <input class="erp-input" type="text" readonly [value]="leaseDraft.contract_no || ''" placeholder="Auto" />
           </div>
-          <div class="erp-form-group">
-            <label class="erp-label">Start Date</label>
-            <app-lease-date [value]="leaseDraft.start_date" (valueChange)="leaseDraft.start_date = $event || leaseDraft.start_date" />
-          </div>
           @if (bodyFieldByKey('customer'); as field) {
             <div class="erp-form-group inventory-header-col-6">
               <label class="erp-label">{{ field.label }}</label>
@@ -106,8 +105,13 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
             </div>
           }
           <div class="erp-form-group">
-            <label class="erp-label">Site</label>
-            <input class="erp-input" type="text" [(ngModel)]="leaseDraft.site_name" placeholder="Branch / location" />
+            <label class="erp-label">Site / Location</label>
+            <input class="erp-input" type="text" [(ngModel)]="leaseDraft.site_name" placeholder="Where the asset is used" />
+          </div>
+
+          <div class="erp-form-group">
+            <label class="erp-label">Start Date</label>
+            <app-lease-date [value]="leaseDraft.start_date" (valueChange)="leaseDraft.start_date = $event || leaseDraft.start_date" />
           </div>
           <div class="erp-form-group">
             <label class="erp-label">End Date</label>
@@ -123,7 +127,8 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
             <ng-select class="erp-ng-select inventory-ng-select" appendTo="body" [items]="leaseModeOptions" bindLabel="label" bindValue="value"
               [searchable]="false" [clearable]="false" [(ngModel)]="leaseDraft.billing_mode"></ng-select>
           </div>
-          <div class="erp-form-group inventory-header-col-6">
+
+          <div class="erp-form-group" style="grid-column: 1 / -1">
             <label class="erp-label">Remarks</label>
             <input class="erp-input" type="text" [(ngModel)]="leaseDraft.remarks" />
           </div>
@@ -134,7 +139,7 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
           <div class="inventory-line-title">
             <div>
               <strong>Leased Assets</strong>
-              <span>Fixed Assets that are not already on lease. Rent is set per asset: applicable or not, the rental unit (UOM) and the rate.</span>
+              <span>Fixed Assets that are not already on lease. Pick the asset, then its serial / RC / vehicle number from what was received. Rent is set per asset.</span>
             </div>
             <div class="inventory-line-title-actions">
               <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" aria-label="Add row" (click)="leaseAddAssetRow()"><i class="pi pi-plus"></i></button>
@@ -143,7 +148,12 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
           <div class="tbl-wrap">
             <table class="erp-table compact inventory-resizable-table">
               <thead>
-                <tr><th class="text-center">Actions</th><th class="text-center">S.No</th><th>Asset</th><th>Asset No / Serial</th><th>Handover Date</th><th>Condition</th><th>Rent</th><th>Rental Unit</th><th>Rent Rate</th><th>Status</th></tr>
+                <tr>
+                  <th class="text-center" style="width:96px">Actions</th><th class="text-center" style="width:48px">S.No</th>
+                  <th style="min-width:240px">Asset</th><th style="min-width:200px">Serial / RC / Asset No</th>
+                  <th style="min-width:160px">Handover Date</th><th style="min-width:180px">Condition</th>
+                  <th style="width:110px">Rent</th><th style="min-width:170px">Rental Unit</th><th style="min-width:120px">Rent Rate</th><th style="min-width:110px">Status</th>
+                </tr>
               </thead>
               <tbody>
                 @for (a of leaseAssets; track $index; let i = $index) {
@@ -161,7 +171,7 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
                       </div>
                     </td>
                     <td class="text-center">{{ i + 1 }}</td>
-                    <td class="inventory-line-col-product">
+                    <td>
                       @if (a.id) { <span class="inventory-grid-static-value">{{ a.product_name }}</span> }
                       @else {
                         <div class="inventory-field-with-add">
@@ -171,10 +181,16 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
                       }
                     </td>
                     <td>
-                      @if (a.id || a.serial_tracked) { <span class="inventory-grid-static-value">{{ a.asset_ref }}</span> }
-                      @else { <input class="erp-input inventory-grid-input" type="text" [(ngModel)]="a.asset_ref" placeholder="Asset number / serial" /> }
+                      @if (a.id) { <span class="inventory-grid-static-value">{{ a.asset_ref }}</span> }
+                      @else if (a.serial_tracked) {
+                        <div class="inventory-field-with-add">
+                          <input class="erp-input inventory-grid-input" type="text" readonly [value]="a.asset_ref" [placeholder]="'Pick ' + a.identifier_label" (click)="leaseOpenUnitPicker(i)" style="cursor:pointer" />
+                          <button type="button" class="erp-btn btn-white btn-icon btn-sm" [title]="'Pick ' + a.identifier_label" (click)="leaseOpenUnitPicker(i)"><i class="pi pi-search"></i></button>
+                        </div>
+                      }
+                      @else { <input class="erp-input inventory-grid-input" type="text" [(ngModel)]="a.asset_ref" [placeholder]="a.product_id ? 'Enter asset number' : ''" [disabled]="!a.product_id" /> }
                     </td>
-                    <td style="min-width:150px">
+                    <td>
                       @if (a.id) { <span class="inventory-grid-static-value">{{ a.handover_date }}</span> }
                       @else { <app-lease-date [value]="a.handover_date" (valueChange)="a.handover_date = $event || a.handover_date" /> }
                     </td>
@@ -188,10 +204,10 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
                         <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
                       </label>
                     </td>
-                    <td style="min-width:150px">
+                    <td>
                       @if (a.rent_applicable) {
                         <ng-select class="erp-ng-select inventory-ng-select inventory-grid-select" appendTo="body" [items]="leaseLookups.uoms()" bindLabel="uom_name" bindValue="id"
-                          [searchable]="true" [clearable]="false" [(ngModel)]="a.rent_uom_id" [disabled]="a.status === 'returned'" placeholder="Per Month, Per Day, Per Hour..."></ng-select>
+                          [searchable]="true" [clearable]="false" [(ngModel)]="a.rent_uom_id" [disabled]="a.status === 'returned'" placeholder="Per Month, Per Day..."></ng-select>
                       } @else { <span class="inventory-grid-na">N/A</span> }
                     </td>
                     <td>
@@ -314,7 +330,7 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
       </div>
       <div class="tbl-wrap">
         <table class="erp-table compact">
-          <thead><tr><th>Contract</th><th>Customer</th><th>Site</th><th>Period</th><th>Billing</th><th>Assets</th><th>Meters</th><th>Billed to</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Contract</th><th>Customer</th><th>Site / Location</th><th>Period</th><th>Billing</th><th>Assets</th><th>Meters</th><th>Billed to</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
             @for (c of leasePageRows(); track c.id) {
               <tr>
@@ -348,9 +364,14 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
 <app-inventory-quick-add-modal [host]="quickAddHost"></app-inventory-quick-add-modal>
 
 @if (leaseAssetPickerFor() !== null) {
-  <app-lease-picker-modal title="Pick Asset" subtitle="Fixed Assets marked 'Can Be Leased Out' that are not already on lease. Tick every serial number you are handing over."
-    noun="asset" [multi]="true" [rows]="leaseAssetPickRows()" (pickedMany)="leaseOnAssetsPicked(leaseAssetPickerFor()!, $event)"
+  <app-lease-picker-modal title="Pick Asset" subtitle="Fixed Assets marked 'Can Be Leased Out' that have stock to lease."
+    noun="asset" [rows]="leaseAssetProductRows()" (picked)="leaseOnAssetProductPicked(leaseAssetPickerFor()!, +$event)"
     (addNew)="leaseAddProduct($event)" (closed)="leaseAssetPickerFor.set(null)" />
+}
+@if (leaseUnitPickerFor() !== null) {
+  <app-lease-picker-modal [title]="'Pick ' + leaseUnitLabel()" subtitle="As captured when the asset was received. Tick every one you are handing over."
+    [noun]="leaseUnitLabel()" [multi]="true" [allowAdd]="false" [rows]="leaseUnitRows()" (pickedMany)="leaseOnUnitsPicked(leaseUnitPickerFor()!, $event)"
+    (closed)="leaseUnitPickerFor.set(null)" />
 }
 @if (leaseRatesFor() !== null && leaseMeter(leaseRatesFor()!); as rm) {
   <app-lease-rates-modal [title]="leaseMeterItemName(leaseRatesFor()!)" [unit]="leaseUnitOfRow(directEntryLineRows()[leaseRatesFor()!])" [startDate]="leaseDraft.start_date" [value]="rm.rates"
@@ -382,6 +403,7 @@ export class InventoryLeaseContractsComponent extends InventoryScreenShell imple
   readonly leaseAvailable = signal<AvailableAsset[]>([]);
 
   readonly leaseAssetPickerFor = signal<number | null>(null);
+  readonly leaseUnitPickerFor = signal<number | null>(null);
   readonly leaseRatesFor = signal<number | null>(null);
   readonly leaseReturning = signal<AssetRow | null>(null);
   private readonly leaseLoadedStatus = signal('');
@@ -551,33 +573,69 @@ export class InventoryLeaseContractsComponent extends InventoryScreenShell imple
   }
 
   leaseOpenAssetPicker(index: number): void { this.leaseAssetPickerFor.set(index); }
+  leaseOpenUnitPicker(index: number): void { if (this.leaseAssets[index]?.product_id) this.leaseUnitPickerFor.set(index); }
 
   /** Free assets, minus the serial numbers already added on this form. */
   private leaseFreeAssets(): AvailableAsset[] {
-    const taken = new Set(this.leaseAssets.filter(a => a.product_id && a.serial_unit_id).map(a => `${a.product_id}|${a.serial_unit_id}`));
+    const taken = new Set(this.leaseAssets.filter((a, i) => a.product_id && a.serial_unit_id).map(a => `${a.product_id}|${a.serial_unit_id}`));
     return this.leaseAvailable().filter(a => !(a.serial_unit_id && taken.has(`${a.product_id}|${a.serial_unit_id}`)));
   }
 
-  leaseAssetPickRows(): LeasePickRow[] {
-    return this.leaseFreeAssets().map((a, i) => ({
-      key: i, code: a.product_code, name: a.product_name, sub: a.asset_ref ? 'Serial ' + a.asset_ref : 'Enter the asset number on the row'
+  /** Step 1: the leasable Fixed Assets (one line per product). */
+  leaseAssetProductRows(): LeasePickRow[] {
+    const byProduct = new Map<number, { a: AvailableAsset; free: number }>();
+    for (const a of this.leaseFreeAssets()) {
+      const e = byProduct.get(a.product_id);
+      if (e) { if (a.serial_tracked) e.free++; } else byProduct.set(a.product_id, { a, free: a.serial_tracked ? 1 : 0 });
+    }
+    return [...byProduct.values()].map(({ a, free }) => ({
+      key: a.product_id, code: a.product_code, name: a.product_name,
+      sub: a.serial_tracked || free ? `${a.identifier_label || 'Serial No'} tracked - ${free} in stock`
+        : `${Math.max(0, Number(a.available_qty ?? 0) - this.leaseAssets.filter(x => x.product_id === a.product_id && !x.id).length)} in hand - enter the asset number on the row`
     }));
   }
 
-  /** Each ticked serial number becomes its own leased asset row (the first one fills the row that opened the picker). */
-  leaseOnAssetsPicked(index: number, keys: (string | number)[]): void {
-    const free = this.leaseFreeAssets();
-    const picked = keys.map(k => free[+k]).filter((a): a is AvailableAsset => !!a);
+  /** Step 2: the serial / RC / vehicle numbers of the picked asset that were received and are free. */
+  leaseUnitLabel(): string {
+    const i = this.leaseUnitPickerFor();
+    return (i !== null ? this.leaseAssets[i]?.identifier_label : '') || 'Serial No';
+  }
+  leaseUnitRows(): LeasePickRow[] {
+    const i = this.leaseUnitPickerFor();
+    const productId = i !== null ? this.leaseAssets[i]?.product_id : null;
+    return this.leaseFreeAssets().filter(a => a.product_id === productId && a.serial_tracked && a.asset_ref).map(a => ({
+      key: a.serial_unit_id!, code: a.product_code, name: a.asset_ref!, sub: a.location_name ? 'In stock at ' + a.location_name : 'In stock'
+    }));
+  }
+
+  leaseOnAssetProductPicked(index: number, productId: number): void {
+    const row = this.leaseAssets[index];
+    const a = this.leaseAvailable().find(x => x.product_id === productId);
+    this.leaseAssetPickerFor.set(null);
+    if (!row || !a) return;
+    row.product_id = a.product_id; row.product_name = a.product_name;
+    row.serial_tracked = !!a.serial_tracked; row.identifier_label = a.identifier_label || 'Serial No';
+    row.serial_unit_id = null; row.asset_ref = '';
+    if (row.serial_tracked) this.leaseUnitPickerFor.set(index);   // straight on to the serial / RC number
+  }
+
+  /** Each ticked number becomes its own leased asset row (the first one fills the row that opened the picker). */
+  leaseOnUnitsPicked(index: number, keys: (string | number)[]): void {
+    const base = this.leaseAssets[index];
+    this.leaseUnitPickerFor.set(null);
+    if (!base) return;
+    const free = this.leaseFreeAssets().filter(a => a.product_id === base.product_id && a.serial_tracked);
+    const picked = keys.map(k => free.find(a => a.serial_unit_id === +k)).filter((a): a is AvailableAsset => !!a);
     picked.forEach((a, n) => {
-      let row = n === 0 && this.leaseAssets[index] && !this.leaseAssets[index].id && !this.leaseAssets[index].product_id ? this.leaseAssets[index] : null;
+      let row = n === 0 ? base : null;
       if (!row) {
         this.leaseAddAssetRow();
         row = this.leaseAssets[this.leaseAssets.length - 1];
+        row.rent_applicable = base.rent_applicable; row.rent_uom_id = base.rent_uom_id; row.rent_rate = base.rent_rate;
       }
-      row.product_id = a.product_id; row.product_name = a.product_name; row.serial_unit_id = a.serial_unit_id;
-      row.serial_tracked = !!a.serial_tracked; row.asset_ref = a.asset_ref ?? '';
+      row.product_id = a.product_id; row.product_name = a.product_name; row.serial_tracked = true;
+      row.identifier_label = a.identifier_label || 'Serial No'; row.serial_unit_id = a.serial_unit_id; row.asset_ref = a.asset_ref ?? '';
     });
-    this.leaseAssetPickerFor.set(null);
   }
 
   leaseConfirmReturn(a: AssetRow, body: { return_date: string; return_condition?: string; new_status: 'returned' | 'under_repair' }): void {
@@ -667,9 +725,9 @@ export class InventoryLeaseContractsComponent extends InventoryScreenShell imple
       this.leaseApi.getAvailableAssets().subscribe({
         next: res => {
           this.leaseAvailable.set(res.data ?? []);
-          const pos = this.leaseFreeAssets().findIndex(a => a.product_name.trim().toLowerCase() === createdName);
-          if (pos >= 0 && this.leaseAssets[assetRow]) {
-            this.leaseOnAssetsPicked(assetRow, [pos]);
+          const created = this.leaseAvailable().find(a => a.product_name.trim().toLowerCase() === createdName);
+          if (created && this.leaseAssets[assetRow]) {
+            this.leaseOnAssetProductPicked(assetRow, created.product_id);
             this.leaseMessage.set('Asset added to the Product Master.');
             clearInterval(timer);
           }

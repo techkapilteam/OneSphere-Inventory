@@ -1,7 +1,7 @@
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
-import { currentAccessToken } from '../Inventory_Shared/inventory-auth-token.util';
+import { currentAccessToken } from '../../core/host/host-bridge';
 
 /** Envelope returned by every inventory API endpoint. */
 export interface LeaseApiResponse<T = any> {

@@ -1,7 +1,9 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { NgSelectModule } from '@ng-select/ng-select';
+import { forkJoin } from 'rxjs';
 import { InventoryScreenShell } from '../../Inventory_Shared/inventory-screen-shell/inventory-screen-shell';
 import { LeaseDateComponent } from '../lease-dialogs';
 import { meterReadingConfig } from '../lease-screen-configs';
@@ -13,6 +15,15 @@ const TYPE_OPTIONS = [
   { value: 'reset', label: 'Meter reset (restarted)' },
   { value: 'replacement', label: 'Meter replaced' }
 ];
+
+/** One row of the entry grid = one meter item of the contract. */
+interface ReadingRow {
+  meter: LeaseMeter;
+  value: number | null;
+  type: string;
+  baseline: number | null;
+  remarks: string;
+}
 
 function today(): string {
   const d = new Date();
@@ -35,36 +46,43 @@ function today(): string {
           <ng-select class="erp-ng-select inventory-ng-select" appendTo="body" [items]="contractOptions()" bindLabel="label" bindValue="id"
             [searchable]="true" [clearable]="true" [ngModel]="contractId()" (ngModelChange)="selectContract($event)" placeholder="Search contract or customer"></ng-select>
         </div>
-        <div class="erp-form-group inventory-header-col-6">
-          <label class="erp-label">Meter <span class="text-danger">*</span></label>
-          <ng-select class="erp-ng-select inventory-ng-select" appendTo="body" [items]="meterOptions()" bindLabel="label" bindValue="id"
-            [searchable]="true" [clearable]="false" [(ngModel)]="meterId" [disabled]="!!editId || !contractId()" placeholder="Select meter"></ng-select>
-          @if (lastReading(); as l) { <small class="inventory-field-hint">Last reading: <strong>{{ l.reading_value }}</strong> on {{ l.reading_date }}</small> }
-          @else if (meterId) { <small class="inventory-field-hint">No reading yet - usage starts from the opening reading.</small> }
-        </div>
         <div class="erp-form-group">
           <label class="erp-label">Reading Date <span class="text-danger">*</span></label>
           <app-lease-date [value]="date" (valueChange)="date = $event || date" [maxDate]="maxDate" />
         </div>
-        <div class="erp-form-group">
-          <label class="erp-label">Meter Reading <span class="text-danger">*</span></label>
-          <input class="erp-input" type="number" min="0" [(ngModel)]="value" />
-        </div>
-        <div class="erp-form-group">
-          <label class="erp-label">Type</label>
-          <ng-select class="erp-ng-select inventory-ng-select" appendTo="body" [items]="typeOptions" bindLabel="label" bindValue="value"
-            [searchable]="false" [clearable]="false" [(ngModel)]="type"></ng-select>
-        </div>
-        @if (type === 'reset' || type === 'replacement') {
-          <div class="erp-form-group">
-            <label class="erp-label">New meter started at</label>
-            <input class="erp-input" type="number" min="0" [(ngModel)]="baseline" placeholder="0" />
-          </div>
-        }
-        <div class="erp-form-group inventory-header-col-6">
-          <label class="erp-label">Remarks</label>
-          <input class="erp-input" type="text" [(ngModel)]="remarks" />
-        </div>
+      </div>
+
+      <div class="inventory-section-title">
+        <div><h3>Meter Readings</h3>
+          <p>{{ contractId() ? 'Every meter item of the contract is listed. Enter the counter now showing for each one and save.' : 'Select a contract to load its meter items.' }}</p></div>
+      </div>
+      <div class="tbl-wrap">
+        <table class="erp-table compact">
+          <thead><tr><th>#</th><th>Meter item</th><th>Unit</th><th>Previous</th><th style="width:150px">New Reading</th><th>Usage</th><th style="width:190px">Type</th><th>Remarks</th></tr></thead>
+          <tbody>
+            @for (r of rows(); track r.meter.id; let i = $index) {
+              <tr>
+                <td>{{ i + 1 }}</td>
+                <td><strong>{{ meterName(r.meter) }}</strong>
+                  @if (r.meter.asset_ref) { <br><small class="text-muted">{{ r.meter.asset_ref }}</small> }</td>
+                <td>{{ r.meter.unit_name }}</td>
+                <td>{{ previousOf(r.meter) }}</td>
+                <td>
+                  <input class="erp-input" type="number" min="0" [(ngModel)]="r.value" [attr.aria-label]="'Reading for ' + meterName(r.meter)" />
+                  @if (r.type === 'reset' || r.type === 'replacement') {
+                    <input class="erp-input mt-1" type="number" min="0" [(ngModel)]="r.baseline" placeholder="New meter started at" />
+                  }
+                </td>
+                <td><strong>{{ usageOf(r) }}</strong></td>
+                <td><ng-select class="erp-ng-select inventory-ng-select" appendTo="body" [items]="typeOptions" bindLabel="label" bindValue="value"
+                  [searchable]="false" [clearable]="false" [(ngModel)]="r.type"></ng-select></td>
+                <td><input class="erp-input" type="text" [(ngModel)]="r.remarks" /></td>
+              </tr>
+            } @empty {
+              <tr><td colspan="8" class="text-center">{{ contractId() ? 'This contract has no meter items.' : 'No contract selected.' }}</td></tr>
+            }
+          </tbody>
+        </table>
       </div>
 
       @if (error()) {
@@ -77,16 +95,17 @@ function today(): string {
       }
 
       <div class="inventory-form-actions">
-        <button type="button" class="erp-btn btn-white" (click)="clearForm()"><i class="pi pi-times"></i> Clear</button>
-        <button type="button" class="erp-btn btn-primary" [disabled]="busy() || !contractId()" (click)="save()">
-          <i [class]="busy() ? 'pi pi-spin pi-spinner' : 'pi pi-save'"></i> {{ editId ? 'Update Reading' : 'Save Reading' }}
+        <button type="button" class="erp-btn btn-white" (click)="resetRows()"><i class="pi pi-times"></i> Clear</button>
+        <button type="button" class="erp-btn btn-white" (click)="goBilling()"><i class="pi pi-file"></i> Go to Lease Billing</button>
+        <button type="button" class="erp-btn btn-primary" [disabled]="busy() || !rows().length" (click)="save()">
+          <i [class]="busy() ? 'pi pi-spin pi-spinner' : 'pi pi-save'"></i> Save Readings
         </button>
       </div>
     </section>
 
     <section class="inventory-section">
       <div class="inventory-section-title">
-        <div><h3>Readings</h3><p>{{ contractId() ? 'Readings of the selected contract. Verify draft readings so they can be billed.' : 'Select a contract to see its readings.' }}</p></div>
+        <div><h3>Reading History</h3><p>Saved readings are verified automatically and are ready for billing. Void a wrong reading and enter it again.</p></div>
         <button type="button" class="erp-btn btn-primary" [disabled]="!selectedIds().length || busy()" (click)="verify()"><i class="pi pi-check-circle"></i> Verify selected ({{ selectedIds().length }})</button>
       </div>
       <div class="tbl-wrap">
@@ -100,7 +119,6 @@ function today(): string {
                 <td>{{ r.previous_value }}</td><td>{{ r.reading_value }}</td><td><strong>{{ r.usage_qty }}</strong></td>
                 <td>{{ r.reading_type }}</td><td>{{ r.status }}</td>
                 <td class="d-flex gap-1">
-                  @if (r.status === 'draft') { <button type="button" class="erp-btn btn-white btn-sm" (click)="edit(r)"><i class="pi pi-pencil"></i> Edit</button> }
                   @if (r.status === 'draft' || r.status === 'verified') { <button type="button" class="erp-btn btn-white btn-sm" (click)="voidReading(r)">Void</button> }
                 </td>
               </tr>
@@ -117,12 +135,13 @@ function today(): string {
 export class InventoryMeterReadingsComponent implements OnInit {
   readonly config = meterReadingConfig;
   private readonly api = inject(LeaseMeterService);
+  private readonly router = inject(Router);
 
   readonly typeOptions = TYPE_OPTIONS;
   readonly maxDate = new Date();
   readonly contracts = signal<LeaseContract[]>([]);
   readonly contractId = signal<number | null>(null);
-  readonly meters = signal<LeaseMeter[]>([]);
+  readonly rows = signal<ReadingRow[]>([]);
   readonly readings = signal<MeterReading[]>([]);
   readonly selectedIds = signal<number[]>([]);
   readonly busy = signal(false);
@@ -132,15 +151,8 @@ export class InventoryMeterReadingsComponent implements OnInit {
   readonly contractOptions = computed(() => this.contracts().map(c => ({
     id: c.id, label: `${c.contract_no} - ${c.customer_name}${c.site_name ? ' (' + c.site_name + ')' : ''}`
   })));
-  readonly meterOptions = computed(() => this.meters().map(m => ({ id: m.id, label: this.meterName(m) })));
 
-  editId: number | null = null;
-  meterId: number | null = null;
   date = today();
-  value: number | null = null;
-  type = 'normal';
-  baseline: number | null = null;
-  remarks = '';
 
   ngOnInit(): void {
     this.api.getContracts().subscribe({
@@ -149,27 +161,36 @@ export class InventoryMeterReadingsComponent implements OnInit {
     });
   }
 
-  meterName(m: LeaseMeter): string { return `${m.meter_label || m.meter_name} (${m.unit_name})`; }
+  meterName(m: LeaseMeter): string {
+    const base = m.meter_label || m.meter_name || m.charge_product_name || 'Meter';
+    const extra = [m.variant_name, m.attribute_value].filter(x => !!x && !base.includes(String(x)));
+    return extra.length ? `${base} - ${extra.join(' / ')}` : base;
+  }
 
-  /** Latest non-void reading of the selected meter, so the user sees what to continue from. */
-  lastReading(): MeterReading | null {
-    if (!this.meterId) return null;
-    const list = this.readings().filter(r => r.lease_meter_id === this.meterId && r.status !== 'void' && r.id !== this.editId);
-    return list.length ? list.reduce((a, b) => (String(a.reading_date) >= String(b.reading_date) ? a : b)) : null;
+  /** Counter value this meter continues from: the latest non-void reading, else its opening reading. */
+  previousOf(m: LeaseMeter): number {
+    const list = this.readings().filter(r => r.lease_meter_id === m.id && r.status !== 'void');
+    if (!list.length) return Number(m.opening_reading ?? 0);
+    const last = list.reduce((a, b) => (String(a.reading_date) >= String(b.reading_date) ? a : b));
+    return Number(last.reading_value);
+  }
+
+  /** Live usage for a normal / estimated reading; a reset or replaced meter is worked out on save. */
+  usageOf(r: ReadingRow): string {
+    if (r.value === null || r.value === undefined || (r.value as any) === '') return '';
+    if (r.type === 'reset' || r.type === 'replacement') return 'on save';
+    const u = Number(r.value) - this.previousOf(r.meter);
+    return u < 0 ? 'lower than previous' : String(u);
   }
 
   selectContract(id: number | null): void {
     this.contractId.set(id);
-    this.meters.set([]); this.readings.set([]); this.selectedIds.set([]);
-    this.meterId = null;
-    this.clearForm();
+    this.rows.set([]); this.readings.set([]); this.selectedIds.set([]);
+    this.error.set(''); this.message.set('');
     if (!id) return;
     this.api.getContract(id).subscribe({
-      next: res => {
-        const list = (res.data?.meters ?? []).filter(m => m.status !== 'inactive');
-        this.meters.set(list);
-        if (list.length === 1) this.meterId = list[0].id ?? null;
-      },
+      next: res => this.rows.set((res.data?.meters ?? []).filter(m => m.status !== 'inactive')
+        .map(m => ({ meter: m, value: null, type: 'normal', baseline: null, remarks: '' }))),
       error: err => this.error.set(LeaseMeterService.errorMessage(err))
     });
     this.loadReadings();
@@ -184,37 +205,48 @@ export class InventoryMeterReadingsComponent implements OnInit {
     });
   }
 
-  clearForm(): void {
-    this.editId = null; this.value = null; this.type = 'normal'; this.baseline = null; this.remarks = ''; this.date = today();
-    this.error.set(''); this.message.set('');
+  resetRows(): void {
+    this.rows.update(list => list.map(r => ({ ...r, value: null, type: 'normal', baseline: null, remarks: '' })));
+    this.error.set(''); this.message.set(''); this.date = today();
   }
 
-  edit(r: MeterReading): void {
-    this.editId = r.id; this.meterId = r.lease_meter_id; this.date = String(r.reading_date).slice(0, 10);
-    this.value = r.reading_value; this.type = r.reading_type; this.baseline = r.baseline_value ?? null; this.remarks = r.remarks ?? '';
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
+  /** Saves every row that has a reading, verifies them so they are billable, and refreshes the grid. */
   save(): void {
     this.error.set(''); this.message.set('');
-    if (!this.meterId || this.value === null || this.value === undefined) { this.error.set('Select a meter and enter the reading.'); return; }
+    const filled = this.rows().filter(r => r.value !== null && r.value !== undefined && (r.value as any) !== '');
+    if (!filled.length) { this.error.set('Enter at least one meter reading.'); return; }
+    for (const r of filled) {
+      const prev = this.previousOf(r.meter);
+      if ((r.type === 'normal' || r.type === 'estimated') && Number(r.value) < prev) {
+        this.error.set(`${this.meterName(r.meter)}: the reading ${r.value} is lower than the previous ${prev}. Choose "Meter reset" or "Meter replaced" if the counter restarted.`);
+        return;
+      }
+    }
     this.busy.set(true);
-    this.api.saveReading({
-      id: this.editId ?? undefined, lease_meter_id: this.meterId, reading_date: this.date, reading_value: Number(this.value),
-      reading_type: this.type, baseline_value: this.type === 'reset' || this.type === 'replacement' ? (this.baseline ?? 0) : undefined,
-      remarks: this.remarks.trim() || undefined
-    }).subscribe({
-      next: res => {
-        this.busy.set(false);
-        const keepMeter = this.meterId;
-        this.clearForm();
-        this.meterId = keepMeter;
-        this.message.set(`Reading saved: usage ${res.data?.usage_qty ?? ''}.`);
-        this.loadReadings();
+    forkJoin(filled.map(r => this.api.saveReading({
+      lease_meter_id: r.meter.id, reading_date: this.date, reading_value: Number(r.value), reading_type: r.type,
+      baseline_value: r.type === 'reset' || r.type === 'replacement' ? (r.baseline ?? 0) : undefined,
+      remarks: r.remarks.trim() || undefined
+    }))).subscribe({
+      next: results => {
+        const ids = results.map(x => x.data?.id).filter((x): x is number => !!x);
+        const done = () => {
+          this.busy.set(false);
+          this.resetRows();
+          this.message.set(`${ids.length} reading(s) saved and verified. They are ready for billing.`);
+          this.loadReadings();
+        };
+        if (!ids.length) { done(); return; }
+        this.api.verifyReadings(ids).subscribe({
+          next: () => done(),
+          error: err => { this.busy.set(false); this.error.set('Saved, but verification failed: ' + LeaseMeterService.errorMessage(err)); this.loadReadings(); }
+        });
       },
-      error: err => { this.busy.set(false); this.error.set(LeaseMeterService.errorMessage(err)); }
+      error: err => { this.busy.set(false); this.error.set(LeaseMeterService.errorMessage(err)); this.loadReadings(); }
     });
   }
+
+  goBilling(): void { this.router.navigate(['/dashboard/inventory/lease/billing']); }
 
   isSelected(id: number): boolean { return this.selectedIds().includes(id); }
   toggle(id: number): void {
