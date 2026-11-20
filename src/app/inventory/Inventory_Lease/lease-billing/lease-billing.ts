@@ -85,7 +85,7 @@ interface BillRow {
         <div class="tbl-wrap">
           <table class="erp-table compact">
             <thead>
-              <tr><th class="text-center">Actions</th><th class="text-center">S.No</th><th>Contract</th><th>Site</th><th>Cycle</th><th>Last billed to</th><th>Bill from</th><th>Bill up to</th><th class="text-end">Amount (before GST)</th><th>Status</th></tr>
+              <tr><th class="text-center">Actions</th><th class="text-center">S.No</th><th>Contract</th><th>Site / Location</th><th>Cycle</th><th>Last billed to</th><th>Bill from</th><th>Bill up to</th><th class="text-end">Amount (before GST)</th><th>Status</th></tr>
             </thead>
             <tbody>
               @for (r of billRows(); track r.c.contract_id; let i = $index) {

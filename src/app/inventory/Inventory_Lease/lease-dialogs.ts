@@ -72,7 +72,7 @@ export interface LeasePickRow { key: string | number; code?: string; name: strin
     </div>
     <div class="tbl-wrap">
       <table class="erp-table compact">
-        <thead><tr>@if (multi) { <th></th> }<th>Code</th><th>{{ noun | titlecase }}</th>@if (showUom) { <th>UOM</th> }<th>Details</th><th></th></tr></thead>
+        <thead><tr>@if (multi) { <th></th> }<th>Code</th><th>{{ nounLabel }}</th>@if (showUom) { <th>UOM</th> }<th>Details</th><th></th></tr></thead>
         <tbody>
           @for (r of filtered(); track r.key) {
             <tr>
@@ -107,6 +107,7 @@ export class LeasePickerModalComponent {
   @Output() pickedMany = new EventEmitter<(string | number)[]>();
   @Output() addNew = new EventEmitter<string>();
   @Output() closed = new EventEmitter<void>();
+  get nounLabel(): string { return this.noun ? this.noun.charAt(0).toUpperCase() + this.noun.slice(1) : ''; }
   readonly all = signal<LeasePickRow[]>([]);
   readonly search = signal('');
   readonly chosen = signal<(string | number)[]>([]);
