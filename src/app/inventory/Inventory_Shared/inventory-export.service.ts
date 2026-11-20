@@ -75,6 +75,11 @@ export interface InventoryExportDocument {
   /** PDF only: fixed width (mm) per column index, for values that can't wrap
    *  (e.g. voucher numbers with no spaces). Unlisted columns size automatically. */
   pdfColumnWidths?: Record<number, number>;
+  /** PDF only: left-hand field labels (Invoice No, Customer, ...) get a column
+   *  just wide enough for the longest one, so the left values sit close to
+   *  their labels (still in one straight line). The right-hand labels keep
+   *  their position. */
+  pdfCompactLeftLabels?: boolean;
   /** PDF only: table header font size (default 10) — smaller lets wide lists fit portrait. */
   pdfHeadFontSize?: number;
   /** PDF only, tax grid (columnGroups): headings filled #0b4093 with white
@@ -728,6 +733,19 @@ export class InventoryExportService {
       // right-hand value (e.g. Mode of Payment) squeezed the left one until
       // no-space values like PAY-SS-26-00011 overflowed into the next label.
       const valueWidth = (pageWidth - L_MARGIN - R_MARGIN - 76) / 2;
+      // Previous: left label column always 38mm, leaving a wide gap before
+      // short labels' values. With pdfCompactLeftLabels it shrinks to the
+      // longest left label + a small gap, and the left value column takes the
+      // freed width, so the right-hand labels stay exactly where they were.
+      let leftLabelWidth = 38;
+      if (document.pdfCompactLeftLabels) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9 * s);
+        const longest = Math.max(0, ...fieldRows.map(row => row[0] ? doc.getTextWidth(row[0]) : 0));
+        leftLabelWidth = Math.min(38, longest + 2 * 0.8 * s + 2);
+        doc.setFont('helvetica', 'normal');
+      }
+      const leftValueWidth = valueWidth + (38 - leftLabelWidth);
       autoTable(doc, {
         body: fieldRows,
         theme: 'plain',
@@ -736,8 +754,9 @@ export class InventoryExportService {
         // Previous: styles: { fontSize: 9, cellPadding: 0.8, overflow: 'linebreak' },
         styles: { fontSize: 9 * s, cellPadding: 0.8 * s, overflow: 'linebreak' },
         columnStyles: {
-          0: { fontStyle: 'bold', cellWidth: 38 },
-          1: { cellWidth: valueWidth },
+          // Previous: 0: { fontStyle: 'bold', cellWidth: 38 }, 1: { cellWidth: valueWidth },
+          0: { fontStyle: 'bold', cellWidth: leftLabelWidth },
+          1: { cellWidth: leftValueWidth },
           2: { fontStyle: 'bold', cellWidth: 38 },
           3: { cellWidth: valueWidth }
         },
@@ -756,7 +775,8 @@ export class InventoryExportService {
           const label = String((data.row.raw as string[])[data.column.index - 1] || '').replace(/\s*:\s*$/, '').trim();
           if (!boxed.includes(label)) return;
           const { x, y: cellY, width, height } = data.cell;
-          const left = x - 38 + 0.5;   // label column is 38mm wide
+          // Previous: const left = x - 38 + 0.5;   // label column is 38mm wide
+          const left = x - (data.column.index === 1 ? leftLabelWidth : 38) + 0.5;
           const right = x + width - 0.5;
           doc.setDrawColor(0, 0, 0);
           doc.setLineWidth(0.2);

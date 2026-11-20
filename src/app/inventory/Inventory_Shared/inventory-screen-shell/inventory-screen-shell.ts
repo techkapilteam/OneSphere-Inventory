@@ -88,6 +88,7 @@ interface GridExportPayload {
   boxedFieldLabels?: string[];
   pdfRuleAboveGrid?: boolean;
   pdfColumnWidths?: Record<number, number>;
+  pdfCompactLeftLabels?: boolean;
   pdfBlueHead?: boolean;
   pdfCenterColumns?: number[];
   pdfPageFrame?: boolean;
@@ -9106,7 +9107,19 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // so 3-digit quantities (100, 200) don't touch the cell border.
       // Previous: { 3: 12, [exportColumns.length - 1]: 24 } — TOTAL narrowed by
       // ~2 digits and the room given to Rate (index 4) (2026-11-20).
-      pdfColumnWidths: rows.length ? { 3: 12, 4: 14, [exportColumns.length - 1]: 20 } : undefined,
+      // Previous: { 3: 12, 4: 14, [exportColumns.length - 1]: 20 } — HSN/SAC
+      // Code (index 2) narrowed to 17mm (heading wraps to "HSN/SAC" / "Code",
+      // 8-digit codes still fit) and the freed width given to Product
+      // Description (index 1), so names wrap like "BOX FILE SUN STEEL / CLIP
+      // BIG" on every row (user request 2026-11-20). Product is fixed only on
+      // the IGST grid; the CGST+SGST grid has 2 more columns and sizes it auto.
+      pdfColumnWidths: rows.length
+        ? { ...(lineIsInterstate ? { 1: 38 } as Record<number, number> : {}), 2: 17, 3: 12, 4: 14, [exportColumns.length - 1]: 20 }
+        : undefined,
+      // Left-hand values (Invoice No, Customer, Customer Phone, State, Bill To
+      // Address) moved closer to their labels, still in one straight line;
+      // the right-hand labels/values stay where they were (user request 2026-11-20).
+      pdfCompactLeftLabels: true,
       // Grid headings in the Purchase Invoice blue (#0b4093, white text) and
       // Qty (index 3) centred in its cell (user request 2026-11-19).
       pdfBlueHead: rows.length ? true : undefined,
@@ -9481,6 +9494,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       boxedFieldLabels: payload.boxedFieldLabels,
       pdfRuleAboveGrid: payload.pdfRuleAboveGrid,
       pdfColumnWidths: payload.pdfColumnWidths,
+      pdfCompactLeftLabels: payload.pdfCompactLeftLabels,
       pdfBlueHead: payload.pdfBlueHead,
       pdfCenterColumns: payload.pdfCenterColumns,
       pdfPageFrame: payload.pdfPageFrame,
