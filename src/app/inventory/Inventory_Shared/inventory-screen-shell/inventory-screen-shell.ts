@@ -20466,7 +20466,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     productionReturn: '/dashboard/inventory/transactions/production-return',
     bomMaster: '/dashboard/inventory/masters/bom-master',
     priceListMaster: '/dashboard/inventory/masters/price-list-master',
-    barcodeConfiguration: '/dashboard/inventory/masters/barcode-configuration'
+    barcodeConfiguration: '/dashboard/inventory/masters/barcode-configuration',
+    leaseContract: '/dashboard/inventory/lease/contracts'
     // Substitute Products is deliberately absent: its route redirects to
     // Product Master, so the screen is never actually reachable to return to.
   };
