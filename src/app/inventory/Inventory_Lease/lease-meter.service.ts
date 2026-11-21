@@ -79,6 +79,10 @@ export interface LeaseContract {
   customer_gstin?: string;
   site_name?: string | null;
   site_address?: string | null;
+  site_state?: string | null;
+  site_district?: string | null;
+  site_city?: string | null;
+  site_pincode?: string | null;
   contract_type: 'rent' | 'usage' | 'rent_usage';
   start_date: string;
   end_date?: string | null;
@@ -131,6 +135,10 @@ export interface BillingCandidate {
   customer_id: number;
   customer_name: string;
   site_name?: string | null;
+  site_state?: string | null;
+  /** State (and GSTIN) the bill uses: the customer registration in the site state, else the customer's own. */
+  place_of_supply?: string | null;
+  site_state_registered?: boolean;
   billing_cycle: string;
   billing_mode: string;
   start_date: string;

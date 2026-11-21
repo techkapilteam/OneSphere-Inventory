@@ -290,8 +290,19 @@ export class InventoryReportPageComponent implements OnInit {
   // Stock Summary shows From Date / To Date as two separate pickers instead of
   // the single range picker; both still write the same fromDate/toDate filters.
   // Collection Report uses the same separate From Date / To Date pickers (user request).
+  // Sale / Purchase Invoice Register also use separate From Date / To Date pickers (user request 2026-11-21).
   // Previous: readonly separateFromToDates = computed(() => this.report().key === 'stockSummary');
-  readonly separateFromToDates = computed(() => ['stockSummary', 'collectionReport'].includes(this.report().key));
+  // Previous: readonly separateFromToDates = computed(() => ['stockSummary', 'collectionReport'].includes(this.report().key));
+  // Previous: readonly separateFromToDates = computed(() =>
+  //   ['stockSummary', 'collectionReport', 'salesInvoiceRegister', 'purchaseInvoiceRegister'].includes(this.report().key)
+  // );
+  // All inventory reports now use separate From Date / To Date pickers instead of the range picker (user request 2026-11-21).
+  readonly separateFromToDates = computed(() => true);
+  // Each picker only shows when the report declares that filter (e.g. Dues List has To Date only).
+  readonly hasFromDateFilter = computed(() => this.report().filters.includes('fromDate'));
+  readonly hasToDateFilter = computed(() => this.report().filters.includes('toDate'));
+  // Vendor Dues only: its To Date is an "as on" date - label it "As On" (user request).
+  readonly toDateLabel = computed(() => this.report().key === 'vendorDues' ? 'As On' : 'To Date');
 
   // Stock Summary's location filter is "Branch" only — no warehouses listed.
   readonly branchOnlyLocation = computed(() => this.report().key === 'stockSummary');
@@ -669,8 +680,11 @@ export class InventoryReportPageComponent implements OnInit {
 
     private exportDocument(): InventoryExportDocument {
     const columns = this.visibleColumns();
-    const from = this.filterDateValue('fromDate');
-    const to = this.filterDateValue('toDate');
+    // Previous: const from = this.filterDateValue('fromDate'); const to = this.filterDateValue('toDate');
+    // Only dates the report has a picker for - Dues List / Vendor Dues have no
+    // From Date, so the hidden default (1st of month) must not print as "Between".
+    const from = this.hasFromDateFilter() ? this.filterDateValue('fromDate') : null;
+    const to = this.hasToDateFilter() ? this.filterDateValue('toDate') : null;
     const pdfDate = (value: Date) => formatDate(value, 'dd-MMM-yyyy', 'en-US');
     const periodText = from && to
       ? `Between: ${pdfDate(from)} And ${pdfDate(to)}`
@@ -684,7 +698,24 @@ export class InventoryReportPageComponent implements OnInit {
     const groupKey = this.groupBy();
     const toCells = (row: InventoryReportRow) => columns.map(column => this.formatCell(row[column.key], column));
 
-    if (!groupKey) {
+    // Vendor Dues: old "Vendor Wise Dues List" layout - vendor name alone as the
+    // group heading, blank vendor cell on invoice rows, "Total:" per vendor.
+    const vendorDuesLayout = this.report().key === 'vendorDues' && groupKey === 'supplier';
+    if (vendorDuesLayout) {
+      const firstTotalIndex = columns.findIndex(column => column.total);
+      const totalLabelIndex = firstTotalIndex > 0 ? firstTotalIndex - 1 : 0;
+      this.groupedRows().forEach(group => {
+        groupRowIndexes.push(rows.length);
+        rows.push(columns.map((_, index) => index === 0 ? group.label : ''));
+        group.rows.forEach(row => rows.push(columns.map(column => column.key === 'supplier' ? '' : this.formatCell(row[column.key], column))));
+        groupRowIndexes.push(rows.length);
+        rows.push(columns.map((column, index) => {
+          if (index === totalLabelIndex) return 'Total:';
+          if (!column.total) return '';
+          return this.formatCell(group.rows.reduce((acc, row) => acc + this.numberValue(row[column.key]), 0), column);
+        }));
+      });
+    } else if (!groupKey) {
       this.sortedRows().forEach(row => rows.push(toCells(row)));
     } else {
       const groupColumn = this.report().columns.find(column => column.key === groupKey);
@@ -719,7 +750,7 @@ export class InventoryReportPageComponent implements OnInit {
     // same figures as the on-screen footer (user request).
     // Collection Report gets the same Grand Total line so PDF / Excel totals match the screen.
     // Previous: if (this.report().key === 'duesList' && rows.length && columns.some(column => column.total)) {
-    if (['duesList', 'collectionReport'].includes(this.report().key) && rows.length && columns.some(column => column.total)) {
+    if (['duesList', 'collectionReport', 'vendorDues'].includes(this.report().key) && rows.length && columns.some(column => column.total)) {
       const totals = this.totals();
       groupRowIndexes.push(rows.length);
       rows.push(columns.map((column, index) => index === 0 ? 'Grand Total' : (column.total ? totals[column.key] ?? '' : '')));
@@ -903,7 +934,8 @@ export class InventoryReportPageComponent implements OnInit {
   private formatCurrency(value: number): string {
     const amount = value.toLocaleString('en-IN', { maximumFractionDigits: 2 });
     // Stock Ledger and Dues List show plain amounts, no "Rs." prefix (user request).
-    if (this.report().key === 'stockLedger' || this.report().key === 'duesList') return amount;
+    // Vendor Dues too (plain amounts, like the old Vendor Wise Dues List).
+    if (['stockLedger', 'duesList', 'vendorDues'].includes(this.report().key)) return amount;
     return `Rs. ${amount}`;
   }
 
@@ -925,7 +957,13 @@ export class InventoryReportPageComponent implements OnInit {
   private matchesActiveFilters(row: InventoryReportRow): boolean {
     const filters = this.filters();
     return Object.entries(filters).every(([key, value]) => {
-      if (key === 'fromDate' || key === 'toDate') return this.matchesDateFilter(row, key as InventoryReportFilterKey, value);
+      // Previous: if (key === 'fromDate' || key === 'toDate') return this.matchesDateFilter(row, key as InventoryReportFilterKey, value);
+      // A date filter the report has no picker for (e.g. hidden From Date = 1st of
+      // month on Dues List / Vendor Dues) must not hide older rows.
+      if (key === 'fromDate' || key === 'toDate') {
+        if (!this.report().filters.includes(key)) return true;
+        return this.matchesDateFilter(row, key as InventoryReportFilterKey, value);
+      }
       return this.matchesValueFilter(row, key as InventoryReportFilterKey, value);
     });
   }

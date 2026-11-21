@@ -349,6 +349,36 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       { invoiceDate: '2026-05-11', invoiceNo: 'PINV-3097', supplier: 'GreenGrow Traders', supplierInvoiceNo: 'GGT-5520', variant: '', attribute: '', taxableAmount: 310000, cgst: 7750, sgst: 7750, igst: 0, netAmount: 325500, status: 'Pending' }
     ]
   }),
+  // Vendor Dues (308): posted Purchase Invoices still unpaid or part-paid as on
+  // "Date To" - same due as the Vendor Payment pending list. Layout follows the
+  // old "Vendor Wise Dues List": vendor heading, vendor bill no / date, Total and
+  // Due, a "Total:" line per vendor. PI No / Paid / Age can be switched on.
+  phaseOneReport({
+    key: 'vendorDues',
+    slug: 'vendor-dues',
+    title: 'Vendor Wise Dues List',
+    groupId: 'purchase',
+    endpoint: 'vendor-dues',
+    icon: 'pi pi-wallet',
+    purpose: 'Vendor-wise list of unpaid and part-paid purchase invoices with total and due amount as on a date.',
+    audience: ['Accountant', 'Purchase', 'Business Owner'],
+    filters: ['branchId', 'toDate', 'supplierId'],
+    columns: cols([
+      ['segment', 'Segment', 'text', false, false],
+      ['supplier', 'Vendor Name'],
+      ['invoiceNo', 'Invoice No'],
+      ['invoiceDate', 'Invoice Date', 'date'],
+      ['piNo', 'PI No', 'text', false, false],
+      ['piDate', 'PI Date', 'date', false, false],
+      ['totalAmount', 'Total Amount', 'currency', true],
+      ['paidAmount', 'Paid', 'currency', true, false],
+      ['dueAmount', 'Due Amount', 'currency', true],
+      ['ageDays', 'Age (Days)', 'number', false, false]
+    ]),
+    defaultGroupBy: 'supplier',
+    // No hardcoded preview rows - only live data from the API is shown.
+    sampleRows: []
+  }),
   phaseOneReport({
     key: 'salesOrderRegister',
     slug: 'sales-order-register',
@@ -467,11 +497,8 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['ageDays', 'Age (Days)', 'number']
     ]),
     defaultGroupBy: 'customer',
-    sampleRows: [
-      { invoiceDate: '2026-09-05', invoiceNo: 'CPINV1358/26', customer: 'Dakshin Infrastructures Private Limited', totalAmount: 40717, receivedAmount: 40027, dueAmount: 690, ageDays: 48 },
-      { invoiceDate: '2026-09-22', invoiceNo: 'CPINV1481/26', customer: 'Dakshin Infrastructures Private Limited', totalAmount: 24321, receivedAmount: 0, dueAmount: 24321, ageDays: 31 },
-      { invoiceDate: '2026-10-13', invoiceNo: 'CPINV1621/26', customer: 'Kapil Chits (Kakatiya) Private Limited', totalAmount: 11772, receivedAmount: 0, dueAmount: 11772, ageDays: 10 }
-    ]
+    // No hardcoded preview rows - only live data from the API is shown.
+    sampleRows: []
   }),
   // Collection Report: money received from customers between "Date From" and
   // "Date To" (posted Customer Receipts), one row per customer. Cash = 'cash'

@@ -1,3 +1,4 @@
+import { createInventoryToast } from '../../Inventory_Shared/inventory-save-toast/inventory-save-toast.component';
 import { CommonModule } from '@angular/common';
 import { Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -5,6 +6,7 @@ import { ActivatedRoute } from '@angular/router';
 import { NgSelectModule } from '@ng-select/ng-select';
 import { firstValueFrom } from 'rxjs';
 import { InventoryLineProductPickerComponent } from '../../Inventory_Shared/inventory-line-product-picker/inventory-line-product-picker.component';
+import { InventoryDeliveryAddressComponent } from '../../Inventory_Shared/inventory-delivery-address/inventory-delivery-address.component';
 import { InventoryQuickAddModalComponent } from '../../Inventory_Shared/inventory-quick-add-modal/inventory-quick-add-modal.component';
 import { InventoryScreenShell } from '../../Inventory_Shared/inventory-screen-shell/inventory-screen-shell';
 import { LeaseDateComponent, LeasePickRow, LeasePickerModalComponent, LeaseRatesModalComponent, LeaseReturnModalComponent } from '../lease-dialogs';
@@ -68,7 +70,7 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
   selector: 'app-inventory-lease-contracts',
   standalone: true,
   imports: [
-    CommonModule, FormsModule, NgSelectModule, InventoryScreenShell, InventoryQuickAddModalComponent, InventoryLineProductPickerComponent,
+    CommonModule, FormsModule, NgSelectModule, InventoryScreenShell, InventoryQuickAddModalComponent, InventoryLineProductPickerComponent, InventoryDeliveryAddressComponent,
     LeaseDateComponent, LeasePickerModalComponent, LeaseRatesModalComponent, LeaseReturnModalComponent
   ],
   template: `
@@ -106,7 +108,7 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
           }
           <div class="erp-form-group">
             <label class="erp-label">Site / Location</label>
-            <input class="erp-input" type="text" [(ngModel)]="leaseDraft.site_name" placeholder="Where the asset is used" />
+            <input class="erp-input" type="text" [(ngModel)]="leaseDraft.site_name" placeholder="Short name, e.g. Warangal shop" />
           </div>
 
           <div class="erp-form-group">
@@ -133,6 +135,11 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
             <input class="erp-input" type="text" [(ngModel)]="leaseDraft.remarks" />
           </div>
         </div>
+
+        <!-- Customer address (shared Delivery Address) + the exact place the assets are installed -->
+        <app-inventory-delivery-address [host]="this" [showShipAddress]="true" [stateRequired]="true" [showToggle]="false"
+          title="Customer Address & Installation Site" shipSameLabel="Install at the customer's address" shipStateLabel="Site State"
+          shipAddressLabel="Installation Address" shipPlaceholder="Exact place where the assets are installed: building, street, area, city, pincode"></app-inventory-delivery-address>
 
         <!-- Leased assets -->
         <div class="inventory-line-items grn-grid-compact">
@@ -278,14 +285,6 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
         </div>
       </div>
 
-      @if (leaseError()) {
-        <div class="inventory-save-error"><span>{{ leaseError() }}</span>
-          <button type="button" class="inventory-alert-close" (click)="leaseError.set('')" aria-label="Dismiss"><i class="pi pi-times"></i></button></div>
-      }
-      @if (leaseMessage()) {
-        <div class="inventory-save-msg"><span>{{ leaseMessage() }}</span>
-          <button type="button" class="inventory-alert-close" (click)="leaseMessage.set('')" aria-label="Dismiss"><i class="pi pi-times"></i></button></div>
-      }
 
       <div class="inventory-form-actions">
         <button type="button" class="erp-btn btn-white" (click)="leaseClear()"><i class="pi pi-times"></i> Clear</button>
@@ -400,6 +399,11 @@ export class InventoryLeaseContractsComponent extends InventoryScreenShell imple
   readonly leaseSaving = signal(false);
   readonly leaseError = signal('');
   readonly leaseMessage = signal('');
+
+  // Messages are raised as the shared bottom-right toast (timed, with an X) and kept in the signals.
+  private readonly leaseToast = createInventoryToast();
+  private leaseFail(m: string): void { this.leaseError.set(m); this.leaseToast.error(m); }
+  private leaseNote(m: string): void { this.leaseMessage.set(m); this.leaseToast.success(m); }
   readonly leaseAvailable = signal<AvailableAsset[]>([]);
 
   readonly leaseAssetPickerFor = signal<number | null>(null);
@@ -472,7 +476,7 @@ export class InventoryLeaseContractsComponent extends InventoryScreenShell imple
   leaseLoad(): void {
     this.leaseApi.getContracts({ status: this.leaseStatusFilter() || undefined }).subscribe({
       next: res => this.leaseRows.set(res.data ?? []),
-      error: err => this.leaseError.set(LeaseMeterService.errorMessage(err))
+      error: err => this.leaseFail(LeaseMeterService.errorMessage(err))
     });
   }
 
@@ -489,6 +493,51 @@ export class InventoryLeaseContractsComponent extends InventoryScreenShell imple
     const value = id ? (options.find(o => this.findCustomerBySelection(o)?.id === id) ?? null) : null;
     this.leaseCustomerCache = { id, options, value };
     return value;
+  }
+
+  /** The address block is always shown once a customer is chosen (its Yes/No switch is hidden here). */
+  override deliveryAddressEnabled(): boolean { return !!this.leaseDraft.customer_id; }
+
+  /** A site in a state where the customer has no GSTIN is billed under the customer's own state: say so. */
+  override shipStateMismatchMessage(): string {
+    if (this.shipSameAsDelivery()) return '';
+    const v = this.formValues();
+    const ship = String(v['shipState'] || '').trim();
+    if (!ship) return '';
+    const own = String(v['deliveryState'] || '').trim();
+    const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+    if (own && same(ship, own)) return '';
+    const customer: any = this.findCustomerBySelection(v['customer']);
+    const rows: any[] = Array.isArray(customer?.gstins) ? customer.gstins : [];
+    if (rows.some(r => same(String(r?.stateName ?? r?.state_name ?? ''), ship) && String(r?.gstin || '').trim())) return '';
+    return `The customer has no GSTIN registered in ${ship}, so this site is billed under ${own || 'the customer\'s own state'}. Add a ${ship} GSTIN on the customer to bill by that state.`;
+  }
+
+  /** Site address fields to save: the customer's own address, or the separate installation address. */
+  private leaseSiteFields(): Pick<LeaseContract, 'site_address' | 'site_state' | 'site_district' | 'site_city' | 'site_pincode'> {
+    const v = this.formValues();
+    if (this.shipSameAsDelivery()) {
+      return {
+        site_address: [v['deliveryHouseNo'], v['deliveryStreet']].map(x => String(x || '').trim()).filter(Boolean).join(', ') || null,
+        site_state: String(v['deliveryState'] || '').trim() || null, site_district: String(v['deliveryDistrict'] || '').trim() || null,
+        site_city: String(v['deliveryCity'] || '').trim() || null, site_pincode: String(v['deliveryPincode'] || '').trim() || null
+      };
+    }
+    return { site_address: String(v['shipAddress'] || '').trim() || null, site_state: String(v['shipState'] || '').trim() || null, site_district: null, site_city: null, site_pincode: null };
+  }
+
+  /** Opening a contract: re-select its customer (fills the address from the master) and restore a separate site if it had one. */
+  private leaseRestoreSite(c: LeaseContract): void {
+    const field = this.displayFields().find(f => f.key === 'customer');
+    const value = field ? this.leaseCustomerValue(field) : null;
+    if (value) this.collectFormField('customer', value);
+    const cust: any = value ? this.findCustomerBySelection(value) : null;
+    const addr = String(c.site_address || '').trim();
+    const state = String(c.site_state || '').trim();
+    const eq = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+    const same = !addr || (eq(addr, String(cust?.address || '')) && (!state || eq(state, String(cust?.state || ''))));
+    this.formValues.update(v => same ? { ...v, shipSameAsDelivery: 'Yes', shipAddress: '', shipState: '' }
+      : { ...v, shipSameAsDelivery: 'No', shipAddress: addr, shipState: state });
   }
 
   leasePickCustomer(value: string | null): void {
@@ -525,6 +574,7 @@ export class InventoryLeaseContractsComponent extends InventoryScreenShell imple
         const c = res.data!;
         this.leaseDraft = { ...c, start_date: String(c.start_date).slice(0, 10), end_date: c.end_date ? String(c.end_date).slice(0, 10) : null };
         this.leaseLoadedStatus.set(c.status ?? '');
+        this.leaseRestoreSite(c);
         this.leaseAssets = (c.assets ?? []).map(a => {
           const row: AssetRow = {
             id: a.id, product_id: a.product_id, product_name: a.product_name ?? '', serial_unit_id: null, serial_tracked: false,
@@ -556,7 +606,7 @@ export class InventoryLeaseContractsComponent extends InventoryScreenShell imple
         this.leaseLoadAvailable();
         window.scrollTo({ top: 0, behavior: 'smooth' });
       },
-      error: err => this.leaseError.set(LeaseMeterService.errorMessage(err))
+      error: err => this.leaseFail(LeaseMeterService.errorMessage(err))
     });
   }
 
@@ -642,8 +692,8 @@ export class InventoryLeaseContractsComponent extends InventoryScreenShell imple
     if (!a.id) return;
     this.leaseError.set(''); this.leaseMessage.set('');
     this.leaseApi.returnAsset(a.id, body).subscribe({
-      next: () => { this.leaseReturning.set(null); this.leaseMessage.set(`Asset ${a.asset_ref} updated.`); this.leaseOpen(this.leaseDraft.id!, true); },
-      error: err => { this.leaseReturning.set(null); this.leaseError.set(LeaseMeterService.errorMessage(err)); }
+      next: () => { this.leaseReturning.set(null); this.leaseNote(`Asset ${a.asset_ref} updated.`); this.leaseOpen(this.leaseDraft.id!, true); },
+      error: err => { this.leaseReturning.set(null); this.leaseFail(LeaseMeterService.errorMessage(err)); }
     });
   }
 
@@ -728,7 +778,7 @@ export class InventoryLeaseContractsComponent extends InventoryScreenShell imple
           const created = this.leaseAvailable().find(a => a.product_name.trim().toLowerCase() === createdName);
           if (created && this.leaseAssets[assetRow]) {
             this.leaseOnAssetProductPicked(assetRow, created.product_id);
-            this.leaseMessage.set('Asset added to the Product Master.');
+            this.leaseNote('Asset added to the Product Master.');
             clearInterval(timer);
           }
         }
@@ -773,6 +823,10 @@ export class InventoryLeaseContractsComponent extends InventoryScreenShell imple
     const d = this.leaseDraft;
     if (!d.customer_id) return 'Select the customer.';
     if (!d.start_date) return 'Start date is required.';
+    if (!this.shipSameAsDelivery()) {
+      if (!String(this.formValues()['shipState'] || '').trim()) return 'Pick the site state for the installation address.';
+      if (!String(this.formValues()['shipAddress'] || '').trim()) return 'Enter the installation address.';
+    }
     for (const [i, a] of this.leaseAssets.entries()) {
       if (!a.id) {
         if (!a.product_id) return `Asset row ${i + 1}: pick the asset (or remove the row).`;
@@ -789,11 +843,12 @@ export class InventoryLeaseContractsComponent extends InventoryScreenShell imple
   async leaseSave(activate: boolean): Promise<void> {
     this.leaseError.set(''); this.leaseMessage.set('');
     const problem = this.leaseValidate();
-    if (problem) { this.leaseError.set(problem); return; }
+    if (problem) { this.leaseFail(problem); return; }
 
     const wasNew = !this.leaseDraft.id;
     const body: LeaseContract = {
       ...this.leaseDraft,
+      ...this.leaseSiteFields(),
       status: this.leaseDraft.id ? this.leaseDraft.status : (activate ? 'active' : 'draft'),
       end_date: this.leaseDraft.end_date || null,
       meters: this.leaseCollectMeters().meters.map(m => ({
@@ -842,11 +897,11 @@ export class InventoryLeaseContractsComponent extends InventoryScreenShell imple
       this.leaseLoad();
       this.leaseLoadAvailable();
       this.leaseOpen(saved.id!, true);
-      this.leaseMessage.set(`Contract ${saved.contract_no ?? ''} saved.`);
-      if (failures.length) this.leaseError.set('Saved, but: ' + failures.join(' | '));
+      this.leaseNote(`Contract ${saved.contract_no ?? ''} saved.`);
+      if (failures.length) this.leaseFail('Saved, but: ' + failures.join(' | '));
     } catch (err) {
       this.leaseSaving.set(false);
-      this.leaseError.set(LeaseMeterService.errorMessage(err));
+      this.leaseFail(LeaseMeterService.errorMessage(err));
     }
   }
 
@@ -857,11 +912,11 @@ export class InventoryLeaseContractsComponent extends InventoryScreenShell imple
     this.leaseError.set(''); this.leaseMessage.set('');
     this.leaseApi.setContractStatus(c.id, status).subscribe({
       next: () => {
-        this.leaseMessage.set(`Contract ${c.contract_no} is now ${status}.`);
+        this.leaseNote(`Contract ${c.contract_no} is now ${status}.`);
         this.leaseLoad();
         if (this.leaseDraft.id === c.id) this.leaseOpen(c.id!, true);
       },
-      error: err => this.leaseError.set(LeaseMeterService.errorMessage(err))
+      error: err => this.leaseFail(LeaseMeterService.errorMessage(err))
     });
   }
 }

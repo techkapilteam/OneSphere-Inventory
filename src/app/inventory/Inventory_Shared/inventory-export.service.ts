@@ -90,6 +90,16 @@ export interface InventoryExportDocument {
   /** PDF only: narrower 10mm side margins and one border box around each
    *  page's content, like the old Crystal sale invoice report (Sales Invoice). */
   pdfPageFrame?: boolean;
+  /** PDF only: header field label (e.g. "Bill To Address") with a full-width
+   *  rule drawn just above its row (border to border on a framed page). */
+  pdfRuleAboveField?: string;
+  /** PDF only: with pdfRuleAboveField, a vertical line between that row's left
+   *  and right fields (Bill To | Ship To Address), from its rule down to the
+   *  rule above the grid (Sales Invoice). */
+  pdfFieldRowDivider?: boolean;
+  /** PDF only: grouped tax-grid headings containing '%' (e.g. "Rate %") stay on
+   *  one line, the font shrinking just enough to fit (Sales Invoice). */
+  pdfOneLinePercentHead?: boolean;
 
   /** Invoice layout (Purchase Invoice): "Total Invoice Amount In Words" (and notes)
    *  on the left and the totals on the right, in ONE bordered block joined
@@ -132,6 +142,9 @@ const TERMS_LINE_HEIGHT = 3.6;
 //const BANK_BOX_HEIGHT = 60;
 /** Text/spacing scales tried in turn for a fitOnePage document. */
 const ONE_PAGE_SCALES = [1, 0.92, 0.85, 0.78, 0.7, 0.62];
+/** Smallest text scale a pdfFixedGridScale document (Sales Invoice) may use
+ *  to stay on one page (9pt -> ~7.7pt); below this it goes to 2 pages instead. */
+const FIXED_GRID_MIN_SCALE = 0.86;
 const BANK_BOX_HEIGHT = 58;
 // Previous: 32 — too little room to sign; taller box gives space for the
 // Authorised Signatory signature and the Common Seal.
@@ -480,8 +493,9 @@ export class InventoryExportService {
     if (terms.length) {
       ws.addRow([]);
       ws.addRow(['Terms & Conditions :']).getCell(1).font = { bold: true };
-      terms.forEach(term => {
-        const row = ws.addRow([`.${term}`]);
+      // Previous: dot-prefixed (`.${term}`); now numbered 1., 2., …
+      terms.forEach((term, i) => {
+        const row = ws.addRow([`${i + 1}. ${term}`]);
         mergeRow(row.number, 1, numCols);
         row.getCell(1).alignment = { wrapText: true, vertical: 'top' };
         row.getCell(1).font = { size: 9 };
@@ -557,9 +571,29 @@ export class InventoryExportService {
     // Sales Invoice (2026-11-17): nothing shrinks any more — header, grid,
     // totals, terms and bank box always print at full size (like INV-CP-00017);
     // a long invoice simply runs onto a 2nd / 3rd page.
+    // Previous (2026-11-17): always full size, no shrinking at all — so even a
+    // 1–4 product invoice pushed the bank box onto page 2.
+    // if (document.pdfFixedGridScale) {
+    //   try {
+    //     this.pdfScale = document.pdfMaxScale || 1;
+    //     return this.buildPdf(document);
+    //   } finally {
+    //     this.pdfScale = 1;
+    //   }
+    // }
+    // Now (2026-11-20): the grid stays full size; header/totals/terms/bank
+    // box may shrink a little (2% steps, never below FIXED_GRID_MIN_SCALE)
+    // only when that keeps the whole invoice on one page. If it still needs
+    // more than one page (many products), it prints at full size across pages.
     if (document.pdfFixedGridScale) {
       try {
-        this.pdfScale = document.pdfMaxScale || 1;
+        const maxScale = document.pdfMaxScale || 1;
+        for (let scale = maxScale; scale >= FIXED_GRID_MIN_SCALE - 1e-9; scale -= 0.02) {
+          this.pdfScale = Math.round(scale * 100) / 100;
+          const attempt = this.buildPdf(document);
+          if (attempt.getNumberOfPages() === 1) return attempt;
+        }
+        this.pdfScale = maxScale;
         return this.buildPdf(document);
       } finally {
         this.pdfScale = 1;
@@ -607,6 +641,11 @@ export class InventoryExportService {
       L_MARGIN = R_MARGIN = DEFAULT_MARGIN;
       this.pageFramed = false;
     }
+  }
+
+  /** "Bill To Address :" -> "Bill To Address". */
+  private fieldLabel(cell: string | undefined): string {
+    return String(cell || '').replace(/\s*:\s*$/, '').trim();
   }
 
   /** True while a pdfPageFrame document (Sales Invoice) is being built. */
@@ -690,8 +729,12 @@ export class InventoryExportService {
     if (logo && logoBox) {
       try {
         const size = logoBox;
-        const centred = (11 + y) / 2 - size.height / 2;
-        const logoY = Math.max(5, Math.min(centred, y + 2.5 - size.height));
+        // Previous (all documents): const centred = (11 + y) / 2 - size.height / 2;
+        // Previous (all documents): const logoY = Math.max(5, Math.min(centred, y + 2.5 - size.height));
+        // Previous (2026-11-20, Sales Invoice only): const logoY = this.pageFramed ? 8 : <centred>;
+        // Now every Inventory PDF: logo moved up, its top level with the top of
+        // the company name (user 2026-11-20: "once we change, all should reflect").
+        const logoY = 8;
         doc.addImage(logo, this.imageFormat(logo), 10, logoY, size.width, size.height);
       } catch {
         // An unreadable logo must not block the export.
@@ -733,6 +776,7 @@ export class InventoryExportService {
       // right-hand value (e.g. Mode of Payment) squeezed the left one until
       // no-space values like PAY-SS-26-00011 overflowed into the next label.
       const valueWidth = (pageWidth - L_MARGIN - R_MARGIN - 76) / 2;
+      const ruleAboveField = String(document.pdfRuleAboveField || '').trim();
       // Previous: left label column always 38mm, leaving a wide gap before
       // short labels' values. With pdfCompactLeftLabels it shrinks to the
       // longest left label + a small gap, and the left value column takes the
@@ -746,6 +790,7 @@ export class InventoryExportService {
         doc.setFont('helvetica', 'normal');
       }
       const leftValueWidth = valueWidth + (38 - leftLabelWidth);
+      let fieldDivider: { x: number; top: number } | null = null;
       autoTable(doc, {
         body: fieldRows,
         theme: 'plain',
@@ -762,10 +807,33 @@ export class InventoryExportService {
         },
         // Values of the listed labels (e.g. Customer, GSTIN No) print bold.
         didParseCell: data => {
+          // Extra top padding on the pdfRuleAboveField row, so its rule sits
+          // in clear space between the row above and this one.
+          if (ruleAboveField && data.section === 'body') {
+            const raw = data.row.raw as string[];
+            if (this.fieldLabel(raw[0]) === ruleAboveField || this.fieldLabel(raw[2]) === ruleAboveField) {
+              // Previous: left always 0.8 — with pdfFieldRowDivider the right-hand
+              // label (Ship To Address) starts a little clear of the divider.
+              const left = document.pdfFieldRowDivider && data.column.index === 2 ? 2.4 * s : 0.8 * s;
+              data.cell.styles.cellPadding = { top: 2.6 * s, bottom: 0.8 * s, left, right: 0.8 * s };
+            }
+          }
           const bold = document.boldFieldLabels;
           if (!bold?.length || (data.column.index !== 1 && data.column.index !== 3)) return;
           const label = String((data.row.raw as string[])[data.column.index - 1] || '').replace(/\s*:\s*$/, '').trim();
           if (bold.includes(label)) data.cell.styles.fontStyle = 'bold';
+        },
+        // Room above the pdfRuleAboveField row (Bill To Address) for its rule.
+        willDrawCell: data => {
+          if (!ruleAboveField || data.section !== 'body') return;
+          const raw = data.row.raw as string[];
+          if (this.fieldLabel(raw[0]) !== ruleAboveField && this.fieldLabel(raw[2]) !== ruleAboveField) return;
+          if (data.column.index === 0) this.drawFullRule(doc, data.cell.y + 0.8 * s);
+          // Remember where the Bill To | Ship To divider goes (left edge of the
+          // right-hand label column, from this row's rule).
+          if (document.pdfFieldRowDivider && data.column.index === 2) {
+            fieldDivider = { x: data.cell.x, top: data.cell.y + 0.8 * s };
+          }
         },
         // Listed fields (Sales Invoice: Bill To / Ship To Address) get a square
         // box around their label + value, each pair its own box.
@@ -784,6 +852,16 @@ export class InventoryExportService {
         }
       });
       y = (doc as any).lastAutoTable.finalY + 3;
+      // Vertical line between Bill To and Ship To Address, joining the rule
+      // above that row to the rule above the grid (or the table's foot).
+      const divider = fieldDivider as { x: number; top: number } | null;
+      if (divider) {
+        const bottom = document.pdfRuleAboveGrid ? y - 1 : y - 3;
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(this.pageFramed ? 0.3 : 0.2);
+        doc.line(divider.x, divider.top, divider.x, bottom);
+        doc.setLineWidth(0.2);
+      }
       // Same rule as under "Branch : …", then the grid (Sales Invoice).
       if (document.pdfRuleAboveGrid) {
         y -= 1;
@@ -819,6 +897,10 @@ export class InventoryExportService {
       // Rate % cells sit centred under their heading, as on the old invoice.
       document.columns.forEach((header, index) => {
         if (/%/.test(header)) columnStyles[index] = { ...columnStyles[index], halign: 'center' };
+        // A little more width so "Rate %" fits on one line (see didParseCell).
+        if (/%/.test(header) && document.pdfOneLinePercentHead) {
+          columnStyles[index] = { ...columnStyles[index], minCellWidth: 9.5 };
+        }
       });
     }
     (document.pdfCenterColumns || []).forEach(index => {
@@ -845,6 +927,21 @@ export class InventoryExportService {
         : { fontSize: 8, cellPadding: 0.8, overflow: 'linebreak', valign: 'middle' } as any,
       columnStyles,
       didParseCell: (data: any) => {
+        // Previous: "Rate %" broke as "Rat / e %" in its narrow column. Now it
+        // prints on ONE straight line, shrinking its font only if needed.
+        if (taxGrid && document.pdfOneLinePercentHead && data.section === 'head'
+          && data.cell.colSpan === 1 && /%/.test(String(data.cell.raw?.content ?? data.cell.raw ?? ''))) {
+          const cell = data.cell;
+          cell.styles.overflow = (text: string | string[], space: number) => {
+            const value = (Array.isArray(text) ? text : [String(text ?? '')]).join(' ').trim();
+            const width = doc.getTextWidth(value);
+            if (width > space && width > 0) {
+              cell.styles.fontSize = cell.styles.fontSize * space / width;
+              doc.setFontSize(cell.styles.fontSize);
+            }
+            return [value];
+          };
+        }
         // Bold and the same 9pt as the header labels (e.g. "Cheque Date :").
         // Previous: if (document.boldRows && data.section === 'body') data.cell.styles.fontStyle = 'bold';
         if (document.boldRows && data.section === 'body') {
@@ -861,6 +958,21 @@ export class InventoryExportService {
           // Previous: data.cell.styles.fontSize = 8.5 * gs;
           // Tax-invoice grids (SI/SR/PI/PR) print the Total row bigger.
           data.cell.styles.fontSize = (taxGrid ? 9.5 : 8.5) * gs;
+          // Previous: amounts wrapped like "5,16,750.0" / "0" in narrow columns.
+          // Now each Total-row amount stays on ONE line; its font shrinks only
+          // as much as needed to fit the column width (2026-11-20).
+          if (data.cell.colSpan === 1) {
+            const cell = data.cell;
+            cell.styles.overflow = (text: string | string[], space: number) => {
+              const value = (Array.isArray(text) ? text : [String(text ?? '')]).join(' ').trim();
+              const width = doc.getTextWidth(value);
+              if (width > space && width > 0) {
+                cell.styles.fontSize = cell.styles.fontSize * space / width;
+                doc.setFontSize(cell.styles.fontSize);
+              }
+              return [value];
+            };
+          }
         }
         // Group headers / subtotals (report "Group by"): bold, shaded.
         if (data.section === 'body' && (document.groupRowIndexes || []).includes(data.row.index)) {
@@ -1289,7 +1401,8 @@ export class InventoryExportService {
     const pageWidth = doc.internal.pageSize.getWidth();
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8 * this.pdfScale);
-    return terms.flatMap(term => doc.splitTextToSize(`.${term}`, pageWidth - L_MARGIN - R_MARGIN) as string[]);
+    // Previous: dot-prefixed (`.${term}`); now numbered 1., 2., …
+    return terms.flatMap((term, i) => doc.splitTextToSize(`${i + 1}. ${term}`, pageWidth - L_MARGIN - R_MARGIN) as string[]);
   }
 
   // Boxed footer as on the earlier sale invoice report: Bank Details on the
@@ -1301,7 +1414,13 @@ export class InventoryExportService {
     const width = pageWidth - L_MARGIN - R_MARGIN;
     const s = this.pdfScale;
     // Previous: if (y + BANK_BOX_HEIGHT > pageHeight - 15) {
-    if (y + BANK_BOX_HEIGHT * s > pageHeight - 15) {
+    // Previous: a fixed 58mm reserve — the box moved to the next page even
+    // when its real height (~48mm) still fit. Now only a minimal check here
+    // (heading row must fit); autoTable's pageBreak: 'avoid' below measures
+    // the real table height and moves it to a new page only if it truly
+    // does not fit (boxTop then follows it).
+    // if (y + BANK_BOX_HEIGHT * s > pageHeight - 15) {
+    if (y + 10 * s > pageHeight - 15) {
       doc.addPage();
       y = 15;
     }

@@ -23,7 +23,8 @@
           }
           <!-- Dates moved up from the second row (controls) to keep that row from overflowing. -->
           @if (showDateRangeField() && separateFromToDates()) {
-            <!-- Stock Summary: separate From Date / To Date pickers. -->
+            <!-- Separate From Date / To Date pickers (all reports now); each shows only if the report has that filter. -->
+            @if (hasFromDateFilter()) {
             <div class="inventory-report-filter inventory-report-filter--date inventory-report-filter--date-single">
               <label title="From Date"><i [class]="filterIcon('fromDate')"></i> From Date</label>
               <div class="inventory-date-wrap">
@@ -31,13 +32,18 @@
                 <i class="pi pi-calendar inventory-date-icon"></i>
               </div>
             </div>
+            }
+            @if (hasToDateFilter()) {
             <div class="inventory-report-filter inventory-report-filter--date inventory-report-filter--date-single">
-              <label title="To Date"><i [class]="filterIcon('toDate')"></i> To Date</label>
+              <!-- Previous: <label title="To Date"><i [class]="filterIcon('toDate')"></i> To Date</label> -->
+              <!-- Vendor Dues labels it "As On"; every other report keeps "To Date". -->
+              <label [title]="toDateLabel()"><i [class]="filterIcon('toDate')"></i> {{ toDateLabel() }}</label>
               <div class="inventory-date-wrap">
-                <p-datepicker [ngModel]="filterDateValue('toDate')" (ngModelChange)="updateFilter('toDate', $event)" [ngModelOptions]="{ standalone: true }" [minDate]="filterDateValue('fromDate')" [maxDate]="todayDate" dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY" [readonlyInput]="true" [showIcon]="false" appendTo="body" styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100"></p-datepicker>
+                <p-datepicker [ngModel]="filterDateValue('toDate')" (ngModelChange)="updateFilter('toDate', $event)" [ngModelOptions]="{ standalone: true }" [minDate]="hasFromDateFilter() ? filterDateValue('fromDate') : null" [maxDate]="todayDate" dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY" [readonlyInput]="true" [showIcon]="false" appendTo="body" styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100"></p-datepicker>
                 <i class="pi pi-calendar inventory-date-icon"></i>
               </div>
             </div>
+            }
           } @else if (showDateRangeField()) {
             <div class="inventory-report-filter inventory-report-filter--date">
               <label title="Date Range"><i class="pi pi-calendar"></i> Date Range</label>

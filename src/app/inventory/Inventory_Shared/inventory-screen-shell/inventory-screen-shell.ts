@@ -92,6 +92,9 @@ interface GridExportPayload {
   pdfBlueHead?: boolean;
   pdfCenterColumns?: number[];
   pdfPageFrame?: boolean;
+  pdfRuleAboveField?: string;
+  pdfFieldRowDivider?: boolean;
+  pdfOneLinePercentHead?: boolean;
   copyType?: string;
   terms?: string[];
   bankDetails?: Array<[string, string]>;
@@ -284,17 +287,31 @@ interface PartySummaryData {
 }
 
 // Fixed Terms & Conditions printed at the foot of every Sales Invoice
-// (Print / PDF / Excel), as on the earlier sale invoice report.
+// (Print / PDF / Excel / Re-Print). Numbers ("1.", "2." …) are added by the
+// print itself, so keep the text here without numbering.
 const SALES_INVOICE_TERMS: string[] = [
-  'Goods once sold cannot be taken back.',
-  'If this payment is not made with in 7 days from the Invoice date Interest will be charged @ 24% p.a.',
-  'No warranty for power adapters, connectors and cables etc. is given.',
-  'Please keep Warrantee Card & purchase Invoice in a safe place for warranty claims purpose.',
-  'Warranty on all the equipment is as per manufacturers standard warranty policy and shall be directly provided by manufacturers.',
-  'General Manufacturer’s polices for warranty repairs / Replacement only if parts are in good physical condition. Products with Broken / Burnt, Pin bends, Pen/Pencil marks, Cracks, Missing / Tampered Components and Tampered Warranty stickers will be rejected and considered warranty void.',
-  'The customers understand, Accept and Agree that the warranties in a respect of equipment’s supplied here under is given by the manufacturer and thereof this trading firm Shall not be held liable or responsible in any matter what ever in respect thereof.',
-  'All disputes subject to Hyderabad Jurisdiction.'
+  'Goods once sold cannot be returned or exchanged, except for manufacturing defects covered under warranty.',
+  'If payment is not made within 7 days from the invoice date, interest will be charged at 24% p.a. on the overdue amount.',
+  'All disputes are subject to Hyderabad jurisdiction.',
+  'Warranty is as per the manufacturer’s standard warranty policy and shall be provided directly by the manufacturer or its authorised service centre.',
+  'A cheque bounce charge, as applicable, along with applicable taxes will be levied for each dishonoured cheque.',
+  'No warranty on power adapters, connectors, cables and other accessories.',
+  'Physical damage, liquid damage, tampering or burnt products are not covered under warranty.',
+  'Goods should be checked at the time of delivery. Shortages or damage must be reported within 24 hours.',
+  'E. & O.E.'
 ];
+
+// Previous terms (replaced 2026-11-20):
+// const SALES_INVOICE_TERMS_OLD: string[] = [
+//   'Goods once sold cannot be taken back.',
+//   'If this payment is not made with in 7 days from the Invoice date Interest will be charged @ 24% p.a.',
+//   'No warranty for power adapters, connectors and cables etc. is given.',
+//   'Please keep Warrantee Card & purchase Invoice in a safe place for warranty claims purpose.',
+//   'Warranty on all the equipment is as per manufacturers standard warranty policy and shall be directly provided by manufacturers.',
+//   'General Manufacturer’s polices for warranty repairs / Replacement only if parts are in good physical condition. Products with Broken / Burnt, Pin bends, Pen/Pencil marks, Cracks, Missing / Tampered Components and Tampered Warranty stickers will be rejected and considered warranty void.',
+//   'The customers understand, Accept and Agree that the warranties in a respect of equipment’s supplied here under is given by the manufacturer and thereof this trading firm Shall not be held liable or responsible in any matter what ever in respect thereof.',
+//   'All disputes subject to Hyderabad Jurisdiction.'
+// ];
 
 const DC_ADDRESS_STATES = [
   'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
@@ -778,6 +795,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     soItemId?: number; dcItemId?: number; siItemId?: number;
     productionPlanItemId?: number | null; materialIssueItemId?: number | null;
     attributeId?: number | null; attributeName?: string | null; attributeValue?: string | null;
+    // Purchase Return only (298): the referenced PI line's own qty / taxable /
+    // GST. The return's amounts are this line's share of them, never
+    // qty x rate — inv_pi_items.rate is 2-dp, so a PI worked at 184.7664
+    // reads back as 184.77 and qty x rate over-states the return
+    // (PRT00002/26-27 vs PI00029/26-27).
+    piQty?: number | null; piTaxable?: number | null; piTax?: number | null;
   }>>({});
   // Serial number tracking (per-unit picker) — finalized list of serial
   // numbers per line, entered (capture) or picked (select) via the popup.
@@ -9127,6 +9150,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // 10mm side margins + a border round each page, like the old Crystal
       // sale invoice report (user request 2026-11-20).
       pdfPageFrame: true,
+      // Border-to-border rule above the Bill To / Ship To Address row (2026-11-20).
+      pdfRuleAboveField: 'Bill To Address',
+      // Vertical line between Bill To and Ship To Address, and "Rate %" grid
+      // headings on one straight line (user request 2026-11-21).
+      pdfFieldRowDivider: true,
+      pdfOneLinePercentHead: rows.length ? true : undefined,
       boldCellSegments: rows.length ? this.documentSerialSegments(record) : undefined,
       fileName: `Sales_Invoice_${docNo || 'Selected_Record'}`
     };
@@ -9290,7 +9319,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       ['Taxable amount', this.moneyValue(totals.taxable)],
       ...(isInterstate
         ? [['IGST', this.moneyValue(totals.igst)]]
-        : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]]) as Array<[string, string]>
+        : [['CGST', this.moneyValue(totals.cgst)], ['SGST', this.moneyValue(totals.sgst)]]) as Array<[string, string]>,
+      // 298: whole-rupee round off, same row as the Purchase Invoice print
+      // (stored total_amount - taxable - GST).
+      ['Round off', this.moneyValue(this.roundLineAmount(totals.roundOff))]
     ];
     return {
       title: 'Tax Invoice',
@@ -9498,6 +9530,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       pdfBlueHead: payload.pdfBlueHead,
       pdfCenterColumns: payload.pdfCenterColumns,
       pdfPageFrame: payload.pdfPageFrame,
+      pdfRuleAboveField: payload.pdfRuleAboveField,
+      pdfFieldRowDivider: payload.pdfFieldRowDivider,
+      pdfOneLinePercentHead: payload.pdfOneLinePercentHead,
       copyType: payload.copyType,
       terms: payload.terms,
       bankDetails: payload.bankDetails,
@@ -11678,6 +11713,19 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const discountAmount = gross * discountPct / 100;
     const discountedGross = gross - discountAmount;
     const gstIncluded = gstIncludedOverride ?? (rowIndex !== undefined ? this.lineGstIncluded(rowIndex) : false);
+    // 298: Purchase Return rows picked from a PI take the PI line's own
+    // taxable / GST (in proportion to qty) instead of qty x the 2-dp rate.
+    const piShare = this.purchaseReturnPiLineShare(qty, rowIndex);
+    if (piShare) {
+      return {
+        gross,
+        discountAmount: 0,
+        taxableAmount: piShare.taxable,
+        taxAmount: piShare.tax,
+        total: piShare.taxable + piShare.tax,
+        gstIncluded: false
+      };
+    }
     // Previous:
     // if (gstIncluded && gstPct > 0) {
     //   const taxableAmount = discountedGross / (1 + gstPct / 100);
@@ -12497,7 +12545,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // server does (migration 275 stores the same round off on save).
   invoiceRoundOffFooter(): { roundOff: string; grandTotal: string; grandTotalValue: number } | null {
     const key = this.config?.key;
-    if (key !== 'salesInvoice' && key !== 'purchaseInvoice') return null;
+    // Previous: if (key !== 'salesInvoice' && key !== 'purchaseInvoice') return null;
+    // 298: Purchase Return rounds to the whole rupee like its PI (no transport).
+    if (key !== 'salesInvoice' && key !== 'purchaseInvoice' && key !== 'purchaseReturn') return null;
     let total = 0;
     this.directEntryLineRows().forEach((row, rowIndex) => {
       const preview = this.transactionLineAmountPreview(row, rowIndex);
@@ -16448,8 +16498,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       const applyRows = () => {
         this.entryLineRowsKey.set(key);
         this.entryLineRows.set(rows);
-        if (key === 'purchaseReturn' || key === 'goodsReceipt') {
+        // Previous:
+        // if (key === 'purchaseReturn' || key === 'goodsReceipt') {
+        //   this.lineRefItemIdMap.set(this.attributeRefMapFromItems(doc.items || []));
+        // }
+        if (key === 'goodsReceipt') {
           this.lineRefItemIdMap.set(this.attributeRefMapFromItems(doc.items || []));
+        } else if (key === 'purchaseReturn') {
+          // 298: also carry the PI line's own qty / taxable / GST (see
+          // lineRefItemIdMap's doc comment).
+          this.lineRefItemIdMap.set(this.purchaseReturnRefMapFromItems(doc.items || [], 'invoice_qty'));
         }
         if (key === 'purchaseReturn') {
           // 258: bind the exact serials that go back
@@ -18783,7 +18841,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // Delivery Challan, Sales Order, Sales Invoice: the Delivery Address IS the
     // customer's address (read-only on the document; changed only through
     // + / Update on the customer). A different customer replaces it completely.
-    const deliveryFromCustomerScreens = ['deliveryChallan', 'salesOrder', 'salesInvoice'];
+    const deliveryFromCustomerScreens = ['deliveryChallan', 'salesOrder', 'salesInvoice', 'leaseContract'];
     if (deliveryFromCustomerScreens.includes(this.config?.key || '')) {
       const customerChanged = !this.optionEquals(this.formValues()[key], value);
       if (customerChanged) {
@@ -23179,14 +23237,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // Restore the already-saved attribute_id/attribute_value per line (see
       // lineRefItemIdMap's doc comment) so re-saving this draft keeps using
       // the exact values instead of falling back to resolveLineAttribute().
-      const purchaseReturnAttrMap: Record<number, { attributeId?: number | null; attributeName?: string | null; attributeValue?: string | null }> = {};
-      (record.items || []).forEach((item: any, i: number) => {
-        purchaseReturnAttrMap[i] = {
-          attributeId: item?.attribute_id ?? item?.attributeId ?? null,
-          attributeName: item?.attribute_name ?? item?.attributeName ?? null,
-          attributeValue: item?.attribute_value ?? item?.attributeValue ?? null
-        };
-      });
+      // Previous:
+      // const purchaseReturnAttrMap: Record<number, { attributeId?: number | null; attributeName?: string | null; attributeValue?: string | null }> = {};
+      // (record.items || []).forEach((item: any, i: number) => {
+      //   purchaseReturnAttrMap[i] = {
+      //     attributeId: item?.attribute_id ?? item?.attributeId ?? null,
+      //     attributeName: item?.attribute_name ?? item?.attributeName ?? null,
+      //     attributeValue: item?.attribute_value ?? item?.attributeValue ?? null
+      //   };
+      // });
+      // 298: a saved return line's own taxable / GST (already the PI line's
+      // share) keep showing instead of return qty x the 2-dp rate.
+      const purchaseReturnAttrMap = this.purchaseReturnRefMapFromItems(record.items || [], 'return_qty');
       this.lineRefItemIdMap.set((record.pi_id ?? record.piId) ? purchaseReturnAttrMap : {});
     }
 
@@ -25430,6 +25492,55 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       };
     });
     return attrMap;
+  }
+
+  // 298: Purchase Return reference map = attribute fields + the line's own
+  // qty / taxable / GST. qtyKey is 'invoice_qty' for a freshly picked PI
+  // (sp_get_purchase_docs_for_ref) and 'return_qty' for a reopened return.
+  private purchaseReturnRefMapFromItems(items: any[], qtyKey: 'invoice_qty' | 'return_qty'): Record<number, {
+    attributeId?: number | null; attributeName?: string | null; attributeValue?: string | null;
+    piQty?: number | null; piTaxable?: number | null; piTax?: number | null;
+  }> {
+    const attrMap = this.attributeRefMapFromItems(items);
+    const num = (value: any): number | null => {
+      if (value === null || value === undefined || String(value).trim() === '') return null;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    const map: Record<number, any> = {};
+    (items || []).forEach((item: any, i: number) => {
+      const camel = qtyKey === 'invoice_qty' ? 'invoiceQty' : 'returnQty';
+      map[i] = {
+        ...attrMap[i],
+        piQty: num(item?.[qtyKey] ?? item?.[camel] ?? item?.qty),
+        piTaxable: num(item?.taxable_amount ?? item?.taxableAmount),
+        piTax: num(item?.tax_amount ?? item?.taxAmount)
+      };
+    });
+    return map;
+  }
+
+  // 298: a Purchase Return line's taxable / GST = its share of the PI line's
+  // own amounts (full qty -> exactly the PI's figures), the same rule
+  // inventory.sp_save_purchase_return applies on save. null when the row has
+  // no PI amounts (manual row, or a PI picked before migration 298).
+  private purchaseReturnPiLineShare(qty: number, rowIndex?: number): { taxable: number; tax: number } | null {
+    if (this.config?.key !== 'purchaseReturn' || rowIndex === undefined) return null;
+    const ref = this.lineRefItemIdMap()[rowIndex];
+    const piQty = Number(ref?.piQty);
+    const piTaxable = ref?.piTaxable;
+    const piTax = ref?.piTax;
+    if (!(piQty > 0) || piTaxable === null || piTaxable === undefined || piTax === null || piTax === undefined) return null;
+    const lineQty = Number(qty) || 0;
+    if (lineQty <= 0) return null;
+    if (Math.abs(lineQty - piQty) < 0.0001) {
+      return { taxable: Number(piTaxable), tax: Number(piTax) };
+    }
+    const share = (amount: number) => {
+      const value = Number((Number(amount) * lineQty / piQty * 100).toFixed(6));
+      return (Math.sign(value) * Math.round(Math.abs(value))) / 100;
+    };
+    return { taxable: share(Number(piTaxable)), tax: share(Number(piTax)) };
   }
 
   private resolveLineAttribute(
