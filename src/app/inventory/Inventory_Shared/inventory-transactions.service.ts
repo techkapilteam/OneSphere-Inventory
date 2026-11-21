@@ -1949,6 +1949,11 @@ export class InventoryTransactionsService {
       gst_inclusive: !!(i.gstInclusive ?? i.gst_inclusive),
       taxable_amount: Number(i.taxableAmount ?? i.taxable_amount ?? 0),
       tax_amount: Number(i.taxAmount ?? i.tax_amount ?? i.gstAmount ?? i.gst_amount ?? 0),
+      // migration 295: delivery progress per Sales Order line (undefined on other documents)
+      delivered_qty: i.deliveredQty ?? i.delivered_qty,
+      invoiced_qty: i.invoicedQty ?? i.invoiced_qty,
+      direct_invoiced_qty: i.directInvoicedQty ?? i.direct_invoiced_qty,
+      pending_qty: i.pendingQty ?? i.pending_qty,
       amount: Number(i.amount || 0), remarks: i.remarks
     };
   }
@@ -2138,6 +2143,12 @@ export class InventoryTransactionsService {
       channel_partner_name: r?.channelPartnerName || r?.channel_partner_name,
       payment_terms: r?.paymentTerms || r?.payment_terms,
       remarks: r?.remarks, status, created_at: r?.createdAt || r?.created_at,
+      // migration 295: delivery / billing progress and close fields      ← NEW
+      delivery_status: r?.deliveryStatus ?? r?.delivery_status ?? null,
+      billing_status: r?.billingStatus ?? r?.billing_status ?? null,
+      closed_at: r?.closedAt ?? r?.closed_at ?? null,
+      close_reason: r?.closeReason ?? r?.close_reason ?? null,
+      total_amount: (r?.items || []).reduce((sum: number, i: any) => sum + Number(i?.amount || 0), 0),
       items: (r?.items || []).map((i: any) => this.normSalesItem(i))
     };
   }
@@ -2148,6 +2159,13 @@ export class InventoryTransactionsService {
     if (segmentId) params = params.set('segmentId', String(segmentId));
     return this.http.get<ApiResponse<any[]>>(this.salesUrl('orders'), { headers: this.headers(), params }).pipe(
       map(res => ({ ...res, data: (res.data ?? []).map(r => this.normSalesOrder(r)) }))
+    );
+  }
+
+    /** Close (with reason) or reopen a posted Sales Order (migration 295). */
+  closeSalesOrder(id: number, closeReason: string | null, reopen = false): Observable<ApiResponse<any>> {
+    return this.http.post<ApiResponse<any>>(this.salesUrl(`orders/${id}/close`), { closeReason, reopen }, { headers: this.headers() }).pipe(
+      map(res => ({ ...res, data: res.data ? this.normSalesOrder(res.data) : res.data }))
     );
   }
 

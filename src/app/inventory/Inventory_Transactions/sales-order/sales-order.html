@@ -554,6 +554,16 @@
                     <!-- Saved transactions are read-only from this grid. -->
                     <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" [disabled]="!canEditOrDeleteRow(row)" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
                     <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" [disabled]="!canEditOrDeleteRow(row)" (click)="cancelRecordByRow(row)"><i class="pi pi-trash"></i></button>
+                    
+                    <!-- Close / Reopen a posted Sales Order (migration 295) -->
+                    @if (salesOrderCloseAction(row); as soAction) {
+                      <button type="button" class="erp-btn btn-white btn-icon btn-sm"
+                        [title]="soAction === 'close' ? 'Close Sales Order (stop pending deliveries)' : 'Reopen Sales Order'"
+                        (click)="closeSalesOrderByRow(row)">
+                        <i class="pi" [class.pi-lock]="soAction === 'close'" [class.pi-lock-open]="soAction === 'reopen'"></i>
+                      </button>
+                    }
+                  
                   </div>
                 </td>
                 @for (col of visibleRecordColumns(); track col.index) {

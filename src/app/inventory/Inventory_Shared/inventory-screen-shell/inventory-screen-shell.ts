@@ -11524,6 +11524,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // Phase 2 (2.6g): on Stock Inward screens this column carries every policy
     // value (per unit or per line), so it is titled "Policy" there.
     if (this.lineGridColumnIsSerialPicker(column) && this.serialPickerModeForKey() === 'capture') return 'Policy';
+    // Delivery Challan (migration 295): the "SO Qty" cell holds what is still
+    // pending on the Sales Order line (ordered - already dispatched), so name it so.
+    if (this.config?.key === 'deliveryChallan' && column === 'SO Qty') return 'Pending Qty';
     return column;
   }
 
@@ -13680,6 +13683,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           : `Short by ${fmt(short)} here — no stock at other warehouses either`;
         return { message, severity: 'warn' };
       }
+      const overDispatch = this.dcOverDispatchText(row, qty);
+      if (overDispatch) return { message: `${overDispatch} · Available here: ${fmt(hereAvailable)}`, severity: 'warn' };
       return { message: `Available here: ${fmt(hereAvailable)}`, severity: 'info' };
     }
 
@@ -14869,21 +14874,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return ids;
   }
 
-  private filterDeliveryChallanAvailableReferenceDocs(docs: PurchaseRefDoc[]): PurchaseRefDoc[] {
+    private filterDeliveryChallanAvailableReferenceDocs(docs: PurchaseRefDoc[]): PurchaseRefDoc[] {
     if (this.config?.key !== 'deliveryChallan') return docs;
-    const usedSoKeys = this.deliveryChallanUsedSoRefKeys();
+    // Previous: Sales Orders already used by a DC were hidden here (one DC per SO).
+    // Migration 295: an SO stays available while it has pending qty and is not
+    // closed -- the server (sp_get_sales_docs_for_ref) already decides that.
     const usedSiItemIds = this.deliveryChallanUsedSiItemIds();
-    if (!usedSoKeys.size && !usedSiItemIds.size) return docs;
+    if (!usedSiItemIds.size) return docs;
     return docs
-      .filter(doc => {
-        if (this.referenceDocType(doc) !== 'SO' || !usedSoKeys.size) return true;
-        const id = this.optionalNumber(doc.id);
-        const number = String(doc.doc_number || '').trim();
-        const keys = [id ? `id:${id}` : '', number ? `no:${this.normalizeKey(number)}` : ''].filter(Boolean);
-        return !keys.some(key => usedSoKeys.has(key));
-      })
       .map(doc => {
-        if (this.referenceDocType(doc) !== 'SI' || !usedSiItemIds.size) return doc;
+        if (this.referenceDocType(doc) !== 'SI') return doc;
         return { ...doc, items: (doc.items || []).filter((item: any) => !usedSiItemIds.has(Number(item?.id))) };
       })
       .filter(doc => this.referenceDocType(doc) !== 'SI' || (doc.items || []).length > 0);
@@ -16523,8 +16523,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       patch['channelPartnerId'] = v['channelPartnerId'] ?? (doc.channel_partner_id ?? null);
       patch['channelPartner'] = v['channelPartner'] || doc.channel_partner_name || '';
       if (!v['customer']) {
-        const addressSource = docType === 'SO' && doc.remarks ? { address: doc.remarks } : customer;
-        Object.assign(patch, this.dcAddressPatchFromSource(addressSource, false));
+        // Delivery address = the customer's address (read-only), same as picking the customer by hand
+        if (customer) {
+          Object.assign(patch, this.deliveryFromCustomer(customer));
+        } else {
+          const addressSource = docType === 'SO' && doc.remarks ? { address: doc.remarks } : customer;
+          Object.assign(patch, this.dcAddressPatchFromSource(addressSource, false));
+        }
       }
       if (!v['fromWarehouse'] && (doc.warehouse_name || doc.branch_name)) {
         patch['fromWarehouse'] = doc.warehouse_name || doc.branch_name || '';
@@ -16607,12 +16612,23 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // of whatever's already there); every other screen keeps replacing, same
     // as before.
     const appendMode = key === 'deliveryChallan';
-    const startIndex = appendMode ? this.entryLineRows().length : 0;
+    // DC appends picked SO lines; drop the empty rows at the end first (the blank
+    // starter row), so the SO lines don't sit below an empty row. Only trailing
+    // empty rows are dropped, so earlier rows keep their indexes (and their maps).
+    const productIdx = this.lineColumnIndex('Product');
+    const keptRows = (() => {
+      const existing = [...this.entryLineRows()];
+      while (existing.length && productIdx >= 0 && !String(existing[existing.length - 1]?.[productIdx] ?? '').trim()) {
+        existing.pop();
+      }
+      return existing;
+    })();
+    const startIndex = appendMode ? keptRows.length : 0;
     if (rows.length) {
       const applyRows = () => {
         this.entryLineRowsKey.set(key);
-        if (appendMode) {
-          this.entryLineRows.update(existing => [...existing, ...rows]);
+       if (appendMode) {
+          this.entryLineRows.set([...keptRows, ...rows]);
         } else {
           this.entryLineRows.set(rows);
         }
@@ -17109,9 +17125,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // instead — there's no SO leg on that path.
       const orderedQty = Number(item?.qty ?? item?.required_qty ?? item?.requiredQty ?? 0);
       const deliveredQty = Number(item?.delivered_qty ?? item?.deliveredQty ?? 0);
-      const soQty = item?.delivered_qty !== undefined || item?.deliveredQty !== undefined
-        ? String(Math.max(0, orderedQty - deliveredQty))
-        : String(orderedQty || '');
+      // Migration 295: the server's remaining_qty also deducts qty invoiced directly
+      // (without a DC); fall back to ordered - delivered for older servers / SI picks.
+      const serverPending = item?.remaining_qty ?? item?.remainingQty;
+      const soQty = serverPending !== undefined && serverPending !== null
+        ? String(Math.max(0, Number(serverPending) || 0))
+        : item?.delivered_qty !== undefined || item?.deliveredQty !== undefined
+          ? String(Math.max(0, orderedQty - deliveredQty))
+          : String(orderedQty || '');
       const variant = this.referenceItemVariantText(item);
       const attribute = item?.attribute_value || item?.attributeValue || this.referenceItemAttributeText(item);
       const row = this.blankLineRow();
@@ -25741,11 +25762,23 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         attribute_id,
         attribute_name,
         attribute_value,
-        so_qty: this.lineNumber(row, ['so', 'order']),
-        dispatch_qty: this.lineNumber(row, ['dispatch', 'qty']),
+        // Read the exact columns: a loose match on 'qty' used to pick "SO Qty"
+        // (the pending qty) instead of "Dispatch Qty" (migration 295).
+        so_qty: this.dcColumnNumber(row, 'SO Qty'),
+        dispatch_qty: this.dcColumnNumber(row, 'Dispatch Qty'),
         serial_numbers: this.lineSerialUnitsMap()[index] || null
       };
     });
+  }
+
+    /** Number in a DC grid column, by its exact name; null when empty / not a number. */
+  private dcColumnNumber(row: string[], column: string): number | null {
+    const idx = this.lineColumnIndex(column);
+    if (idx < 0) return null;
+    const text = String(row[idx] ?? '').trim();
+    if (!text) return null;
+    const value = this.parseDecimalNumber(text);
+    return Number.isFinite(value) ? value : null;
   }
 
   private salesReturnItems(): any[] {
@@ -26761,14 +26794,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           `Rs. ${Number(r.total_amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
           cap(r.status || 'draft')
         ]);
-      case 'salesOrder':
+        case 'salesOrder':
         return records.map(r => [
           r.doc_number || '',
           r.doc_date || '',
           r.customer_name || '',
           `Rs. ${Number(r.total_amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
           r.delivery_date || '',
-          cap(r.status || 'draft')
+          // posted SOs show their delivery progress (migration 295): Open / Partially Delivered / Delivered / Closed
+          this.salesOrderStatusLabel(r)
         ]);
       case 'purchaseReturn':
         return records.map(r => [
@@ -26866,6 +26900,73 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         return [];
     }
   }
+
+    /** Status text for a saved Sales Order: Draft, or its delivery progress once posted. */
+  salesOrderStatusLabel(r: any): string {
+    const status = String(r?.status || 'draft').toLowerCase();
+    if (status !== 'posted') return status.charAt(0).toUpperCase() + status.slice(1);
+    const delivery = String(r?.delivery_status ?? r?.deliveryStatus ?? '').toLowerCase();
+    const labels: Record<string, string> = {
+      open: 'Open',
+      partially_delivered: 'Partially Delivered',
+      delivered: 'Delivered',
+      closed: 'Closed'
+    };
+    return labels[delivery] || 'Posted';
+  }
+
+    /** DC: "2 more than pending" when Dispatch Qty exceeds the SO line's pending qty (allowed, but flagged). */
+  private dcOverDispatchText(row: string[], qty: number): string {
+    if (this.config?.key !== 'deliveryChallan' || !Number.isFinite(qty)) return '';
+    const pendingIdx = this.lineColumnIndex('SO Qty');
+    if (pendingIdx < 0 || String(row[pendingIdx] ?? '').trim() === '') return '';   // extra line, no SO qty
+    const pending = this.parseDecimalNumber(row[pendingIdx]);
+    if (!Number.isFinite(pending) || qty <= pending) return '';
+    const extra = Math.round((qty - pending) * 1000) / 1000;
+    return `${extra} more than pending on the Sales Order`;
+  }
+
+    /** Saved Sales Order behind a grid row. */
+  private salesOrderRecordForRow(row: string[]): any {
+    return (this.savedRecordObjects() || []).find((r: any) => (r.doc_number || r.docNumber) === row[0]) || null;
+  }
+
+  /** Close is offered on posted, not yet closed / fully delivered Sales Orders; Reopen on closed ones. */
+  salesOrderCloseAction(row: string[]): 'close' | 'reopen' | null {
+    if (this.config?.key !== 'salesOrder') return null;
+    const r = this.salesOrderRecordForRow(row);
+    if (!r || String(r.status || '').toLowerCase() !== 'posted') return null;
+    const delivery = String(r.delivery_status || '').toLowerCase();
+    if (delivery === 'closed') return 'reopen';
+    if (delivery === 'delivered') return null;
+    return 'close';
+  }
+
+  closeSalesOrderByRow(row: string[]): void {
+    const r = this.salesOrderRecordForRow(row);
+    const action = this.salesOrderCloseAction(row);
+    if (!r?.id || !action) return;
+    let reason: string | null = null;
+    if (action === 'close') {
+      reason = (window.prompt(`Close Sales Order ${r.doc_number}? The pending quantities will no longer be delivered.\n\nReason:`) || '').trim();
+      if (!reason) return;                       // cancelled or empty
+    } else if (!window.confirm(`Reopen Sales Order ${r.doc_number}?`)) {
+      return;
+    }
+    this.txService.closeSalesOrder(Number(r.id), reason, action === 'reopen')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: res => {
+          if (!res?.success) { this.saveError.set(res?.message || 'Failed to update the Sales Order.'); return; }
+          const updated = res.data;
+          this.savedRecordObjects.update((list: any[]) => list.map(x => Number(x.id) === Number(r.id) ? { ...x, ...updated } : x));
+          this.saveMsg.set(action === 'close' ? `Sales Order ${r.doc_number} closed.` : `Sales Order ${r.doc_number} reopened.`);
+        },
+        error: (err: any) => this.saveError.set(this.apiErrorMessage(err, 'Failed to update the Sales Order.'))
+      });
+  }
+
+
   // "Brushless Motor × 2 Numbers, Electronic Speed Controller × 2 Numbers"
   // Quantity = what THIS issue gave out (issued qty), not the plan's requirement.
   private materialIssueItemsSummary(items: any[]): string {
