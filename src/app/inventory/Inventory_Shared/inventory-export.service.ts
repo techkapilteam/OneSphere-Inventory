@@ -93,6 +93,13 @@ export interface InventoryExportDocument {
   /** PDF only: header field label (e.g. "Bill To Address") with a full-width
    *  rule drawn just above its row (border to border on a framed page). */
   pdfRuleAboveField?: string;
+  /** PDF only: with pdfRuleAboveField, a vertical line between that row's left
+   *  and right fields (Bill To | Ship To Address), from its rule down to the
+   *  rule above the grid (Sales Invoice). */
+  pdfFieldRowDivider?: boolean;
+  /** PDF only: grouped tax-grid headings containing '%' (e.g. "Rate %") stay on
+   *  one line, the font shrinking just enough to fit (Sales Invoice). */
+  pdfOneLinePercentHead?: boolean;
 
   /** Invoice layout (Purchase Invoice): "Total Invoice Amount In Words" (and notes)
    *  on the left and the totals on the right, in ONE bordered block joined
@@ -783,6 +790,7 @@ export class InventoryExportService {
         doc.setFont('helvetica', 'normal');
       }
       const leftValueWidth = valueWidth + (38 - leftLabelWidth);
+      let fieldDivider: { x: number; top: number } | null = null;
       autoTable(doc, {
         body: fieldRows,
         theme: 'plain',
@@ -804,7 +812,10 @@ export class InventoryExportService {
           if (ruleAboveField && data.section === 'body') {
             const raw = data.row.raw as string[];
             if (this.fieldLabel(raw[0]) === ruleAboveField || this.fieldLabel(raw[2]) === ruleAboveField) {
-              data.cell.styles.cellPadding = { top: 2.6 * s, bottom: 0.8 * s, left: 0.8 * s, right: 0.8 * s };
+              // Previous: left always 0.8 — with pdfFieldRowDivider the right-hand
+              // label (Ship To Address) starts a little clear of the divider.
+              const left = document.pdfFieldRowDivider && data.column.index === 2 ? 2.4 * s : 0.8 * s;
+              data.cell.styles.cellPadding = { top: 2.6 * s, bottom: 0.8 * s, left, right: 0.8 * s };
             }
           }
           const bold = document.boldFieldLabels;
@@ -818,6 +829,11 @@ export class InventoryExportService {
           const raw = data.row.raw as string[];
           if (this.fieldLabel(raw[0]) !== ruleAboveField && this.fieldLabel(raw[2]) !== ruleAboveField) return;
           if (data.column.index === 0) this.drawFullRule(doc, data.cell.y + 0.8 * s);
+          // Remember where the Bill To | Ship To divider goes (left edge of the
+          // right-hand label column, from this row's rule).
+          if (document.pdfFieldRowDivider && data.column.index === 2) {
+            fieldDivider = { x: data.cell.x, top: data.cell.y + 0.8 * s };
+          }
         },
         // Listed fields (Sales Invoice: Bill To / Ship To Address) get a square
         // box around their label + value, each pair its own box.
@@ -836,6 +852,16 @@ export class InventoryExportService {
         }
       });
       y = (doc as any).lastAutoTable.finalY + 3;
+      // Vertical line between Bill To and Ship To Address, joining the rule
+      // above that row to the rule above the grid (or the table's foot).
+      const divider = fieldDivider as { x: number; top: number } | null;
+      if (divider) {
+        const bottom = document.pdfRuleAboveGrid ? y - 1 : y - 3;
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(this.pageFramed ? 0.3 : 0.2);
+        doc.line(divider.x, divider.top, divider.x, bottom);
+        doc.setLineWidth(0.2);
+      }
       // Same rule as under "Branch : …", then the grid (Sales Invoice).
       if (document.pdfRuleAboveGrid) {
         y -= 1;
@@ -871,6 +897,10 @@ export class InventoryExportService {
       // Rate % cells sit centred under their heading, as on the old invoice.
       document.columns.forEach((header, index) => {
         if (/%/.test(header)) columnStyles[index] = { ...columnStyles[index], halign: 'center' };
+        // A little more width so "Rate %" fits on one line (see didParseCell).
+        if (/%/.test(header) && document.pdfOneLinePercentHead) {
+          columnStyles[index] = { ...columnStyles[index], minCellWidth: 9.5 };
+        }
       });
     }
     (document.pdfCenterColumns || []).forEach(index => {
@@ -897,6 +927,21 @@ export class InventoryExportService {
         : { fontSize: 8, cellPadding: 0.8, overflow: 'linebreak', valign: 'middle' } as any,
       columnStyles,
       didParseCell: (data: any) => {
+        // Previous: "Rate %" broke as "Rat / e %" in its narrow column. Now it
+        // prints on ONE straight line, shrinking its font only if needed.
+        if (taxGrid && document.pdfOneLinePercentHead && data.section === 'head'
+          && data.cell.colSpan === 1 && /%/.test(String(data.cell.raw?.content ?? data.cell.raw ?? ''))) {
+          const cell = data.cell;
+          cell.styles.overflow = (text: string | string[], space: number) => {
+            const value = (Array.isArray(text) ? text : [String(text ?? '')]).join(' ').trim();
+            const width = doc.getTextWidth(value);
+            if (width > space && width > 0) {
+              cell.styles.fontSize = cell.styles.fontSize * space / width;
+              doc.setFontSize(cell.styles.fontSize);
+            }
+            return [value];
+          };
+        }
         // Bold and the same 9pt as the header labels (e.g. "Cheque Date :").
         // Previous: if (document.boldRows && data.section === 'body') data.cell.styles.fontStyle = 'bold';
         if (document.boldRows && data.section === 'body') {

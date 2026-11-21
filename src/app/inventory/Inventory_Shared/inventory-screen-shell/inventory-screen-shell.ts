@@ -93,6 +93,8 @@ interface GridExportPayload {
   pdfCenterColumns?: number[];
   pdfPageFrame?: boolean;
   pdfRuleAboveField?: string;
+  pdfFieldRowDivider?: boolean;
+  pdfOneLinePercentHead?: boolean;
   copyType?: string;
   terms?: string[];
   bankDetails?: Array<[string, string]>;
@@ -9150,6 +9152,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       pdfPageFrame: true,
       // Border-to-border rule above the Bill To / Ship To Address row (2026-11-20).
       pdfRuleAboveField: 'Bill To Address',
+      // Vertical line between Bill To and Ship To Address, and "Rate %" grid
+      // headings on one straight line (user request 2026-11-21).
+      pdfFieldRowDivider: true,
+      pdfOneLinePercentHead: rows.length ? true : undefined,
       boldCellSegments: rows.length ? this.documentSerialSegments(record) : undefined,
       fileName: `Sales_Invoice_${docNo || 'Selected_Record'}`
     };
@@ -9525,6 +9531,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       pdfCenterColumns: payload.pdfCenterColumns,
       pdfPageFrame: payload.pdfPageFrame,
       pdfRuleAboveField: payload.pdfRuleAboveField,
+      pdfFieldRowDivider: payload.pdfFieldRowDivider,
+      pdfOneLinePercentHead: payload.pdfOneLinePercentHead,
       copyType: payload.copyType,
       terms: payload.terms,
       bankDetails: payload.bankDetails,
