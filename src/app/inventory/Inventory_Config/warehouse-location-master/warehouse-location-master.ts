@@ -10,6 +10,7 @@ import {
 import { applyInventoryTextCase, toInventoryTitleCase } from '../../Inventory_Shared/inventory-text-case.util';
 import { warehouseLocationMasterConfig } from '../../Inventory_Shared/inventory-screen.model';
 import { InventoryScreenShell } from '../../Inventory_Shared/inventory-screen-shell/inventory-screen-shell';
+import { attachInventorySaveToast } from '../../Inventory_Shared/inventory-save-toast/inventory-save-toast.component';
 
 const INDIAN_STATES = [
   'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
@@ -80,6 +81,10 @@ export class InventoryWarehouseLocationMasterComponent implements OnInit {
   saving    = signal(false);
   saveMsg   = signal('');
   saveError = signal('');
+
+  constructor() {
+    attachInventorySaveToast(this.saveMsg, this.saveError);
+  }
 
   readonly indianStates  = INDIAN_STATES;
   readonly capacityUnits = CAPACITY_UNITS;

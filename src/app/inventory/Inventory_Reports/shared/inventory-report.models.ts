@@ -127,7 +127,10 @@ export const INVENTORY_COMMON_REPORT_FILTERS: InventoryReportFilterDefinition[] 
   { key: 'companyId', label: 'Company', type: 'multiselect', placeholder: 'Select company', options: INVENTORY_REPORT_COMPANY_OPTIONS },
   { key: 'branchId', label: 'Branch', type: 'multiselect', placeholder: 'Select branch', options: INVENTORY_OPTIONS.branches },
   { key: 'segmentId', label: 'Segment', type: 'multiselect', placeholder: 'Select segment', options: INVENTORY_OPTIONS.segments },
-  { key: 'financialYear', label: 'Financial Year', type: 'multiselect', placeholder: 'Select financial year', options: ['2026-2027', '2025-2026', '2024-2025'] },
+  // Previous: { key: 'financialYear', label: 'Financial Year', type: 'multiselect', placeholder: 'Select financial year', options: ['2026-2027', '2025-2026', '2024-2025'] },
+  // One financial year at a time: a single-select shows the chosen year as plain
+  // text instead of a multi-select chip that got clipped in the 34px header box.
+  { key: 'financialYear', label: 'Financial Year', type: 'select', placeholder: 'Select financial year', options: ['2026-2027', '2025-2026', '2024-2025'] },
   { key: 'warehouseId', label: 'Warehouse', type: 'multiselect', placeholder: 'Select warehouse / location', options: INVENTORY_OPTIONS.locations },
   { key: 'fromDate', label: 'Date From', type: 'date' },
   { key: 'toDate', label: 'Date To', type: 'date' },

@@ -4,7 +4,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { InventoryScreenShell } from './inventory-screen-shell';
 import { InventoryScreenConfig } from '../inventory-screen.model';
 
-// The Print / Export PDF / Export Excel / Mail toolbar icons above every
+// The Print / Export PDF / Export Excel toolbar icons above every
 // transaction screen's "Existing Saved" grid.
 //
 // SUPERSEDES item 16. That requirement tied these icons to the status of the

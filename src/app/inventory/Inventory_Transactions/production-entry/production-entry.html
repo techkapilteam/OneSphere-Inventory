@@ -52,6 +52,7 @@
             <div class="erp-form-group">
               <label class="erp-label">{{ numField.label }}</label>
               <input class="erp-input" type="text"
+                readonly
                 [ngModel]="transactionNumberValue(numField)"
                 (ngModelChange)="collectFormField(numField.key, $event)"
                 [placeholder]="transactionNumberPlaceholder(numField)" />
@@ -66,6 +67,7 @@
                   (ngModelChange)="collectFormField(dateField.key, $event)"
                   [ngModelOptions]="{ standalone: true }"
                   [maxDate]="transactionDateFieldMaxDate(dateField)"
+                  [minDate]="minTransactionDate()"
                   dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY"
                   [readonlyInput]="true" [showIcon]="false" appendTo="body"
                   styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100">
@@ -111,7 +113,8 @@
                 </label>
               } @else if (field.type === 'select' || field.type === 'multiselect') {
                 <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
-                  [items]="field.options || []" [searchable]="true" [clearable]="true"
+                  [items]="field.options || []" [searchable]="!isLoginBranchLockedField(field) && field.key !== 'finishedProduct'" [clearable]="!isLoginBranchLockedField(field) && field.key !== 'finishedProduct'"
+                  [readonly]="isLoginBranchLockedField(field) || field.key === 'finishedProduct'"
                   [multiple]="field.type === 'multiselect'"
                   [closeOnSelect]="field.type !== 'multiselect'"
                   [ngModel]="formFieldValue(field)"
@@ -132,7 +135,9 @@
                   <i class="pi pi-calendar inventory-date-icon"></i>
                 </div>
               } @else if (field.type === 'number') {
-                <input class="erp-input" type="number"
+                  <input class="erp-input" type="number" min="0"
+                  [readonly]="field.key === 'productionCost'"
+                  [style.border-color]="field.key === 'producedQty' && productionEntryQtyLimitText() ? '#dc2626' : null"
                   [ngModel]="formFieldValue(field)"
                   (ngModelChange)="collectFormField(field.key, $event)"
                   [placeholder]="fieldTypingHint(field)" />
@@ -142,12 +147,13 @@
                   (ngModelChange)="collectFormField(field.key, $event)"
                   [placeholder]="fieldTypingHint(field)"></textarea>
               } @else {
-                <input class="erp-input" type="text"
+                  <input class="erp-input" type="text"
+                  [readonly]="field.key === 'producibleQty'"
                   [ngModel]="formFieldValue(field)"
                   (ngModelChange)="collectFormField(field.key, $event)"
-                  [placeholder]="fieldTypingHint(field)" />
+                  [placeholder]="field.key === 'producibleQty' ? 'From the Production Plan' : fieldTypingHint(field)" />
               }
-              @if (field.addMaster) {
+                @if (field.addMaster && field.key !== 'finishedProduct') {
                 <button type="button" class="erp-btn btn-white btn-icon"
                   [title]="'Add ' + field.addMaster"
                   (click)="openFieldAddMaster(field)">
@@ -155,6 +161,11 @@
                 </button>
               }
             </div>
+            @if (field.key === 'producedQty' && productionEntryQtyLimitText(); as limitText) {
+              <small style="display:block; margin-top:4px; color:#dc2626; font-size:12px;">
+                <i class="pi pi-exclamation-circle" style="font-size:11px"></i> {{ limitText }}
+              </small>
+            }
           </div>
         }
       </div>
@@ -162,10 +173,16 @@
       @if (config.lineColumns?.length) {
         <div class="inventory-line-items grn-grid-compact">
           <div class="inventory-line-title">
-            <div>
+            <!-- <div>
               <strong>{{ config.lineTitle || 'Line Items' }}</strong>
               <span>Add, edit or remove rows directly here before saving this document.</span>
+            </div> -->
+                      <div class="inventory-line-title">
+            <div>
+              <strong>{{ config.lineTitle || 'Line Items' }}</strong>
+              <span>From the Production Plan. Enter Produced / Rejected Qty above and the serial numbers of the produced units.</span>
             </div>
+          </div>
             <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" aria-label="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button>
           </div>
           <div class="tbl-wrap">
@@ -174,7 +191,7 @@
             <table class="erp-table compact inventory-resizable-table">
               <thead>
                 <tr>
-                  <th class="text-center">Actions</th>
+                  <!-- <th class="text-center">Actions</th> -->
                   @for (column of renderedColumns; track column) {
                     <th [class]="lineGridColumnCssClass(column)" [style.width]="lineGridColumnWidthPx(column)">
                       {{ lineGridColumnHeader(column) }}
@@ -186,12 +203,12 @@
               <tbody>
                 @for (row of directEntryLineRows(); track $index; let rowIndex = $index) {
                   <tr>
-                    <td class="text-center">
+                    <!-- <td class="text-center">
                       <div class="inventory-row-actions">
                         <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button>
                         <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove row" (click)="removeEntryLineRow(rowIndex)"><i class="pi pi-trash"></i></button>
                       </div>
-                    </td>
+                    </td> -->
                     @let rowView = rowViews[rowIndex];
                     @for (column of renderedColumns; track column) {
                       @let columnIndex = lineGridSourceColumnIndex(column);
@@ -202,7 +219,7 @@
                           <span class="inventory-grid-na">N/A</span>
                         } @else if (lineGridCellReadonly(rowIndex, row, column)) {
                           <span class="inventory-grid-static-value">{{ lineGridReadonlyCellText(rowIndex, row, column, cellView, rowView) || '-' }}</span>
-                        } @else if (lineGridColumnIsSerialPicker(column) && isSerialApplicableRow(row)) {
+                        } @else if (lineGridColumnIsSerialPicker(column) && (isSerialApplicableRow(row) || rowHasLinePolicies(row))) {
                           <button type="button" class="erp-btn btn-white btn-sm inventory-serial-trigger" (click)="openSerialPicker(rowIndex, row)">
                             {{ serialPickerSummaryForRow(rowIndex, row) }}
                           </button>
@@ -246,6 +263,20 @@
                   </tr>
                 }
               </tbody>
+              <tfoot>
+                <tr class="inventory-line-total-row">
+                  <!-- <td class="text-center"></td> -->
+                  @for (column of renderedColumns; track column; let first = $first) {
+                    <td>
+                      @if (first) {
+                        <strong>Total</strong>
+                      } @else {
+                        <strong>{{ lineFooterCellText(column) }}</strong>
+                      }
+                    </td>
+                  }
+                </tr>
+              </tfoot>
             </table>
           </div>
         </div>
@@ -343,7 +374,6 @@
             <button type="button" class="erp-btn btn-white btn-sm" title="Print"><i class="pi pi-print"></i></button>
             <button type="button" class="erp-btn btn-white btn-sm" title="Export PDF"><i class="pi pi-file-pdf"></i></button>
             <button type="button" class="erp-btn btn-white btn-sm" title="Export Excel"><i class="pi pi-file-excel"></i></button>
-            <button type="button" class="erp-btn btn-white btn-sm" title="Mail"><i class="pi pi-envelope"></i></button>
           }
           <span class="inventory-grid-divider"></span>
           <div class="inventory-grid-pager">
@@ -379,11 +409,11 @@
                 <td class="text-center">
                   <div class="inventory-row-actions">
                     @if (isAdmin()) {
-                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
+                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit" [disabled]="!canEditOrDeleteRow(row)" (click)="editRecordByRow(row)"><i class="pi pi-pencil"></i></button>
                       @if (isManufacturingDraftRow(row)) {
                         <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Post" (click)="postManufacturingRecordByRow(row)"><i class="pi pi-check-circle"></i></button>
                       }
-                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete"><i class="pi pi-trash"></i></button>
+                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Delete" [disabled]="!canEditOrDeleteRow(row)"><i class="pi pi-trash"></i></button>
                     }
                   </div>
                 </td>
@@ -406,7 +436,7 @@
       <div class="inventory-modal inventory-pr-items-modal" (click)="$event.stopPropagation()">
         <div class="inventory-modal-header">
           <h3>{{ transactionReferencePickerTitle(null) }}</h3>
-          <button type="button" class="erp-btn btn-white btn-icon btn-sm" (click)="closePurchaseReferencePicker()">
+          <button title="Close" type="button" class="erp-btn btn-white btn-icon btn-sm" (click)="closePurchaseReferencePicker()">
             <i class="pi pi-times"></i>
           </button>
         </div>

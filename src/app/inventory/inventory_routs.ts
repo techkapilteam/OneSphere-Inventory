@@ -347,6 +347,14 @@ export const inventoryRoutes: Routes = [
           .then(m => m.InventoryProductionEntryComponent)
       },
       {
+        path: 'uin-registration',
+        // Same permission as Production Entry for now: whoever records production
+        // can also register the UINs. A separate key can be added later.
+        canActivate: [screenPermissionGuard('INV_T_PROD_ENTRY')],
+        loadComponent: () => import('./Inventory_Transactions/uin-registration/uin-registration')
+          .then(m => m.InventoryUinRegistrationComponent)
+      },
+      {
         path: 'production-return',
         canActivate: [screenPermissionGuard('INV_T_PROD_RETURN')],
         loadComponent: () => import('./Inventory_Transactions/production-return/production-return')
@@ -392,6 +400,21 @@ export const inventoryRoutes: Routes = [
           .then(m => m.InventoryCreditNoteComponent)
       },
       { path: '', redirectTo: 'purchase-requisition', pathMatch: 'full' }
+    ]
+  },
+  {
+    // Lease & Meter Billing (always available)
+    path: 'lease',
+    children: [
+      { path: 'contracts', canActivate: [screenPermissionGuard('INV_LEASE_CONTRACT')],
+        loadComponent: () => import('./Inventory_Lease/lease-contracts/lease-contracts').then(m => m.InventoryLeaseContractsComponent) },
+      { path: 'readings', canActivate: [screenPermissionGuard('INV_LEASE_READINGS')],
+        loadComponent: () => import('./Inventory_Lease/meter-readings/meter-readings').then(m => m.InventoryMeterReadingsComponent) },
+      { path: 'billing', canActivate: [screenPermissionGuard('INV_LEASE_BILLING')],
+        loadComponent: () => import('./Inventory_Lease/lease-billing/lease-billing').then(m => m.InventoryLeaseBillingComponent) },
+      { path: 'reports', canActivate: [screenPermissionGuard('INV_LEASE_REPORTS')],
+        loadComponent: () => import('./Inventory_Lease/lease-reports/lease-reports').then(m => m.InventoryLeaseReportsComponent) },
+      { path: '', redirectTo: 'contracts', pathMatch: 'full' }
     ]
   },
   {

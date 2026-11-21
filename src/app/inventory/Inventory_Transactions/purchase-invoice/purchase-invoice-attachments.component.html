@@ -1,7 +1,7 @@
 <div class="erp-form-group purchase-invoice-attachment-field">
-  <label class="erp-label">Attachment PI Ref</label>
+  <label class="erp-label">Attachment PI Ref <span class="text-danger">*</span></label>
 
-  <div class="purchase-invoice-attachment-box" [class.is-busy]="uploadPending()">
+  <div class="purchase-invoice-attachment-box" [class.is-busy]="uploadPending()" [class.is-required-missing]="requiredError()">
     <div class="purchase-invoice-attachment-toolbar">
       <label class="purchase-invoice-file-picker" [class.is-disabled]="uploadPending()" title="Attach file">
         <input type="file" [attr.accept]="acceptAttr" [disabled]="uploadPending()" (change)="onFileSelected($event)" />
@@ -20,6 +20,9 @@
       }
     </div>
 
+    @if (requiredError()) {
+      <div class="inventory-error-msg purchase-invoice-attachment-error">Attachment PI Ref is mandatory. Attach the PI file before saving.</div>
+    }
     @if (uploadError()) {
       <div class="inventory-error-msg purchase-invoice-attachment-error">{{ uploadError() }}</div>
     }
@@ -74,7 +77,7 @@
     <div class="inventory-modal purchase-invoice-attachment-modal" (click)="$event.stopPropagation()">
       <div class="inventory-modal-header">
         <h3>{{ previewName() }}</h3>
-        <button type="button" class="erp-btn btn-white btn-icon btn-sm" (click)="closePreview()">
+        <button title="Close" type="button" class="erp-btn btn-white btn-icon btn-sm" (click)="closePreview()">
           <i class="pi pi-times"></i>
         </button>
       </div>

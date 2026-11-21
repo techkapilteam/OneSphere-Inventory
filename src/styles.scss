@@ -3706,13 +3706,9 @@ input[type='date'].erp-input {
   .erp-btn:has(.pi-file-pdf),
   .erp-btn:has(.pi-file-excel),
   .erp-btn:has(.pi-download),
-  .erp-btn:has(.pi-envelope),
-  .erp-btn:has(.pi-whatsapp),
   .icon-action:has(.pi-print),
   .icon-action:has(.pi-file-pdf),
-  .icon-action:has(.pi-file-excel),
-  .icon-action:has(.pi-envelope),
-  .icon-action:has(.pi-whatsapp) {
+  .icon-action:has(.pi-file-excel) {
     width: 34px;
     min-width: 34px;
     height: 32px;
@@ -3736,8 +3732,6 @@ input[type='date'].erp-input {
   :has(.pi-file-pdf) { order: 2; }
   :has(.pi-file-excel),
   :has(.pi-download) { order: 3; }
-  :has(.pi-envelope) { order: 4; }
-  :has(.pi-whatsapp) { order: 5; }
 }
 
 /* Table wrapper */
@@ -8873,7 +8867,36 @@ body .p-connected-overlay {
 
 .inv-modal-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
+
+  .inv-modal-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+
+    i {
+      position: absolute;
+      left: 10px;
+      font-size: 12px;
+      color: #94a3b8;
+      pointer-events: none;
+    }
+
+    input {
+      width: 220px;
+      height: 34px;
+      padding: 0 10px 0 30px;
+      border: 1px solid #dbe8f9;
+      border-radius: 8px;
+      background: #fff;
+      color: #1e293b;
+      font-size: 13px;
+      outline: none;
+
+      &:focus { border-color: #2456d6; box-shadow: 0 0 0 2px rgba(36, 86, 214, 0.12); }
+    }
+  }
 
   button {
     width: 34px;
@@ -9128,8 +9151,20 @@ body .p-connected-overlay {
   }
 
   &.inventory-generic-report-page .inventory-report-header-top-filters {
-    grid-template-columns: minmax(178px, max-content) minmax(258px, max-content);
+    // Previous: grid-template-columns: minmax(178px, max-content) minmax(258px, max-content);
+    // Two more columns: the date filter(s) moved up next to Branch / Warehouse.
+    grid-template-columns: minmax(178px, max-content) minmax(258px, max-content) repeat(2, max-content);
     justify-content: flex-start;
+  }
+
+  // Date filters in the top row keep their own widths: range box 230px,
+  // Stock Summary's single From / To pickers 154px each.
+  .inventory-report-header-top-filters .inventory-report-filter.inventory-report-filter--date {
+    width: 230px;
+  }
+
+  .inventory-report-header-top-filters .inventory-report-filter--date.inventory-report-filter--date-single {
+    width: 154px;
   }
 
   .inventory-report-header-top-filters .inventory-report-filter,
@@ -9151,6 +9186,12 @@ body .p-connected-overlay {
 
   .inventory-report-header-controls .inventory-report-filter--date {
     flex-basis: 230px;
+  }
+
+  // Stock Summary: separate From Date / To Date pickers each hold one date,
+  // so they take the normal filter width instead of the wider range box.
+  .inventory-report-header-controls .inventory-report-filter--date.inventory-report-filter--date-single {
+    flex-basis: 154px;
   }
 
   .inventory-report-header-controls .inventory-report-filter--group {
@@ -10452,6 +10493,11 @@ body .p-connected-overlay {
   margin-bottom: 12px;
 }
 
+/* Guide panel now has two cards (Use, Steps) — the video moved to the top-bar icon. */
+.inventory-advice-grid--short {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
+}
+
 .inventory-advice-card {
   min-width: 0;
   padding: 12px;
@@ -10894,36 +10940,57 @@ body .p-connected-overlay {
   border-top: 1px solid #dbe8f9;
 }
 
-.inventory-save-msg {
+/* Page messages (Inventory): same look as the toast - white card, coloured left bar, dot, X. */
+.inventory-save-msg,
+.inventory-save-error {
+  --erp-msg-accent: #16a34a;
+  --erp-msg-bg: #f0fdf4;
+  --erp-msg-border: #bbf7d0;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  font-size: 13px;
-  font-weight: 500;
-  padding: 8px 10px 8px 12px;
-  border-radius: 8px;
+  gap: 12px;
   margin: 10px 0;
-  color: #166534;
-  background: #dcfce7;
-  border: 1px solid #86efac;
-  &.save-ok  { color: #166534; background: #dcfce7; }
-  &.save-err { color: #991b1b; background: #fee2e2; }
+  padding: 11px 12px 11px 42px;
+  border: 1px solid var(--erp-msg-border);
+  border-left: 4px solid var(--erp-msg-accent);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #fff 0%, var(--erp-msg-bg) 100%);
+  color: #334155;
+  font-family: 'Poppins', sans-serif;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
 }
 
-.inventory-save-error {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 13px;
-  font-weight: 500;
-  padding: 8px 10px 8px 12px;
-  border-radius: 8px;
-  margin: 10px 0;
-  color: #991b1b;
-  background: #fee2e2;
-  border: 1px solid #fca5a5;
+.inventory-save-msg::before,
+.inventory-save-error::before {
+  content: '';
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  border-radius: 999px;
+  background: var(--erp-msg-accent);
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--erp-msg-accent) 14%, transparent);
+}
+
+.inventory-save-error,
+.inventory-save-msg.save-err {
+  --erp-msg-accent: #dc2626;
+  --erp-msg-bg: #fff1f2;
+  --erp-msg-border: #fecdd3;
+}
+
+.inventory-save-msg a {
+  margin-left: 8px;
+  font-weight: 600;
+  color: var(--erp-msg-accent);
+  text-decoration: underline;
 }
 
 .inventory-alert-close {
@@ -10931,17 +10998,22 @@ body .p-connected-overlay {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   border: none;
   background: transparent;
-  color: inherit;
-  opacity: .65;
+  color: #64748b;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 12px;
+  transition: background 0.15s, color 0.15s;
+}
 
-  &:hover { opacity: 1; background: rgba(0, 0, 0, 0.06); }
+.inventory-alert-close:hover,
+.inventory-alert-close:focus-visible {
+  background: rgba(15, 23, 42, 0.08);
+  color: #0f172a;
+  outline: none;
 }
 
 .inventory-grid-range {
@@ -11451,7 +11523,7 @@ body .p-connected-overlay {
 // Accounts shell (only the host's global styles.scss applies at runtime) --
 // this rule is mirrored byte-for-byte in OneSphere-Accounts/src/styles.scss.
 .grn-grid-compact.inventory-line-items .erp-table.compact td.inventory-line-col-product {
-  vertical-align: middle;
+  vertical-align: top;
 }
 
 .grn-grid-compact.inventory-line-items .erp-table.compact th.inventory-line-col-qty,
@@ -13284,7 +13356,11 @@ body .ng-dropdown-panel.ap-switch-ng-select .ng-option.ng-option-selected::after
   position: sticky;
   top: 68px; // sits flush under .breadcrumb-bar (main-layout.component.scss), which is sticky at top: 0
   z-index: 150; // above form content, below .breadcrumb-bar (z-index 200)
-  margin: -20px 0 14px; // tightens the gap under the Business Segment bar above it
+  // -14px exactly cancels .product-segment-bar's 14px margin-bottom, so the tab bar
+  // sits flush under the segment bar instead of overlapping its bottom border
+  // (-20px pulled it 6px into the box). It also keeps the pinned/unpinned layout
+  // the same height, since the JS pin swaps this bar for a spacer with margin 0.
+  margin: -14px 0 14px;
   padding: 10px 0;
   background: var(--page-bg, #fff);
   border-bottom: 1px solid rgba(15, 23, 42, 0.06);
@@ -15010,8 +15086,23 @@ body .ng-dropdown-panel.ap-switch-ng-select .ng-option.ng-option-selected::after
   padding: 0;
   min-width: 0;
 
+  // This wrapper sits inside .inventory-branch-form, so its 12px grid gap
+  // never reaches the section cards nested here -- restore the same gap.
+  > .inventory-fieldset + .inventory-fieldset {
+    margin-top: 12px;
+  }
+
   &:disabled {
     opacity: 0.65;
     pointer-events: none;
   }
+}
+
+// Transaction records grid: Edit/Delete stay visible on Posted/Cancelled rows
+// but are disabled (Draft rows only) -- grey them out so they read as locked.
+// Same rule as OneSphere-Accounts/src/styles.scss (the host that applies when
+// Inventory is loaded inside Accounts); kept here for standalone runs.
+.inventory-row-actions .erp-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }

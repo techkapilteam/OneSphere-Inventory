@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component } from '@angular/core';
+import { Component, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { NgSelectModule } from '@ng-select/ng-select';
@@ -19,4 +19,6 @@ export class InventoryCategoryMasterComponent extends InventoryScreenShell {
   // embedded (via its selector) inside Business Segment configuration, which requires
   // Angular to be able to bind the required `config` input explicitly at that call site.
   override config = categoryMasterConfig;
+
+  readonly uinGuideVisible = signal(false);
 }
