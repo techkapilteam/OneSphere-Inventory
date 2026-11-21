@@ -181,6 +181,22 @@ export class PaymentReceiptVoucherComponent {
   readonly saveMsg = signal('');
   readonly saveError = signal('');
 
+  /** Keeps the toast above the sticky Save bar. */
+  readonly toastBottom = computed(() => (this.footerOffset.offsetPx() + 24) + 'px');
+
+  // Settlement: net invoices against credit / debit notes with no cash or bank mode (same screen, same save).
+  readonly settlementMode = signal(false);
+
+  /** Error / info messages: kept in the signals and shown as a bottom-right toast with a timer and an X. */
+  private notifyError(message: string): void {
+    this.saveError.set(message);
+    this.messageService.add({ severity: 'error', summary: 'Error', detail: message, life: 7000 });
+  }
+  private notifyInfo(message: string): void {
+    this.saveMsg.set(message);
+    this.messageService.add({ severity: 'info', summary: 'Info', detail: message, life: 5000 });
+  }
+
   readonly partyType = computed<'vendor' | 'customer'>(() => this.mode() === 'pay' ? 'vendor' : 'customer');
   readonly partyLabel = computed(() => this.mode() === 'pay' ? 'Vendor' : 'Customer');
   readonly docLabel = computed(() => this.mode() === 'pay' ? 'Purchase Invoice' : 'Sales Invoice');
@@ -188,7 +204,9 @@ export class PaymentReceiptVoucherComponent {
   readonly guideConfig = computed(() => this.mode() === 'pay' ? vendorPaymentConfig : customerReceiptConfig);
   readonly cashLimit = computed(() => this.mode() === 'pay' ? CASH_PAYMENT_LIMIT : CASH_RECEIPT_LIMIT);
 
-  readonly multiPartySelect = computed(() => this.mode() === 'receipt');
+  // One customer / vendor per voucher on both Customer Receipt and Vendor Payment. (The per-party multi-voucher
+  // handling below is kept but is no longer reachable from the picker.)
+  readonly multiPartySelect = computed(() => false);
   readonly partySelectModel = computed(() =>
     this.multiPartySelect() ? this.selectedPartyIds() : (this.selectedPartyIds()[0] ?? null));
 
@@ -391,6 +409,31 @@ export class PaymentReceiptVoucherComponent {
     this.hasParty() && (this.totalAllocated() > 0 || this.modeTotal() > 0 || this.totalNotesApplied() > 0) && !this.isSaving()
   );
 
+  /** Settlement button: only the settlement controls are shown (no payment / receipt modes). */
+  toggleSettlement(): void {
+    const on = !this.settlementMode();
+    this.settlementMode.set(on);
+    this.saveError.set('');
+    if (on) this.modeRows.set([]);
+  }
+
+  /** Settles the ticked invoices against the ticked notes; nothing goes through cash or bank. */
+  settle(): void {
+    this.saveError.set(''); this.saveMsg.set('');
+    const rows = this.partySummaries().filter(s => s.allocated > 0.005 || s.notes > 0.005);
+    const doc = this.docLabel().toLowerCase();
+    const note = this.mode() === 'pay' ? 'debit note' : 'credit note';
+    if (!rows.length) { this.notifyError(`Tick the ${doc}s to settle and the ${note}s to apply.`); return; }
+    for (const s of rows) {
+      const who = this.isMultiParty() ? `${s.name}: ` : '';
+      if (s.allocated <= 0.005) { this.notifyError(`${who}tick at least one ${doc} to settle.`); return; }
+      if (s.notes <= 0.005) { this.notifyError(`${who}tick the ${note} to settle with.`); return; }
+      if (s.notes > s.allocated + 0.5) { this.notifyError(`${who}the ${note}s applied (${this.fmt(s.notes)}) are more than the ${doc}s (${this.fmt(s.allocated)}). Reduce the Apply Amount to ${this.fmt(s.allocated)}.`); return; }
+      if (s.reference >= 0.5) { this.notifyError(`${who}the ${note}s applied (${this.fmt(s.notes)}) do not cover the ${doc}s (${this.fmt(s.allocated)}). Raise the Apply Amount, or turn Settlement off and add a ${this.mode() === 'pay' ? 'payment' : 'receipt'} mode for the balance.`); return; }
+    }
+    this.save();
+  }
+
   private singlePartyId(): number | null {
     const ids = this.selectedPartyIds();
     return ids.length === 1 ? ids[0] : null;
@@ -416,6 +459,7 @@ export class PaymentReceiptVoucherComponent {
     // hasServiceAllocation() (see its getter below), no separate manual
     // toggle to keep in sync.
     effect(() => { if (!this.hasServiceAllocation()) this.tdsSection.set(''); });
+    effect(() => { if (this.settlementMode() && !this.availableNotes().length) this.settlementMode.set(false); });
 
     this.paymentsService.getTdsCodes().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: res => this.tdsCodes.set(res.data ?? []),
@@ -677,7 +721,7 @@ export class PaymentReceiptVoucherComponent {
       }
       this.narration.set(text);
       if (skipped > 0) {
-        this.saveMsg.set(`Narration limit (${this.narrationMaxLength} characters) reached — ${skipped} invoice number(s) not added to narration.`);
+        this.notifyInfo(`Narration limit (${this.narrationMaxLength} characters) reached — ${skipped} invoice number(s) not added to narration.`);
       }
     }
     this.selectedInvoiceIds.set(next);
@@ -779,7 +823,7 @@ export class PaymentReceiptVoucherComponent {
 
   autoAllocate(): void {
     let amt = this.quickAmount();
-    if (amt <= 0) { this.saveError.set('Enter an amount to auto-allocate.'); return; }
+    if (amt <= 0) { this.notifyError('Enter an amount to auto-allocate.'); return; }
     const sorted = [...this.outstandingInvoices()].sort((a, b) =>
       new Date(a.due_date || a.invoice_date || '').getTime() - new Date(b.due_date || b.invoice_date || '').getTime());
     const ids = new Set<number>();
@@ -794,7 +838,7 @@ export class PaymentReceiptVoucherComponent {
     this.setSelectedInvoices(ids);
     this.allocAmounts.set(alloc);
     this.saveError.set('');
-    if (amt > 0.005) this.saveMsg.set(`${this.fmt(amt)} left unallocated after auto-allocating.`);
+    if (amt > 0.005) this.notifyInfo(`${this.fmt(amt)} left unallocated after auto-allocating.`);
   }
 
   addMode(): void {
@@ -910,7 +954,7 @@ export class PaymentReceiptVoucherComponent {
   // Amount, narration, Approved / Verified / Posted By).
   exportVoucherList(action: 'Pdf' | 'Print' | 'Excel'): void {
     const list = this.vouchers();
-    if (!list.length) { this.saveMsg.set('No rows available for this action.'); return; }
+    if (!list.length) { this.notifyInfo('No rows available for this action.'); return; }
     const title = this.mode() === 'pay' ? 'Vendor Payments' : 'Customer Receipts';
     const exportDoc: InventoryExportDocument = {
       title,
@@ -1168,22 +1212,22 @@ export class PaymentReceiptVoucherComponent {
 
   save(): void {
     const parties = this.selectedParties();
-    if (!parties.length) { this.saveError.set('Select a ' + this.partyLabel().toLowerCase() + ' first.'); return; }
+    if (!parties.length) { this.notifyError('Select a ' + this.partyLabel().toLowerCase() + ' first.'); return; }
     const multi = this.isMultiParty();
     const activeModeRows = this.modeRows().filter(r => r.amount > 0);
     if (this.cashLimitExceeded()) {
       const over = multi ? this.partySummaries().find(s => s.cashTotal > this.cashLimit() + 0.005) : undefined;
-      this.saveError.set(over ? `${over.name}: ${this.cashLimitMessage()}` : this.cashLimitMessage());
+      this.notifyError(over ? `${over.name}: ${this.cashLimitMessage()}` : this.cashLimitMessage());
       return;
     }
     const invalidRow = activeModeRows.find(r => !r.details.isValid);
     if (invalidRow) {
-      this.saveError.set('Complete the required fields for each ' + (this.mode() === 'pay' ? 'payment' : 'receipt') + ' mode before saving.');
+      this.notifyError('Complete the required fields for each ' + (this.mode() === 'pay' ? 'payment' : 'receipt') + ' mode before saving.');
       this.modeSelectors?.forEach(c => c.markAllTouched());
       return;
     }
     if (multi && activeModeRows.some(r => r.partyId == null)) {
-      this.saveError.set(`Select the ${this.partyLabel().toLowerCase()} for each ${this.mode() === 'pay' ? 'payment' : 'receipt'} mode.`);
+      this.notifyError(`Select the ${this.partyLabel().toLowerCase()} for each ${this.mode() === 'pay' ? 'payment' : 'receipt'} mode.`);
       return;
     }
 
@@ -1212,18 +1256,18 @@ export class PaymentReceiptVoucherComponent {
       return { party, allocations, noteAllocations, modes, reference: summaries.get(party.id)?.reference ?? 0, modeTotal: rows.reduce((s, r) => s + r.amount, 0) };
     }).filter(d => d.allocations.length || d.noteAllocations.length || d.modes.length);
 
-    if (!drafts.length) { this.saveError.set('Nothing to save — allocate an amount.'); return; }
+    if (!drafts.length) { this.notifyError('Nothing to save — allocate an amount.'); return; }
     const noMode = drafts.find(d => d.modes.length === 0 && d.reference > 0.005);
     if (noMode) {
-      this.saveError.set('Add at least one ' + (this.mode() === 'pay' ? 'payment' : 'receipt') + ' mode' + (multi ? ` for ${this.partyName(noMode.party)}.` : '.'));
+      this.notifyError('Add at least one ' + (this.mode() === 'pay' ? 'payment' : 'receipt') + ' mode' + (multi ? ` for ${this.partyName(noMode.party)}.` : '.'));
       return;
     }
     if (this.mode() === 'pay' && this.tdsApplicable() && !this.tdsSection()) {
-      this.saveError.set('This payment includes a Service invoice — select the applicable TDS section.');
+      this.notifyError('This payment includes a Service invoice — select the applicable TDS section.');
       return;
     }
     if (this.narration().trim().length > this.narrationMaxLength) {
-      this.saveError.set(`Narration cannot exceed ${this.narrationMaxLength} characters — shorten it before saving.`);
+      this.notifyError(`Narration cannot exceed ${this.narrationMaxLength} characters — shorten it before saving.`);
       return;
     }
 
@@ -1246,7 +1290,7 @@ export class PaymentReceiptVoucherComponent {
       this.isSaving.set(false);
       const detail = posted.length ? `${msg} (${posted.join(', ')} already posted; the rest were not saved.)` : msg;
       this.saveError.set(detail);
-      this.messageService.add({ severity: 'error', summary: 'Save failed', detail, life: 5000 });
+      this.messageService.add({ severity: 'error', summary: 'Save failed', detail, life: 7000 });
       if (posted.length) {
         // Posted invoices are no longer outstanding — reload so they can't be posted twice.
         this.loadVouchers();
@@ -1275,14 +1319,17 @@ export class PaymentReceiptVoucherComponent {
         if (index + 1 < drafts.length) { this.postDrafts(drafts, index + 1, posted); return; }
 
         this.isSaving.set(false);
-        this.saveMsg.set(`${posted.join(', ')} posted successfully.`);
+        const settled = this.settlementMode();
+        this.saveMsg.set(settled ? `${posted.join(', ')} settled successfully.` : `${posted.join(', ')} posted successfully.`);
         this.messageService.add({
           severity: 'success',
-          summary: 'Posted',
-          detail: drafts.length === 1
+          summary: settled ? 'Settled' : 'Posted',
+          detail: settled
+            ? `${posted.join(', ')} settled against ${drafts.map(d => this.partyName(d.party)).join(', ')} with no cash or bank entry.`
+            : drafts.length === 1
             ? `${voucherNo} for ${this.fmt(this.netAmount())} posted successfully against ${this.partyName(party)}.`
             : `${drafts.length} receipts posted successfully: ${drafts.map((d, i) => `${posted[i]} (${this.partyName(d.party)}, ${this.fmt(d.modeTotal)})`).join(', ')}.`,
-          life: 4500
+          life: 5000
         });
         this.clearAllocations();
         // Re-fetch cheque lists so the leaf just used is no longer offered.

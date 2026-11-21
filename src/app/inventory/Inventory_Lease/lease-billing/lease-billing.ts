@@ -1,3 +1,4 @@
+import { createInventoryToast } from '../../Inventory_Shared/inventory-save-toast/inventory-save-toast.component';
 import { CommonModule } from '@angular/common';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -60,19 +61,16 @@ interface BillRow {
         <div class="erp-form-group"><label class="erp-label">Invoice Date</label>
           <app-lease-date [value]="billInvoiceDate" (valueChange)="billInvoiceDate = $event || billInvoiceDate" /></div>
         <div class="erp-form-group"><label class="erp-label">Place of Supply <span class="erp-label-hint">optional</span></label>
-          <input class="erp-input" type="text" [(ngModel)]="billPlaceOfSupply" placeholder="Blank = customer's state" /></div>
+          <input class="erp-input" type="text" [(ngModel)]="billPlaceOfSupply" placeholder="Blank = the site's GST state of each contract" /></div>
         <div class="erp-form-group inventory-header-col-6"><label class="erp-label">Note on invoice</label>
           <input class="erp-input" type="text" [(ngModel)]="billRemarks" /></div>
       </div>
 
-      @if (billError()) {
-        <div class="inventory-save-error"><span>{{ billError() }}</span>
-          <button type="button" class="inventory-alert-close" (click)="billError.set('')" aria-label="Dismiss"><i class="pi pi-times"></i></button></div>
-      }
-      @if (billMessage()) {
+      <!-- Messages come up as the bottom-right toast; only the link to the new invoice stays on the page. -->
+      @if (billCreated()) {
         <div class="inventory-save-msg"><span>{{ billMessage() }}
-          @if (billCreated()) { <a routerLink="/dashboard/inventory/transactions/sales-invoice">Open Sales Invoice</a> }</span>
-          <button type="button" class="inventory-alert-close" (click)="billMessage.set('')" aria-label="Dismiss"><i class="pi pi-times"></i></button></div>
+          <a routerLink="/dashboard/inventory/transactions/sales-invoice">Open Sales Invoice</a></span>
+          <button type="button" class="inventory-alert-close" (click)="billCreated.set(false)" aria-label="Dismiss"><i class="pi pi-times"></i></button></div>
       }
 
       <div class="inventory-line-items grn-grid-compact">
@@ -85,7 +83,7 @@ interface BillRow {
         <div class="tbl-wrap">
           <table class="erp-table compact">
             <thead>
-              <tr><th class="text-center">Actions</th><th class="text-center">S.No</th><th>Contract</th><th>Site / Location</th><th>Cycle</th><th>Last billed to</th><th>Bill from</th><th>Bill up to</th><th class="text-end">Amount (before GST)</th><th>Status</th></tr>
+              <tr><th class="text-center">Actions</th><th class="text-center">S.No</th><th>Contract</th><th>Site / Location</th><th>GST State</th><th>Cycle</th><th>Last billed to</th><th>Bill from</th><th>Bill up to</th><th class="text-end">Amount (before GST)</th><th>Status</th></tr>
             </thead>
             <tbody>
               @for (r of billRows(); track r.c.contract_id; let i = $index) {
@@ -100,7 +98,7 @@ interface BillRow {
                   </td>
                   <td class="text-center">{{ i + 1 }}</td>
                   <td>{{ r.c.contract_no }}</td>
-                  <td>{{ r.c.site_name }}</td>
+                  <td>{{ r.c.site_name }}</td><td>{{ r.c.place_of_supply }}@if (r.c.site_state && r.c.site_state_registered === false) { <small class="text-warning" title="The customer has no GSTIN in the site state">(site: {{ r.c.site_state }})</small> }</td>
                   <td>{{ r.c.billing_cycle }} / {{ r.c.billing_mode }}</td>
                   <td>{{ r.c.last_billed_to || '-' }}</td>
                   <td>{{ r.c.period_from }}</td>
@@ -184,6 +182,11 @@ export class InventoryLeaseBillingComponent extends InventoryScreenShell impleme
   readonly billBills = signal<any[]>([]);
   readonly billError = signal('');
   readonly billMessage = signal('');
+
+  // Messages are raised as the shared bottom-right toast (timed, with an X) and kept in the signals.
+  private readonly billToast = createInventoryToast();
+  private billFail(m: string): void { this.billError.set(m); this.billToast.error(m); }
+  private billNote(m: string): void { this.billMessage.set(m); this.billToast.success(m); }
   readonly billCreated = signal(false);
   readonly billCustomerId = signal<number | null>(null);
   private readonly billCustomerName = signal('');
@@ -234,7 +237,7 @@ export class InventoryLeaseBillingComponent extends InventoryScreenShell impleme
         this.billRows.set(rows);
         rows.forEach(r => this.billPreview(r));
       },
-      error: err => this.billError.set(LeaseMeterService.errorMessage(err))
+      error: err => this.billFail(LeaseMeterService.errorMessage(err))
     });
   }
 
@@ -300,12 +303,12 @@ export class InventoryLeaseBillingComponent extends InventoryScreenShell impleme
       next: res => {
         r.busy = false;
         this.billCreated.set(true);
-        this.billMessage.set(`Bill created for ${p.contract_no}. Draft invoice ${res.data?.invoice_number ?? ''} is ready for review.`);
+        this.billNote(`Bill created for ${p.contract_no}. Draft invoice ${res.data?.invoice_number ?? ''} is ready for review.`);
         this.billLoadBills();
         const id = this.billCustomerId();
         if (id) this.billLoadCandidates(id);
       },
-      error: err => { r.busy = false; this.billError.set(LeaseMeterService.errorMessage(err)); }
+      error: err => { r.busy = false; this.billFail(LeaseMeterService.errorMessage(err)); }
     });
   }
 
@@ -319,12 +322,12 @@ export class InventoryLeaseBillingComponent extends InventoryScreenShell impleme
     this.billError.set(''); this.billMessage.set(''); this.billCreated.set(false);
     this.billApi.releaseBill(b.id).subscribe({
       next: () => {
-        this.billMessage.set('Bill released. The readings and the period can be billed again.');
+        this.billNote('Bill released. The readings and the period can be billed again.');
         this.billLoadBills();
         const id = this.billCustomerId();
         if (id) this.billLoadCandidates(id);
       },
-      error: err => this.billError.set(LeaseMeterService.errorMessage(err))
+      error: err => this.billFail(LeaseMeterService.errorMessage(err))
     });
   }
 }

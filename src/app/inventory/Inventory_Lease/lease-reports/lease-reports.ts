@@ -1,3 +1,4 @@
+import { createInventoryToast } from '../../Inventory_Shared/inventory-save-toast/inventory-save-toast.component';
 import { CommonModule } from '@angular/common';
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -14,7 +15,7 @@ const REPORTS: ReportDef[] = [
     key: 'position', label: 'Asset position', hint: 'Each leasable asset: in hand, or on lease to which customer.',
     columns: [
       { key: 'product_name', label: 'Asset' }, { key: 'asset_ref', label: 'Reference' }, { key: 'qty', label: 'Qty' },
-      { key: 'asset_position', label: 'Position' }, { key: 'customer_name', label: 'Customer' }, { key: 'site_name', label: 'Site / Location' },
+      { key: 'asset_position', label: 'Position' }, { key: 'customer_name', label: 'Customer' }, { key: 'install_address', label: 'Installed at' },
       { key: 'contract_no', label: 'Contract' }, { key: 'handover_date', label: 'Handed over' }, { key: 'location_name', label: 'Stored at' }
     ]
   },
@@ -22,7 +23,7 @@ const REPORTS: ReportDef[] = [
     key: 'on_lease', label: 'Assets on lease', hint: 'Every asset currently with a customer (or under repair).',
     columns: [
       { key: 'product_name', label: 'Asset' }, { key: 'asset_ref', label: 'Reference' }, { key: 'customer_name', label: 'Customer' },
-      { key: 'site_name', label: 'Site' }, { key: 'contract_no', label: 'Contract' }, { key: 'handover_date', label: 'Handed over' }, { key: 'status', label: 'Status' }
+      { key: 'install_address', label: 'Installed at' }, { key: 'contract_no', label: 'Contract' }, { key: 'handover_date', label: 'Handed over' }, { key: 'status', label: 'Status' }
     ]
   },
   {
@@ -83,10 +84,6 @@ const REPORTS: ReportDef[] = [
       <div class="inventory-form-actions">
         <button type="button" class="erp-btn btn-white" (click)="run()"><i class="pi pi-refresh"></i> Refresh</button>
       </div>
-      @if (error()) {
-        <div class="inventory-save-error"><span>{{ error() }}</span>
-          <button type="button" class="inventory-alert-close" (click)="error.set('')" aria-label="Dismiss"><i class="pi pi-times"></i></button></div>
-      }
       @if (!rows().length) {
         <div class="inventory-empty-state">No records.</div>
       } @else {
@@ -112,6 +109,10 @@ export class InventoryLeaseReportsComponent implements OnInit {
   readonly rows = signal<any[]>([]);
   readonly error = signal('');
 
+  // Messages are raised as the shared bottom-right toast (timed, with an X) and kept in the signals.
+  private readonly pageToast = createInventoryToast();
+  private pageFail(m: string): void { this.error.set(m); this.pageToast.error(m); }
+
   days = 30;
   fromDate = '';
   toDate = '';
@@ -127,7 +128,7 @@ export class InventoryLeaseReportsComponent implements OnInit {
     if (this.reportKey() === 'revenue') { extra['fromDate'] = this.fromDate; extra['toDate'] = this.toDate; }
     this.api.getReport(this.reportKey(), extra).subscribe({
       next: res => this.rows.set(res.data ?? []),
-      error: err => { this.rows.set([]); this.error.set(LeaseMeterService.errorMessage(err)); }
+      error: err => { this.rows.set([]); this.pageFail(LeaseMeterService.errorMessage(err)); }
     });
   }
 }

@@ -23,6 +23,8 @@ describe('InventoryLeaseContractsComponent (shared shell)', () => {
     expect(el.querySelector('.inventory-transaction-header')).toBeTruthy();
     expect(fixture.componentInstance.bodyFieldByKey('customer')?.addMaster).toBe('Customer');
     expect(el.textContent).toContain('Leased Assets');
+    // the exact installation site uses the shared address block
+    expect(el.textContent).toContain('Customer Address & Installation Site');
     // meter items use the shared product picker (variant / attribute steps) on the shell's product rows
     expect(el.querySelector('app-inventory-line-product-picker')).toBeTruthy();
     // no contract type / rent item any more: rent is per asset

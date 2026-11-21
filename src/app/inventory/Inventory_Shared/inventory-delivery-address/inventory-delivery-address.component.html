@@ -2,7 +2,8 @@
   <!-- Delivery address = the customer's address (read-only). To change it,
        use + beside Party / Customer (Update on the customer). -->
     <div class="inventory-fieldset-title inventory-fieldset-title-row">
-    <span><i class="pi pi-map-marker"></i> Delivery Address</span>
+    <span><i class="pi pi-map-marker"></i> {{ title }}</span>
+    @if (showToggle) {
     <label class="inventory-labeled-switch yes-no" title="Deliver to the customer's address?">
       <input type="checkbox" [checked]="host.deliveryAddressEnabled()" (change)="host.toggleDeliveryAddress($any($event.target).checked)" />
       <span class="inventory-switch-track">
@@ -10,6 +11,7 @@
         <span class="switch-text switch-off">No</span>
       </span>
     </label>
+    }
   </div>
   @if (host.deliveryAddressEnabled()) {
   <small class="inventory-field-hint">From the customer master. To change it, use + beside Party / Customer.</small>
@@ -39,7 +41,7 @@
     @if (showShipAddress) {
       <div class="erp-form-group span-2">
         <div class="inventory-fieldset-title-row">
-          <label class="erp-label">Ship Address same as Delivery Address</label>
+          <label class="erp-label">{{ shipSameLabel }}</label>
           <label class="inventory-labeled-switch yes-no" title="Ship to the same address as the Delivery Address?">
             <input type="checkbox" [checked]="host.shipSameAsDelivery()" (change)="host.toggleShipSameAsDelivery($any($event.target).checked)" />
             <span class="inventory-switch-track">
@@ -51,7 +53,7 @@
       </div>
             @if (!host.shipSameAsDelivery()) {
         <div class="erp-form-group">
-          <label class="erp-label">Ship State <span class="text-danger">*</span></label>
+          <label class="erp-label">{{ shipStateLabel }} <span class="text-danger">*</span></label>
           <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
             [items]="host.dcAddressStates" [searchable]="true" [clearable]="false"
             [ngModel]="host.formValues()['shipState'] || ''"
@@ -60,11 +62,11 @@
           </ng-select>
         </div>
         <div class="erp-form-group span-2">
-          <label class="erp-label">Ship Address <span class="text-danger">*</span></label>
+          <label class="erp-label">{{ shipAddressLabel }} <span class="text-danger">*</span></label>
           <textarea class="erp-input" rows="2"
             [ngModel]="host.formValues()['shipAddress'] || ''"
             (ngModelChange)="host.collectFormField('shipAddress', $event)"
-            placeholder="Another branch of the same customer, in the same state"></textarea>
+            [placeholder]="shipPlaceholder"></textarea>
         </div>
         @if (host.shipStateMismatchMessage(); as shipError) {
           <div class="erp-form-group span-2">
