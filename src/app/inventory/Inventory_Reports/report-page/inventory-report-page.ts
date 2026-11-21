@@ -686,8 +686,11 @@ export class InventoryReportPageComponent implements OnInit {
     const from = this.hasFromDateFilter() ? this.filterDateValue('fromDate') : null;
     const to = this.hasToDateFilter() ? this.filterDateValue('toDate') : null;
     const pdfDate = (value: Date) => formatDate(value, 'dd-MMM-yyyy', 'en-US');
+    // Vendor Payments prints "From Date : .. To Date : .." like the old report.
     const periodText = from && to
-      ? `Between: ${pdfDate(from)} And ${pdfDate(to)}`
+      ? (this.report().key === 'vendorPaymentReport'
+          ? `From Date : ${pdfDate(from)}    To Date : ${pdfDate(to)}`
+          : `Between: ${pdfDate(from)} And ${pdfDate(to)}`)
       : from ? `From: ${pdfDate(from)}` : to ? `As on: ${pdfDate(to)}` : '';
 
     // Previous: rows: this.sortedRows().map(row => columns.map(column => this.formatCell(row[column.key], column))),
@@ -700,7 +703,9 @@ export class InventoryReportPageComponent implements OnInit {
 
     // Vendor Dues: old "Vendor Wise Dues List" layout - vendor name alone as the
     // group heading, blank vendor cell on invoice rows, "Total:" per vendor.
-    const vendorDuesLayout = this.report().key === 'vendorDues' && groupKey === 'supplier';
+    // Previous: const vendorDuesLayout = this.report().key === 'vendorDues' && groupKey === 'supplier';
+    // Vendor Payments uses the same vendor-heading layout (old "VENDOR PAYMENTS REPORT").
+    const vendorDuesLayout = ['vendorDues', 'vendorPaymentReport'].includes(this.report().key) && groupKey === 'supplier';
     if (vendorDuesLayout) {
       const firstTotalIndex = columns.findIndex(column => column.total);
       const totalLabelIndex = firstTotalIndex > 0 ? firstTotalIndex - 1 : 0;
@@ -750,7 +755,7 @@ export class InventoryReportPageComponent implements OnInit {
     // same figures as the on-screen footer (user request).
     // Collection Report gets the same Grand Total line so PDF / Excel totals match the screen.
     // Previous: if (this.report().key === 'duesList' && rows.length && columns.some(column => column.total)) {
-    if (['duesList', 'collectionReport', 'vendorDues'].includes(this.report().key) && rows.length && columns.some(column => column.total)) {
+    if (['duesList', 'collectionReport', 'vendorDues', 'vendorPaymentReport'].includes(this.report().key) && rows.length && columns.some(column => column.total)) {
       const totals = this.totals();
       groupRowIndexes.push(rows.length);
       rows.push(columns.map((column, index) => index === 0 ? 'Grand Total' : (column.total ? totals[column.key] ?? '' : '')));
@@ -935,7 +940,7 @@ export class InventoryReportPageComponent implements OnInit {
     const amount = value.toLocaleString('en-IN', { maximumFractionDigits: 2 });
     // Stock Ledger and Dues List show plain amounts, no "Rs." prefix (user request).
     // Vendor Dues too (plain amounts, like the old Vendor Wise Dues List).
-    if (['stockLedger', 'duesList', 'vendorDues'].includes(this.report().key)) return amount;
+    if (['stockLedger', 'duesList', 'vendorDues', 'vendorPaymentReport'].includes(this.report().key)) return amount;
     return `Rs. ${amount}`;
   }
 

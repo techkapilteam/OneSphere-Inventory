@@ -379,6 +379,37 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
     // No hardcoded preview rows - only live data from the API is shown.
     sampleRows: []
   }),
+  // Vendor Payments (309): posted Inventory Vendor Payments between From / To
+  // date, one row per purchase invoice paid. Layout follows the old "VENDOR
+  // PAYMENTS REPORT": vendor code-name heading, Trans Date, vendor bill no,
+  // amount, Cheque No, Voucher No; plus a Total per vendor and a Grand Total.
+  // Paid Amount = what was paid on that invoice in that voucher (lines of one
+  // voucher add up to its cheque); Invoice Amount (full total) can be switched on.
+  phaseOneReport({
+    key: 'vendorPaymentReport',
+    slug: 'vendor-payment-report',
+    title: 'Vendor Payments Report',
+    groupId: 'purchase',
+    endpoint: 'vendor-payment-report',
+    icon: 'pi pi-money-bill',
+    purpose: 'Vendor-wise list of purchase invoices paid between two dates, with cheque and voucher number.',
+    audience: ['Accountant', 'Purchase', 'Business Owner'],
+    filters: ['branchId', 'fromDate', 'toDate', 'supplierId'],
+    columns: cols([
+      ['segment', 'Segment', 'text', false, false],
+      ['supplier', 'Vendor Name'],
+      ['transDate', 'Trans Date', 'date'],
+      ['invoiceNo', 'Invoice No'],
+      ['piNo', 'PI No', 'text', false, false],
+      ['invoiceAmount', 'Invoice Amount', 'currency', false, false],
+      ['paidAmount', 'Paid Amount', 'currency', true],
+      ['chequeNo', 'Cheque No'],
+      ['paymentMode', 'Payment Mode', 'text', false, false],
+      ['voucherNo', 'Voucher No']
+    ]),
+    defaultGroupBy: 'supplier',
+    sampleRows: []
+  }),
   phaseOneReport({
     key: 'salesOrderRegister',
     slug: 'sales-order-register',
