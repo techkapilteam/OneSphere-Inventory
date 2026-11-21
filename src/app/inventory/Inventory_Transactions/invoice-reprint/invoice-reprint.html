@@ -176,7 +176,7 @@
           <div class="mb-4 p-4 border rounded bg-white">
             <p class="mb-2 font-bold small text-muted text-uppercase letter-spacing-1">Terms &amp; Conditions</p>
             @for (term of reprintDoc()!.terms!; track $index) {
-            <p class="mb-1 small text-dark">{{ term }}</p>
+            <p class="mb-1 small text-dark">{{ $index + 1 }}. {{ term }}</p>
             }
           </div>
           }

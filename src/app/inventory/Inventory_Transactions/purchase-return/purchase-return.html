@@ -344,6 +344,34 @@
                     </td>
                   }
                 </tr>
+                <!-- 298: whole-rupee Round Off + Grand Total, same as the Purchase Invoice -->
+                @let roundOffFooter = invoiceRoundOffFooter();
+                @if (roundOffFooter) {
+                  <tr class="inventory-line-total-row">
+                    <td class="text-center"></td>
+                    @for (column of renderedColumns; track column; let first = $first) {
+                      <td>
+                        @if (first) {
+                          <strong>Round Off</strong>
+                        } @else if (column === 'Return Amount') {
+                          <strong>{{ roundOffFooter.roundOff }}</strong>
+                        }
+                      </td>
+                    }
+                  </tr>
+                  <tr class="inventory-line-total-row">
+                    <td class="text-center"></td>
+                    @for (column of renderedColumns; track column; let first = $first) {
+                      <td>
+                        @if (first) {
+                          <strong>Grand Total</strong>
+                        } @else if (column === 'Return Amount') {
+                          <strong>{{ roundOffFooter.grandTotal }}</strong>
+                        }
+                      </td>
+                    }
+                  </tr>
+                }
               </tfoot>
             </table>
           </div>
