@@ -290,8 +290,17 @@ export class InventoryReportPageComponent implements OnInit {
   // Stock Summary shows From Date / To Date as two separate pickers instead of
   // the single range picker; both still write the same fromDate/toDate filters.
   // Collection Report uses the same separate From Date / To Date pickers (user request).
+  // Sale / Purchase Invoice Register also use separate From Date / To Date pickers (user request 2026-11-21).
   // Previous: readonly separateFromToDates = computed(() => this.report().key === 'stockSummary');
-  readonly separateFromToDates = computed(() => ['stockSummary', 'collectionReport'].includes(this.report().key));
+  // Previous: readonly separateFromToDates = computed(() => ['stockSummary', 'collectionReport'].includes(this.report().key));
+  // Previous: readonly separateFromToDates = computed(() =>
+  //   ['stockSummary', 'collectionReport', 'salesInvoiceRegister', 'purchaseInvoiceRegister'].includes(this.report().key)
+  // );
+  // All inventory reports now use separate From Date / To Date pickers instead of the range picker (user request 2026-11-21).
+  readonly separateFromToDates = computed(() => true);
+  // Each picker only shows when the report declares that filter (e.g. Dues List has To Date only).
+  readonly hasFromDateFilter = computed(() => this.report().filters.includes('fromDate'));
+  readonly hasToDateFilter = computed(() => this.report().filters.includes('toDate'));
 
   // Stock Summary's location filter is "Branch" only — no warehouses listed.
   readonly branchOnlyLocation = computed(() => this.report().key === 'stockSummary');
