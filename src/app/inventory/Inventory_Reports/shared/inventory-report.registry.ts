@@ -515,7 +515,9 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
     icon: 'pi pi-wallet',
     purpose: 'Customer-wise list of unpaid and part-paid sales invoices with total, received and due amount as on a date.',
     audience: ['Accountant', 'Sales', 'Business Owner'],
-    filters: ['branchId', 'toDate', 'customerId'],
+    // Previous: filters: ['branchId', 'toDate', 'customerId'],
+    // From Date + To Date (user request 2026-11-23): invoices dated in the range, due as on To Date (310).
+    filters: ['branchId', 'fromDate', 'toDate', 'customerId'],
     columns: cols([
       // Segment is auto-added to every report; hidden here to match the Dues List layout.
       ['segment', 'Segment', 'text', false, false],
@@ -559,11 +561,8 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['preJvAmount', 'Pre JV', 'currency', true],
       ['grandTotal', 'Grand Total', 'currency', true]
     ]),
-    sampleRows: [
-      { customer: 'Dakshin Infrastructures Private Limited', noOfInvoices: 3, cashAmount: 15000, preCashAmount: 0, chequeAmount: 40027, preChequeAmount: 24321, jvAmount: 0, preJvAmount: 0, grandTotal: 79348 },
-      { customer: 'Kapil Chits (Kakatiya) Private Limited', noOfInvoices: 1, cashAmount: 11772, preCashAmount: 0, chequeAmount: 0, preChequeAmount: 0, jvAmount: 0, preJvAmount: 0, grandTotal: 11772 },
-      { customer: 'Tenant Works Pvt Ltd', noOfInvoices: 2, cashAmount: 0, preCashAmount: 5000, chequeAmount: 120000, preChequeAmount: 0, jvAmount: 0, preJvAmount: 0, grandTotal: 125000 }
-    ]
+    // No hardcoded preview rows - only live data from the API is shown.
+    sampleRows: []
   }),
   phaseOneReport({
     key: 'pendingDocument',
