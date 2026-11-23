@@ -110,6 +110,8 @@ export interface ProfitLossColumn {
 export interface ProfitLossLine {
   section: ProfitLossSection;
   groupName: string;
+  /** Schedule TB sub group (chart subgroupname); '' when the ledger has none. */
+  subGroupName?: string;
   head: string;
   sort: number;
   amounts: Record<string, number>;

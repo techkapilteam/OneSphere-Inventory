@@ -25,7 +25,9 @@ import {
 // Gross Profit, group subtotals, % of sales, Net Profit and the totals are
 // worked out here from the ledger lines the procedure returns.
 
-type CellKind = 'line' | 'group' | 'subtotal' | 'percent' | 'total' | 'bold' | 'blank';
+// Groups follow Schedule TB: Group (bold heading) -> Sub Group (sub heading)
+// -> ledgers, in the order the procedure returns them (Schedule sort orders).
+type CellKind = 'line' | 'group' | 'subgroup' | 'subtotal' | 'percent' | 'total' | 'bold' | 'blank';
 
 interface SideRow {
   label: string;
@@ -146,7 +148,7 @@ export class ProfitLossReportComponent {
   // ---------------------------------------------------------------- formatting
 
   formatAmount(row: SideRow, key: string): string {
-    if (row.kind === 'blank' || row.kind === 'group') return '';
+    if (row.kind === 'blank' || row.kind === 'group' || row.kind === 'subgroup') return '';
     const value = row.amounts[key];
     if (value === null || value === undefined) return '';
     if (row.kind === 'percent') {
@@ -196,7 +198,7 @@ export class ProfitLossReportComponent {
     const cols = this.columns();
     const rows: string[][] = [];
     const boldIndexes: number[] = [];
-    const isBold = (kind: CellKind) => ['group', 'subtotal', 'total', 'bold'].includes(kind);
+    const isBold = (kind: CellKind) => ['group', 'subgroup', 'subtotal', 'total', 'bold'].includes(kind);
 
     this.blocks().forEach((block, blockIndex) => {
       if (blockIndex > 0) {
@@ -262,8 +264,7 @@ export class ProfitLossReportComponent {
     const expenseGroups = this.groupLines(of('PL_EXP'));
     expenseGroups.forEach(group => {
       const total = sum(group.lines);
-      plLeft.push({ label: group.name, kind: 'group', amounts: {} });
-      group.lines.forEach(line => plLeft.push(asLine(line)));
+      this.pushGroupRows(plLeft, group);
       plLeft.push({ label: '', kind: 'subtotal', amounts: total });
       plLeft.push({ label: '', kind: 'percent', amounts: pct(total, sales) });
     });
@@ -272,8 +273,7 @@ export class ProfitLossReportComponent {
     const plRight: SideRow[] = [{ label: 'GROSS PROFIT/(LOSS)', kind: 'line', amounts: grossProfit }];
     const incomeGroups = this.groupLines(of('PL_INC'));
     incomeGroups.forEach(group => {
-      plRight.push({ label: group.name, kind: 'group', amounts: {} });
-      group.lines.forEach(line => plRight.push(asLine(line)));
+      this.pushGroupRows(plRight, group);
       plRight.push({ label: '', kind: 'subtotal', amounts: sum(group.lines) });
     });
     const otherIncome = sum(of('PL_INC'));
@@ -305,8 +305,7 @@ export class ProfitLossReportComponent {
       const lines = report.lines.filter(line => line.section === section);
       const rows: SideRow[] = [];
       this.groupLines(lines).forEach(group => {
-        rows.push({ label: group.name, kind: 'group', amounts: {} });
-        group.lines.forEach(line => rows.push({ label: line.head, kind: 'line', amounts: { ...line.amounts } }));
+        this.pushGroupRows(rows, group);
         rows.push({ label: '', kind: 'subtotal', amounts: sum(group.lines) });
       });
       return { rows, total: sum(lines) };
@@ -338,6 +337,20 @@ export class ProfitLossReportComponent {
     return Array.from(groups.entries())
       .map(([name, groupLines]) => ({ name, lines: groupLines }))
       .sort((a, b) => Number(a.name === 'PROFIT & LOSS A/C') - Number(b.name === 'PROFIT & LOSS A/C'));
+  }
+
+  /** Group heading, then each Sub Group heading (when set) with its ledgers. */
+  private pushGroupRows(rows: SideRow[], group: { name: string; lines: ProfitLossLine[] }): void {
+    rows.push({ label: group.name, kind: 'group', amounts: {} });
+    let currentSub: string | null = null;
+    group.lines.forEach(line => {
+      const sub = (line.subGroupName ?? '').trim();
+      if (sub && sub !== currentSub) {
+        rows.push({ label: sub, kind: 'subgroup', amounts: {} });
+      }
+      currentSub = sub;
+      rows.push({ label: line.head, kind: 'line', amounts: { ...line.amounts } });
+    });
   }
 
   private zip(left: SideRow[], right: SideRow[]): GridRow[] {
