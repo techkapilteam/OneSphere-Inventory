@@ -123,6 +123,7 @@ export class NavigationService {
                 { id: 'delivery-challan', name: 'Delivery Challan', route: '/dashboard/inventory/transactions/delivery-challan', group: 'Sales' },
                 { id: 'sales-invoice', name: 'Sales Invoice', route: '/dashboard/inventory/transactions/sales-invoice', group: 'Sales' },
                 { id: 'sales-return', name: 'Sales Return', route: '/dashboard/inventory/transactions/sales-return', group: 'Sales' },
+                { id: 'e-invoice', name: 'E-Invoice', route: '/dashboard/inventory/transactions/e-invoice', group: 'Sales' },
                 // Inventory
                 { id: 'stock-transfer', name: 'Stock Transfer', route: '/dashboard/inventory/transactions/stock-transfer', group: 'Inventory' },
                 { id: 'stock-adjustment', name: 'Stock Adjustment', route: '/dashboard/inventory/transactions/stock-adjustment', group: 'Inventory' },
