@@ -449,6 +449,14 @@ export const inventoryRoutes: Routes = [
           .then(m => m.MisReportComponent)
       },
       {
+        // Profit & Loss (311_profit_loss_report.sql): two-sided Trading + P&L /
+        // Balance Sheet from accounts total transactions - bespoke layout, so its
+        // own static route; must stay ABOVE the ':reportKey' catch-all.
+        path: 'profit-loss',
+        loadComponent: () => import('./Inventory_Reports/profit-loss/profit-loss-report')
+          .then(m => m.ProfitLossReportComponent)
+      },
+      {
         path: ':reportKey',
         canActivate: [reportPermissionGuard],
         loadComponent: () => import('./Inventory_Reports/report-page/inventory-report-page')

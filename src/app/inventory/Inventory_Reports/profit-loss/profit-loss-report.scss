@@ -1,0 +1,109 @@
+.pl-type-filter {
+  min-width: 220px;
+}
+
+.pl-actions {
+  display: flex;
+  flex-direction: column;
+
+  .pl-actions-spacer {
+    visibility: hidden;
+  }
+
+  .pl-actions-buttons {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+  }
+}
+
+.pl-heading {
+  text-align: center;
+  margin: 4px 0 10px;
+
+  .pl-heading-company {
+    font-weight: 700;
+    font-size: 14px;
+  }
+
+  .pl-heading-title {
+    font-weight: 700;
+    font-size: 13px;
+    margin-top: 2px;
+  }
+
+  .pl-heading-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #555;
+    margin-top: 4px;
+  }
+}
+
+.pl-unmapped {
+  margin-bottom: 8px;
+  display: block;
+}
+
+.pl-wrap {
+  overflow-x: auto;
+}
+
+.pl-table {
+  width: 100%;
+  border-collapse: collapse;
+
+  th,
+  td {
+    white-space: nowrap;
+    padding: 3px 8px;
+  }
+
+  thead th {
+    background: #0b4093;
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .pl-head-label,
+  .pl-label {
+    text-align: left;
+    min-width: 200px;
+  }
+
+  .pl-num {
+    text-align: right;
+    min-width: 96px;
+  }
+
+  .pl-side-split {
+    border-left: 2px solid #0b4093;
+  }
+
+  td.pl-group {
+    font-weight: 700;
+    padding-top: 8px;
+  }
+
+  td.pl-subtotal {
+    font-weight: 700;
+    border-top: 1px solid #333;
+  }
+
+  td.pl-percent {
+    font-style: italic;
+    color: #555;
+  }
+
+  td.pl-bold {
+    font-weight: 700;
+  }
+
+  td.pl-total {
+    font-weight: 700;
+    border-top: 1px solid #333;
+    border-bottom: 2px solid #333;
+  }
+}

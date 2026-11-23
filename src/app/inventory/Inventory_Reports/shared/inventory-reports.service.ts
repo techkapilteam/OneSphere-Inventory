@@ -94,6 +94,35 @@ export interface MisReport {
   segments: MisReportSegment[];
 }
 
+// Backs GET /api/reports/profit-loss (inventory.sp_get_profit_loss_report,
+// 311_profit_loss_report.sql). Two-sided Trading + P&L / Balance Sheet built
+// from accounts total transactions -- not the flat report-page table shape.
+export type ProfitLossReportType = 'IE' | 'AL';
+export type ProfitLossSection = 'TRADING_EXP' | 'TRADING_INC' | 'PL_EXP' | 'PL_INC' | 'LIAB' | 'ASSET';
+
+export interface ProfitLossColumn {
+  key: string;
+  label: string;
+  fromDate: string | null;
+  toDate: string;
+}
+
+export interface ProfitLossLine {
+  section: ProfitLossSection;
+  groupName: string;
+  head: string;
+  sort: number;
+  amounts: Record<string, number>;
+}
+
+export interface ProfitLossReport {
+  reportType: ProfitLossReportType;
+  columns: ProfitLossColumn[];
+  lines: ProfitLossLine[];
+  unmapped: Array<{ head: string; amount: number }>;
+  message: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -124,6 +153,25 @@ export class InventoryReportsService {
         if (!response?.data) throw new Error('No data returned for MIS report.');
         return response.data;
       }),
+      catchError(error => throwError(() => error))
+    );
+  }
+
+  getProfitLoss(reportType: ProfitLossReportType, fromDate: Date, toDate: Date, branchId?: number | null): Observable<ProfitLossReport> {
+    let params = new HttpParams()
+      .set('reportType', reportType)
+      .set('fromDate', this.toDateParam(fromDate))
+      .set('toDate', this.toDateParam(toDate));
+    if (branchId) params = params.set('branchId', String(branchId));
+
+    return this.commonService.getAPI('/reports/profit-loss', params, 'YES').pipe(
+      map((response: { message?: string; data?: ProfitLossLine[]; summary?: { reportType?: ProfitLossReportType; columns?: ProfitLossColumn[]; unmapped?: Array<{ head: string; amount: number }> } }) => ({
+        reportType: response?.summary?.reportType ?? reportType,
+        columns: response?.summary?.columns ?? [],
+        lines: Array.isArray(response?.data) ? response.data : [],
+        unmapped: response?.summary?.unmapped ?? [],
+        message: String(response?.message ?? '')
+      })),
       catchError(error => throwError(() => error))
     );
   }
