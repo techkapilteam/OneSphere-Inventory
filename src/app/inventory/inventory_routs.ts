@@ -471,6 +471,14 @@ export const inventoryRoutes: Routes = [
           .then(m => m.AgeingAnalysisReportComponent)
       },
       {
+        // Product-wise Ageing (314_productwise_ageing_report.sql): closing stock
+        // (= Stock Summary) aged FIFO by inward date - own layout, so its own
+        // static route; must stay ABOVE the ':reportKey' catch-all.
+        path: 'productwise-ageing',
+        loadComponent: () => import('./Inventory_Reports/productwise-ageing/productwise-ageing-report')
+          .then(m => m.ProductwiseAgeingReportComponent)
+      },
+      {
         path: ':reportKey',
         canActivate: [reportPermissionGuard],
         loadComponent: () => import('./Inventory_Reports/report-page/inventory-report-page')
