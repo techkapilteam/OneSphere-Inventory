@@ -301,8 +301,15 @@ export class InventoryReportPageComponent implements OnInit {
   // Dues List: "As On" checkbox (user request 2026-11-24). Ticked = one "As On"
   // date only (From Date hidden and not sent - all invoices up to that date);
   // unticked = From Date + To Date.
-  readonly asOnToggleAvailable = computed(() => this.report().key === 'duesList');
+  // Previous: readonly asOnToggleAvailable = computed(() => this.report().key === 'duesList');
+  // Product-wise Dues List (313) gets the same As On checkbox.
+  readonly asOnToggleAvailable = computed(() => ['duesList', 'productwiseDues'].includes(this.report().key));
   readonly asOnMode = signal(true);
+  // Default state of the As On checkbox per report: Dues List starts ticked;
+  // Product-wise Dues List starts unticked = From Date + To Date (user 2026-11-24).
+  private asOnDefault(): boolean {
+    return this.report().key !== 'productwiseDues';
+  }
   // Each picker only shows when the report declares that filter (e.g. Dues List has To Date only).
   // Previous: readonly hasFromDateFilter = computed(() => this.report().filters.includes('fromDate'));
   readonly hasFromDateFilter = computed(() =>
@@ -317,6 +324,12 @@ export class InventoryReportPageComponent implements OnInit {
 
   setAsOnMode(checked: boolean): void {
     this.asOnMode.set(checked);
+    // Ticking "As On" always binds today's date (user 2026-11-24), so a date
+    // picked earlier in From/To mode is not carried over.
+    if (checked) {
+      const now = new Date();
+      this.updateFilter('toDate', new Date(now.getFullYear(), now.getMonth(), now.getDate()));
+    }
   }
 
   // Stock Summary's location filter is "Branch" only — no warehouses listed.
@@ -548,7 +561,8 @@ export class InventoryReportPageComponent implements OnInit {
 
   resetFilters(generate = true): void {
     this.filters.set(this.defaultFilters());
-    this.asOnMode.set(true);
+    // Previous: this.asOnMode.set(true);
+    this.asOnMode.set(this.asOnDefault());
     this.searchText.set('');
     this.page.set(1);
     if (generate) this.generateReport(false);
@@ -771,7 +785,7 @@ export class InventoryReportPageComponent implements OnInit {
     // same figures as the on-screen footer (user request).
     // Collection Report gets the same Grand Total line so PDF / Excel totals match the screen.
     // Previous: if (this.report().key === 'duesList' && rows.length && columns.some(column => column.total)) {
-    if (['duesList', 'collectionReport', 'vendorDues', 'vendorPaymentReport'].includes(this.report().key) && rows.length && columns.some(column => column.total)) {
+    if (['duesList', 'productwiseDues', 'collectionReport', 'vendorDues', 'vendorPaymentReport'].includes(this.report().key) && rows.length && columns.some(column => column.total)) {
       const totals = this.totals();
       groupRowIndexes.push(rows.length);
       rows.push(columns.map((column, index) => index === 0 ? 'Grand Total' : (column.total ? totals[column.key] ?? '' : '')));
@@ -855,7 +869,8 @@ export class InventoryReportPageComponent implements OnInit {
     this.showColumnChooser.set(false);
     this.visibleColumnKeys.set(definition.columns.filter(column => column.defaultVisible !== false).map(column => column.key));
     this.filters.set(this.defaultFilters());
-    this.asOnMode.set(true);
+    // Previous: this.asOnMode.set(true);
+    this.asOnMode.set(this.asOnDefault());
     this.page.set(1);
     this.loadPreview('Preview rows are shown until the API responds.');
   }
@@ -960,7 +975,7 @@ export class InventoryReportPageComponent implements OnInit {
     const amount = value.toLocaleString('en-IN', { maximumFractionDigits: 2 });
     // Stock Ledger and Dues List show plain amounts, no "Rs." prefix (user request).
     // Vendor Dues too (plain amounts, like the old Vendor Wise Dues List).
-    if (['stockLedger', 'duesList', 'vendorDues', 'vendorPaymentReport'].includes(this.report().key)) return amount;
+    if (['stockLedger', 'duesList', 'productwiseDues', 'vendorDues', 'vendorPaymentReport'].includes(this.report().key)) return amount;
     return `Rs. ${amount}`;
   }
 

@@ -533,6 +533,40 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
     // No hardcoded preview rows - only live data from the API is shown.
     sampleRows: []
   }),
+  // Product-wise Dues List (313): same invoices and due as the Dues List, one
+  // row per product line. A receipt is against the whole invoice, so its Total
+  // and Received are split across the invoice's products by line value; the
+  // Grand Total Due always equals the Dues List total for the same filters.
+  phaseOneReport({
+    key: 'productwiseDues',
+    slug: 'productwise-dues',
+    title: 'Product-wise Dues List',
+    groupId: 'customerSupplier',
+    endpoint: 'productwise-dues',
+    icon: 'pi pi-box',
+    purpose: 'Product-wise list of amounts still due from customers on unpaid and part-paid sales invoices as on a date.',
+    audience: ['Accountant', 'Sales', 'Business Owner'],
+    filters: ['branchId', 'fromDate', 'toDate', 'customerId', 'productId'],
+    columns: cols([
+      // Segment is auto-added to every report; hidden here, same as Dues List.
+      ['segment', 'Segment', 'text', false, false],
+      ['product', 'Product'],
+      ['productCode', 'Product Code', 'text', false, false],
+      ['variant', 'Variant', 'text', false, false],
+      ['customer', 'Customer'],
+      ['invoiceNo', 'Invoice No'],
+      ['invoiceDate', 'Invoice Date', 'date'],
+      ['qty', 'Qty', 'number', true],
+      ['uom', 'UOM', 'text', false, false],
+      ['totalAmount', 'Total Amount', 'currency', true],
+      ['receivedAmount', 'Received', 'currency', true],
+      ['dueAmount', 'Due Amount', 'currency', true],
+      ['ageDays', 'Age (Days)', 'number']
+    ]),
+    defaultGroupBy: 'product',
+    // No hardcoded preview rows - only live data from the API is shown.
+    sampleRows: []
+  }),
   // Collection Report: money received from customers between "Date From" and
   // "Date To" (posted Customer Receipts), one row per customer. Cash = 'cash'
   // mode; Cheque = cheque / online / card / bank. "Pre" = receipts against
