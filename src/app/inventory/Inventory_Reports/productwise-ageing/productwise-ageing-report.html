@@ -12,7 +12,7 @@
           </div>
           <div class="inventory-report-filter ag-head-filter">
             <label title="Product"><i class="pi pi-box"></i> Product</label>
-            <ng-select class="erp-ng-select inventory-ng-select ag-product-select" appendTo="body" [items]="productOptions()" bindLabel="name" bindValue="id" placeholder="Select Product" [multiple]="true" [closeOnSelect]="false" [loading]="productsLoading()" [clearable]="true" [ngModel]="selectedProductIds()" (ngModelChange)="setProducts($event)">
+            <ng-select class="erp-ng-select inventory-ng-select ag-product-select" appendTo="body" [items]="productOptions()" bindLabel="name" bindValue="id" placeholder="Select Product" [multiple]="true" [closeOnSelect]="false" [deselectOnClick]="true" [clearSearchOnAdd]="false" [loading]="productsLoading()" [clearable]="true" [ngModel]="selectedProductIds()" (ngModelChange)="setProducts($event)">
               <!-- One line in the box: the product name, or "N Products selected". -->
               <ng-template ng-multi-label-tmp let-items="items">
                 <div class="ng-value ag-multi-label" [title]="multiLabelTitle(items)">
