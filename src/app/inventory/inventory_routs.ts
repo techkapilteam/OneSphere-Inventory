@@ -463,6 +463,14 @@ export const inventoryRoutes: Routes = [
           .then(m => m.ProfitLossReportComponent)
       },
       {
+        // Ageing Analysis (312_ageing_analysis_report.sql): FIFO ageing of the
+        // party ledgers under an account group - bespoke layout, so its own
+        // static route; must stay ABOVE the ':reportKey' catch-all.
+        path: 'ageing-analysis',
+        loadComponent: () => import('./Inventory_Reports/ageing-analysis/ageing-analysis-report')
+          .then(m => m.AgeingAnalysisReportComponent)
+      },
+      {
         path: ':reportKey',
         canActivate: [reportPermissionGuard],
         loadComponent: () => import('./Inventory_Reports/report-page/inventory-report-page')

@@ -125,6 +125,44 @@ export interface ProfitLossReport {
   message: string;
 }
 
+// Backs GET /api/reports/ageing-analysis (inventory.sp_get_ageing_analysis_report,
+// 312_ageing_analysis_report.sql): the open bills (FIFO) of every party ledger
+// under SUNDRY DEBITORS (customer) / SUNDRY CREDITORS (vendor) as on a date,
+// each already put into one of the company's ageing slabs. Grand Total = Trial
+// Balance. The age columns come from the procedure, not from the screen.
+export type AgeingPartyType = 'customer' | 'vendor';
+
+export interface AgeingColumn {
+  index: number;
+  label: string;
+  fromDays: number;
+  toDays: number | null;
+}
+
+export interface AgeingAnalysisRow {
+  /** Party ledger id. */
+  accountId: number;
+  party: string;
+  /** Transaction (voucher / invoice) no. of the open bill. */
+  invoiceNo: string;
+  invoiceDate: string | null;
+  ageDays: number;
+  /** Open amount on the head's normal side; negative = advance. */
+  dueAmount: number;
+  /** Index into AgeingAnalysisReport.columns. */
+  bucket: number;
+}
+
+export interface AgeingAnalysisReport {
+  partyType: AgeingPartyType;
+  asOnDate: string;
+  columns: AgeingColumn[];
+  totals: number[];
+  dueAmount: number;
+  rows: AgeingAnalysisRow[];
+  message: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -178,6 +216,25 @@ export class InventoryReportsService {
     );
   }
 
+  getAgeingAnalysis(asOnDate: Date, partyType: AgeingPartyType, branchId?: number | null): Observable<AgeingAnalysisReport> {
+    let params = new HttpParams()
+      .set('toDate', this.toDateParam(asOnDate))
+      .set('partyType', partyType);
+    if (branchId) params = params.set('branchId', String(branchId));
+
+    return this.commonService.getAPI('/reports/ageing-analysis', params, 'YES').pipe(
+      map((response: { message?: string; data?: AgeingAnalysisRow[]; summary?: { asOnDate?: string; partyType?: AgeingPartyType; columns?: AgeingColumn[]; totals?: number[]; dueAmount?: number } }) => ({
+        partyType: response?.summary?.partyType ?? partyType,
+        asOnDate: response?.summary?.asOnDate ?? this.toDateParam(asOnDate),
+        columns: response?.summary?.columns ?? [],
+        totals: (response?.summary?.totals ?? []).map(Number),
+        dueAmount: Number(response?.summary?.dueAmount ?? 0),
+        rows: Array.isArray(response?.data) ? response.data : [],
+        message: String(response?.message ?? '')
+      })),
+      catchError(error => throwError(() => error))
+    );
+  }
   contextDefaults(): InventoryReportFilters {
     return {
       companyId: this.commonService.getCompanyCode(),

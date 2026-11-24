@@ -24,6 +24,15 @@
           <!-- Dates moved up from the second row (controls) to keep that row from overflowing. -->
           @if (showDateRangeField() && separateFromToDates()) {
             <!-- Separate From Date / To Date pickers (all reports now); each shows only if the report has that filter. -->
+            <!-- Dues List: "As On" checkbox - ticked = As On date only; unticked = From Date + To Date. -->
+            @if (asOnToggleAvailable()) {
+            <div class="inventory-report-filter inventory-report-filter--as-on" style="flex: 0 0 auto; width: auto; min-width: 0;">
+              <label for="duesAsOnToggle" title="As On Date"><i class="pi pi-check-square"></i> As On</label>
+              <div style="display: flex; align-items: center; min-height: 34px;">
+                <input id="duesAsOnToggle" type="checkbox" style="width: 18px; height: 18px; cursor: pointer; margin: 0;" [checked]="asOnMode()" (change)="setAsOnMode($any($event.target).checked)" />
+              </div>
+            </div>
+            }
             @if (hasFromDateFilter()) {
             <div class="inventory-report-filter inventory-report-filter--date inventory-report-filter--date-single">
               <label title="From Date"><i [class]="filterIcon('fromDate')"></i> From Date</label>
