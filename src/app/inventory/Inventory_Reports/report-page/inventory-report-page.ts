@@ -200,10 +200,15 @@ export class InventoryReportPageComponent implements OnInit {
     ...this.report().columns.map(column => ({ label: `Group by ${column.label}`, value: column.key }))
   ]);
 
+  // Filters with no real master/API source (their options were only hardcoded
+  // demo names) are not shown -- no static data in any Inventory report.
+  private static readonly NO_REAL_SOURCE_FILTERS = new Set<InventoryReportFilterKey>(['project', 'department', 'createdBy', 'approvedBy']);
+
   readonly filterDefinitions = computed(() => {
     const allowed = new Set<InventoryReportFilterKey>(this.report().filters);
     const dynamic = this.masterOptions();
-    return INVENTORY_COMMON_REPORT_FILTERS.filter(filter => allowed.has(filter.key))
+    return INVENTORY_COMMON_REPORT_FILTERS
+      .filter(filter => allowed.has(filter.key) && !InventoryReportPageComponent.NO_REAL_SOURCE_FILTERS.has(filter.key))
       .map(filter => dynamic[filter.key] ? { ...filter, options: dynamic[filter.key] } : filter);
   });
 
@@ -477,7 +482,7 @@ export class InventoryReportPageComponent implements OnInit {
     const summary = this.summary();
     return (this.report().summaryCards ?? []).map(card => ({
       ...card,
-      value: this.formatSummaryValue(summary[card.valueKey], card.fallback)
+      value: this.formatSummaryValue(summary[card.valueKey])
     }));
   });
 
@@ -872,7 +877,8 @@ export class InventoryReportPageComponent implements OnInit {
     // Previous: this.asOnMode.set(true);
     this.asOnMode.set(this.asOnDefault());
     this.page.set(1);
-    this.loadPreview('Preview rows are shown until the API responds.');
+    // No static preview rows -- the grid stays empty until the report is generated.
+    this.clearRows();
   }
 
   private defaultFilters(): InventoryReportFilters {
@@ -948,12 +954,12 @@ export class InventoryReportPageComponent implements OnInit {
     });
   }
 
-  private loadPreview(message: string): void {
-    this.rows.set(this.report().sampleRows);
+  private clearRows(): void {
+    this.rows.set([]);
     this.summary.set({});
-    this.totalRecords.set(this.report().sampleRows.length);
+    this.totalRecords.set(0);
     this.loadedFromApi.set(false);
-    this.infoMessage.set(message);
+    this.infoMessage.set('');
   }
 
   private sortValue(value: InventoryReportRow[string], column: InventoryReportColumn | undefined): string | number {
@@ -979,8 +985,9 @@ export class InventoryReportPageComponent implements OnInit {
     return `Rs. ${amount}`;
   }
 
-  private formatSummaryValue(value: string | number | undefined, fallback: string): string {
-    if (value === null || value === undefined || value === '') return fallback;
+  // No hardcoded fallback figures -- a card without live data shows '-'.
+  private formatSummaryValue(value: string | number | undefined): string {
+    if (value === null || value === undefined || value === '') return '-';
     return typeof value === 'number' ? value.toLocaleString('en-IN') : String(value);
   }
 
