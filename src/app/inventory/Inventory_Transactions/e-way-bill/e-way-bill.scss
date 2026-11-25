@@ -1,0 +1,209 @@
+// Only the classes specific to this screen (mirrors e-invoice.scss). Shared
+// classes (module-page, inventory-section, erp-table, erp-btn, inventory-modal
+// ...) come from src/styles.scss.
+
+.ewb-filter-grid {
+  align-items: end;
+}
+
+.ewb-show-group {
+  justify-content: flex-end;
+}
+
+.ewb-filter-error {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.ewb-mock-tag {
+  align-self: flex-start;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.ewb-search {
+  min-width: 280px;
+}
+
+.ewb-empty {
+  padding: 16px;
+  color: #64748b;
+}
+
+.ewb-subtext {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.ewb-row-selected {
+  background: #eef4ff;
+}
+
+.ewb-mono {
+  font-family: monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ewb-break {
+  white-space: normal;
+  word-break: break-all;
+}
+
+.ewb-actions {
+  white-space: nowrap;
+
+  .erp-btn + .erp-btn {
+    margin-left: 4px;
+  }
+}
+
+.ewb-cancel-btn,
+.ewb-cancel-btn i {
+  color: #b91c1c;
+}
+
+.ewb-link {
+  color: var(--primary-color, #2563eb);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.ewb-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.ewb-badge--ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.ewb-badge--pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.ewb-badge--error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.ewb-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 2px 0;
+  font-size: 12px;
+  color: #475569;
+}
+
+.ewb-pager-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ewb-page-size {
+  width: auto;
+  min-width: 110px;
+}
+
+// ── Dialogs ──────────────────────────────────────────────────────────────────
+
+.ewb-modal-subtitle {
+  margin: 4px 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+
+  &:not(:first-child) {
+    margin-top: 18px;
+  }
+}
+
+.ewb-transport-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ewb-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.ewb-distance {
+  width: 100%;
+  min-width: 90px;
+}
+
+.ewb-view-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+
+  > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  span {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: #64748b;
+  }
+
+  strong {
+    color: #0f172a;
+  }
+}
+
+.ewb-view-full {
+  grid-column: 1 / -1;
+}
+
+.ewb-cancel-note {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #fee2e2;
+  color: #991b1b;
+  font-size: 12px;
+}
+
+// Opened on top of the View dialog.
+.ewb-cancel-backdrop {
+  z-index: 1210;
+}
+
+.ewb-remarks {
+  margin-top: 12px;
+}
+
+@media (max-width: 760px) {
+  .ewb-transport-grid,
+  .ewb-view-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .ewb-search {
+    min-width: 0;
+    width: 100%;
+  }
+}

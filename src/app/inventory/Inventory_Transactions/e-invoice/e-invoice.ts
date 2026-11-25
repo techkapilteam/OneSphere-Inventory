@@ -99,8 +99,24 @@ export class InventoryEInvoiceComponent {
   // ── Filters ────────────────────────────────────────────────────────────────
 
   onTypeChange(type: EInvoiceType): void {
-    this.einvoiceType.set(type || 'New');
+    const next = type || 'New';
+    this.einvoiceType.set(next);
+    // Old lists every saved e-invoice: start from the financial year (1-Apr),
+    // New keeps the current month. To Date stays today.
+    this.fromDate.set(next === 'Old' ? this.financialYearStart() : this.monthStart());
+    this.toDate.set(new Date());
+    this.filterError.set('');
     this.resetGrid();
+  }
+
+  private monthStart(): Date {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  }
+
+  private financialYearStart(): Date {
+    const now = new Date();
+    return new Date(now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1, 3, 1);
   }
 
   onFromDateChange(date: Date | null): void {
@@ -133,6 +149,8 @@ export class InventoryEInvoiceComponent {
       return;
     }
     this.filterError.set('');
+    // A search typed for the previous list would hide rows of the new one.
+    this.searchText.set('');
     this.load(this.einvoiceType(), from, to);
   }
 
@@ -144,7 +162,15 @@ export class InventoryEInvoiceComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: res => {
-          this.rows.set(res.data ?? []);
+          const rows = res.data ?? [];
+          // Old: latest e-invoice first (by Ack Date, then invoice date).
+          if (type === 'Old') {
+            rows.sort((a, b) =>
+              String(b.ack_date || '').localeCompare(String(a.ack_date || '')) ||
+              String(b.invoice_date || '').localeCompare(String(a.invoice_date || '')) ||
+              b.invoice_id - a.invoice_id);
+          }
+          this.rows.set(rows);
           this.shownType.set(type);
           this.loaded.set(true);
           this.loading.set(false);
