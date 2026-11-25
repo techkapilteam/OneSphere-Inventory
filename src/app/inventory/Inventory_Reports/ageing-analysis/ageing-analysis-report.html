@@ -1,0 +1,115 @@
+<div class="module-page inventory-page inventory-report-page inventory-generic-report-page ag-page">
+  <div class="inventory-shell">
+    <div class="inventory-report-header-card">
+      <div class="inventory-header inventory-report-header">
+        <div class="inventory-report-header-top-filters">
+          <div class="inventory-report-filter inventory-report-filter--date inventory-report-filter--date-single">
+            <label title="As on Date"><i class="pi pi-calendar"></i> As on Date</label>
+            <div class="inventory-date-wrap">
+              <p-datepicker [ngModel]="asOnDate()" (ngModelChange)="setAsOnDate($event)" [ngModelOptions]="{ standalone: true }" [maxDate]="todayDate" dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY" [readonlyInput]="true" [showIcon]="false" appendTo="body" styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100"></p-datepicker>
+              <i class="pi pi-calendar inventory-date-icon"></i>
+            </div>
+          </div>
+          <div class="inventory-report-filter ag-head-filter">
+            <label title="Account Head"><i class="pi pi-sitemap"></i> Account Head</label>
+            <ng-select class="erp-ng-select inventory-ng-select" appendTo="body" [items]="accountHeadOptions" bindLabel="label" bindValue="value" [clearable]="false" [searchable]="false" [ngModel]="accountHead()" (ngModelChange)="setAccountHead($event)"></ng-select>
+          </div>
+          <!-- Empty label above the button so it lines up with the filter boxes, not their labels. -->
+          <div class="inventory-report-filter ag-actions">
+            <label class="ag-actions-spacer" aria-hidden="true">&nbsp;</label>
+            <div class="ag-actions-buttons">
+              <button type="button" class="erp-btn btn-primary btn-sm inventory-report-generate-btn" title="Generate" [disabled]="loading()" (click)="generate()"><i class="pi pi-search"></i> Generate</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <section class="inventory-section inventory-report-section">
+      <div class="inventory-report-grid-bar">
+        <div class="inventory-report-grid-messages">
+          @if (errorMessage()) {
+            <div class="inventory-report-message error"><i class="pi pi-exclamation-triangle"></i> {{ errorMessage() }}</div>
+          }
+        </div>
+        <div class="inventory-report-grid-actions">
+          @if (hasData()) {
+            <div class="ag-search">
+              <i class="pi pi-search"></i>
+              <input type="text" class="erp-input" placeholder="Search party / trans. no." [value]="search()" (input)="search.set($any($event.target).value)" />
+            </div>
+          }
+          <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Export Excel" [disabled]="!hasData()" (click)="exportExcel()"><i class="pi pi-file-excel"></i></button>
+          <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Export PDF" [disabled]="!hasData()" (click)="exportPdf()"><i class="pi pi-file-pdf"></i></button>
+          <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Print" [disabled]="!hasData()" (click)="printReport()"><i class="pi pi-print"></i></button>
+        </div>
+      </div>
+
+      @if (report()) {
+        <div class="ag-heading">
+          <div class="ag-heading-company">{{ companyName() }}</div>
+          <div class="ag-heading-title">{{ reportTitle() }}</div>
+          <div class="ag-heading-meta">
+            <span>{{ periodText() }}</span>
+            <span>Parties: {{ parties().length }}</span>
+            @if (branchName()) { <span>{{ branchName() }}</span> }
+          </div>
+        </div>
+      }
+
+      <div class="tbl-wrap ag-wrap">
+        @if (loading()) {
+          <div class="text-center p-4"><i class="pi pi-spin pi-spinner"></i> Loading report data...</div>
+        } @else if (report() && !hasData()) {
+          <div class="text-center p-4">Nothing is due under {{ headLabel() }} as on this date.</div>
+        } @else if (!report()) {
+          <div class="text-center p-4">Select the As on Date and Account Head, then click Generate.</div>
+        } @else {
+          <table class="erp-table compact ag-table">
+            <thead>
+              <tr>
+                <th class="ag-label ag-trans">Trans. No</th>
+                <th class="ag-label">Trans. Date</th>
+                <th class="ag-num ag-days">Days</th>
+                @for (c of columns(); track c.index) { <th class="ag-num">{{ c.label }}</th> }
+                <th class="ag-num">Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (p of filteredParties(); track p.accountId) {
+                <tr class="ag-party">
+                  <td [attr.colspan]="leadColumns + columns().length + 1">{{ p.serial }}&nbsp;&nbsp;{{ p.party }}</td>
+                </tr>
+                @for (bill of p.bills; track $index) {
+                  <tr>
+                    <td class="ag-label">{{ bill.invoiceNo }}</td>
+                    <td class="ag-label">{{ date(bill.invoiceDate) }}</td>
+                    <td class="ag-num">{{ bill.ageDays }}</td>
+                    @for (c of columns(); track c.index) {
+                      <td class="ag-num">{{ c.index === bill.bucket ? amt(bill.dueAmount) : '-' }}</td>
+                    }
+                    <td class="ag-num">{{ amt(bill.runningBalance) }}</td>
+                  </tr>
+                }
+                <tr class="ag-party-total">
+                  <td [attr.colspan]="leadColumns" class="ag-right">Total</td>
+                  @for (v of p.buckets; track $index) { <td class="ag-num">{{ amt(v) }}</td> }
+                  <td class="ag-num">{{ amt(p.balance) }}</td>
+                </tr>
+              } @empty {
+                <tr><td [attr.colspan]="leadColumns + columns().length + 1" class="text-center p-3">No party matches the search.</td></tr>
+              }
+            </tbody>
+            <tfoot>
+              <tr class="ag-grand-total">
+                <td [attr.colspan]="leadColumns" class="ag-right">Grand Total</td>
+                @for (v of totals().buckets; track $index) { <td class="ag-num">{{ amt(v) }}</td> }
+                <td class="ag-num">{{ amt(totals().balance) }}</td>
+              </tr>
+            </tfoot>
+          </table>
+        }
+      </div>
+    </section>
+  </div>
+</div>

@@ -152,6 +152,8 @@ export class NavigationService {
               name: 'Reports',
               screens: [
                 { id: 'stock-summary', name: 'Stock Summary Report', route: '/dashboard/inventory/reports/stock-summary', group: 'Stock Reports' },
+                // Product-wise Ageing: closing stock (= Stock Summary) aged FIFO by inward date (314).
+                { id: 'productwise-ageing', name: 'Product-wise Ageing Report', route: '/dashboard/inventory/reports/productwise-ageing', group: 'Stock Reports' },
                 { id: 'stock-ledger', name: 'Stock Ledger Report', route: '/dashboard/inventory/reports/stock-ledger', group: 'Stock Reports' },
                 { id: 'warehouse-wise-stock', name: 'Warehouse-wise Stock Report', route: '/dashboard/inventory/reports/warehouse-wise-stock', group: 'Stock Reports' },
                 { id: 'purchase-order-register', name: 'Purchase Order Register', route: '/dashboard/inventory/reports/purchase-order-register', group: 'Purchase Reports' },
@@ -161,6 +163,7 @@ export class NavigationService {
                 { id: 'delivery-challan-register', name: 'Delivery Challan Register', route: '/dashboard/inventory/reports/delivery-challan-register', group: 'Sales Reports' },
                 { id: 'sales-invoice-register', name: 'Sale Invoice Register', route: '/dashboard/inventory/reports/sales-invoice-register', group: 'Sales Reports' },
                 { id: 'dues-list', name: 'Dues List Report', route: '/dashboard/inventory/reports/dues-list', group: 'Customer & Supplier Reports' },
+                { id: 'productwise-dues', name: 'Product-wise Dues List', route: '/dashboard/inventory/reports/productwise-dues', group: 'Customer & Supplier Reports' },
                 { id: 'collection-report', name: 'Collection Report', route: '/dashboard/inventory/reports/collection-report', group: 'Customer & Supplier Reports' },
                 { id: 'hsn-summary', name: 'HSN/SAC Summary Report', route: '/dashboard/inventory/reports/hsn-summary', group: 'GST & Compliance Reports' },
                 { id: 'batch-serial-expiry', name: 'Batch / Serial / Expiry Report', route: '/dashboard/inventory/reports/batch-serial-expiry', group: 'Batch / Serial / Expiry Reports' },

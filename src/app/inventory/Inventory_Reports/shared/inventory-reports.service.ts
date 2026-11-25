@@ -125,6 +125,72 @@ export interface ProfitLossReport {
   message: string;
 }
 
+// Backs GET /api/reports/ageing-analysis (inventory.sp_get_ageing_analysis_report,
+// 312_ageing_analysis_report.sql): the open bills (FIFO) of every party ledger
+// under SUNDRY DEBITORS (customer) / SUNDRY CREDITORS (vendor) as on a date,
+// each already put into one of the company's ageing slabs. Grand Total = Trial
+// Balance. The age columns come from the procedure, not from the screen.
+export type AgeingPartyType = 'customer' | 'vendor';
+
+export interface AgeingColumn {
+  index: number;
+  label: string;
+  fromDays: number;
+  toDays: number | null;
+}
+
+export interface AgeingAnalysisRow {
+  /** Party ledger id. */
+  accountId: number;
+  party: string;
+  /** Transaction (voucher / invoice) no. of the open bill. */
+  invoiceNo: string;
+  invoiceDate: string | null;
+  ageDays: number;
+  /** Open amount on the head's normal side; negative = advance. */
+  dueAmount: number;
+  /** Index into AgeingAnalysisReport.columns. */
+  bucket: number;
+}
+
+export interface AgeingAnalysisReport {
+  partyType: AgeingPartyType;
+  asOnDate: string;
+  columns: AgeingColumn[];
+  totals: number[];
+  dueAmount: number;
+  rows: AgeingAnalysisRow[];
+  message: string;
+}
+
+// Backs GET /api/reports/productwise-ageing (inventory.sp_get_productwise_ageing_report,
+// 314_productwise_ageing_report.sql): each product's closing stock as on a date
+// (= Stock Summary qty / value) split into the company's ageing slabs by the
+// date of the inwards still in hand (FIFO). qty / value are per column.
+export interface ProductwiseAgeingRow {
+  productId: number;
+  productCode: string;
+  product: string;
+  category: string;
+  uom: string;
+  closingQty: number;
+  stockValue: number;
+  qty: number[];
+  value: number[];
+}
+
+export interface ProductwiseAgeingReport {
+  asOnDate: string;
+  columns: AgeingColumn[];
+  totals: number[];
+  stockValue: number;
+  closingQty: number;
+  excludedCount: number;
+  excludedValue: number;
+  rows: ProductwiseAgeingRow[];
+  message: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -178,6 +244,55 @@ export class InventoryReportsService {
     );
   }
 
+  getAgeingAnalysis(asOnDate: Date, partyType: AgeingPartyType, branchId?: number | null): Observable<AgeingAnalysisReport> {
+    let params = new HttpParams()
+      .set('toDate', this.toDateParam(asOnDate))
+      .set('partyType', partyType);
+    if (branchId) params = params.set('branchId', String(branchId));
+
+    return this.commonService.getAPI('/reports/ageing-analysis', params, 'YES').pipe(
+      map((response: { message?: string; data?: AgeingAnalysisRow[]; summary?: { asOnDate?: string; partyType?: AgeingPartyType; columns?: AgeingColumn[]; totals?: number[]; dueAmount?: number } }) => ({
+        partyType: response?.summary?.partyType ?? partyType,
+        asOnDate: response?.summary?.asOnDate ?? this.toDateParam(asOnDate),
+        columns: response?.summary?.columns ?? [],
+        totals: (response?.summary?.totals ?? []).map(Number),
+        dueAmount: Number(response?.summary?.dueAmount ?? 0),
+        rows: Array.isArray(response?.data) ? response.data : [],
+        message: String(response?.message ?? '')
+      })),
+      catchError(error => throwError(() => error))
+    );
+  }
+
+  /** productIds empty = All products. */
+  getProductwiseAgeing(asOnDate: Date, productIds: number[] = [], branchId?: number | null): Observable<ProductwiseAgeingReport> {
+    let params = new HttpParams().set('toDate', this.toDateParam(asOnDate));
+    const ids = productIds.filter(id => id > 0);
+    if (ids.length) params = params.set('productIds', ids.join(','));
+    if (branchId) params = params.set('branchId', String(branchId));
+
+    type Summary = { asOnDate?: string; columns?: AgeingColumn[]; totals?: number[]; stockValue?: number; closingQty?: number; excludedCount?: number; excludedValue?: number };
+    return this.commonService.getAPI('/reports/productwise-ageing', params, 'YES').pipe(
+      map((response: { message?: string; data?: ProductwiseAgeingRow[]; summary?: Summary }) => ({
+        asOnDate: response?.summary?.asOnDate ?? this.toDateParam(asOnDate),
+        columns: response?.summary?.columns ?? [],
+        totals: (response?.summary?.totals ?? []).map(Number),
+        stockValue: Number(response?.summary?.stockValue ?? 0),
+        closingQty: Number(response?.summary?.closingQty ?? 0),
+        excludedCount: Number(response?.summary?.excludedCount ?? 0),
+        excludedValue: Number(response?.summary?.excludedValue ?? 0),
+        rows: (Array.isArray(response?.data) ? response.data : []).map(r => ({
+          ...r,
+          closingQty: Number(r.closingQty) || 0,
+          stockValue: Number(r.stockValue) || 0,
+          qty: (r.qty ?? []).map(Number),
+          value: (r.value ?? []).map(Number)
+        })),
+        message: String(response?.message ?? '')
+      })),
+      catchError(error => throwError(() => error))
+    );
+  }
   contextDefaults(): InventoryReportFilters {
     return {
       companyId: this.commonService.getCompanyCode(),

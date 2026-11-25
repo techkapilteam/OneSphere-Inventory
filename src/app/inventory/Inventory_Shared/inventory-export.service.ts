@@ -711,9 +711,16 @@ export class InventoryExportService {
     // Previous: if (cinGst) {
     // Previous:   const lines = doc.splitTextToSize(cinGst, textWidth) as string[];
     // Previous: const gstPan = [GST NO, PAN].filter(Boolean).join('   ');  (GST NO and PAN on one line)
+    // Previous (each on its own line):
+    // const cinGstLines = [CIN, GST NO, PAN].filter(Boolean);
+    // Now CIN and GST NO side by side — "CIN : xxx | GST NO : yyy" (user
+    // 2026-11-24). If that pair is wider than the text area it falls back to
+    // two lines so a label is never split from its number. PAN stays below.
+    const cinText = company?.cinNumber ? `CIN : ${company.cinNumber}` : '';
+    const gstText = company?.gstNumber ? `GST NO : ${company.gstNumber}` : '';
+    const cinGstPair = [cinText, gstText].filter(Boolean).join(' | ');
     const cinGstLines = [
-      company?.cinNumber ? `CIN : ${company.cinNumber}` : '',
-      company?.gstNumber ? `GST NO : ${company.gstNumber}` : '',
+      ...(cinGstPair && doc.getTextWidth(cinGstPair) <= textWidth ? [cinGstPair] : [cinText, gstText]),
       company?.panNumber ? `PAN : ${company.panNumber}` : ''
     ].filter(Boolean);
     if (cinGstLines.length) {
@@ -1688,8 +1695,10 @@ export class InventoryExportService {
     const parts: string[] = [];
     if (company?.cinNumber) parts.push(`CIN : ${company.cinNumber}`);
     if (company?.gstNumber) parts.push(`GST NO : ${company.gstNumber}`);
-    if (company?.panNumber) parts.push(`PAN : ${company.panNumber}`);
-    return parts.join('   ');
+    // Previous: PAN pushed here too and everything joined with '   '.
+    // Now "CIN : xxx | GST NO : yyy" like the PDF letterhead (2026-11-24).
+    const line = parts.join(' | ');
+    return company?.panNumber ? [line, `PAN : ${company.panNumber}`].filter(Boolean).join('   ') : line;
   }
 
   userName(): string {

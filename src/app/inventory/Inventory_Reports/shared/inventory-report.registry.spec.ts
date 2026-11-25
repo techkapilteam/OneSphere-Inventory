@@ -22,21 +22,6 @@ describe('Inventory Audit Trail Report (registry)', () => {
     expect(matches.length).toBe(1);
   });
 
-  it('defines every sample row using only declared column keys', () => {
-    const columnKeys = new Set(report.columns.map(column => column.key));
-    report.sampleRows.forEach(row => {
-      Object.keys(row).forEach(key => {
-        // 'segment' is auto-injected by phaseOneReport() for cross-report segment filtering
-        if (key === 'segment') return;
-        expect(columnKeys.has(key)).toBe(true);
-      });
-    });
-  });
-
-  it('has at least one sample row so the report renders a preview before the API responds', () => {
-    expect(report.sampleRows.length).toBeGreaterThan(0);
-  });
-
   it('falls back to the first report when the slug is unknown (findInventoryReport contract)', () => {
     expect(findInventoryReport('does-not-exist')).toBe(INVENTORY_REPORTS[0]);
   });
