@@ -1,0 +1,437 @@
+<div class="module-page inventory-page ewb-page">
+  <div class="inventory-shell">
+
+    <!-- Filters -->
+    <section class="inventory-section">
+      <div class="inventory-section-title">
+        <div>
+          <h3><i class="pi pi-truck"></i> E-Way Bill</h3>
+          <p>Generate e-way bills for Sales Invoices above ₹50,000, or view the ones already generated.</p>
+        </div>
+        <span class="ewb-mock-tag" title="Front-end only: data is sample data held in memory until the API is ready">Sample data</span>
+      </div>
+
+      <div class="inventory-form-grid inventory-config-grid ewb-filter-grid">
+        <div class="erp-form-group">
+          <label class="erp-label">E-Way Bill Type</label>
+          <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+            [items]="typeOptions" bindLabel="label" bindValue="value"
+            [searchable]="false" [clearable]="false"
+            [ngModel]="ewbType()" (ngModelChange)="onTypeChange($event)">
+          </ng-select>
+        </div>
+
+        <div class="erp-form-group">
+          <label class="erp-label">From Date <span class="text-danger">*</span></label>
+          <div class="inventory-date-wrap">
+            <p-datepicker
+              [ngModel]="fromDate()" (ngModelChange)="onFromDateChange($event)"
+              [maxDate]="maxDate"
+              dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY"
+              [readonlyInput]="true" [showIcon]="false" appendTo="body"
+              styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100">
+            </p-datepicker>
+            <i class="pi pi-calendar inventory-date-icon"></i>
+          </div>
+        </div>
+
+        <div class="erp-form-group">
+          <label class="erp-label">To Date <span class="text-danger">*</span></label>
+          <div class="inventory-date-wrap">
+            <p-datepicker
+              [ngModel]="toDate()" (ngModelChange)="onToDateChange($event)"
+              [minDate]="fromDate()" [maxDate]="maxDate"
+              dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY"
+              [readonlyInput]="true" [showIcon]="false" appendTo="body"
+              styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100">
+            </p-datepicker>
+            <i class="pi pi-calendar inventory-date-icon"></i>
+          </div>
+        </div>
+
+        <div class="erp-form-group ewb-show-group">
+          <button type="button" class="erp-btn btn-primary" [disabled]="loading()" (click)="show()">
+            <i [class]="loading() ? 'pi pi-spin pi-spinner' : 'pi pi-search'"></i> Show
+          </button>
+        </div>
+      </div>
+
+      @if (filterError()) {
+        <div class="text-danger ewb-filter-error"><i class="pi pi-exclamation-triangle"></i> {{ filterError() }}</div>
+      }
+    </section>
+
+    <!-- List -->
+    <section class="inventory-section">
+      <div class="inventory-section-title">
+        <div>
+          <h3>{{ isNew() ? 'Pending Invoices' : 'Generated E-Way Bills' }}</h3>
+          <p>
+            {{ filteredRows().length }} record(s)
+            @if (isNew() && selectedIds().size) {
+              · <strong>{{ selectedIds().size }} selected ({{ formatAmount(selectedTotal()) }})</strong>
+            }
+          </p>
+        </div>
+        <div class="ewb-search">
+          <input class="erp-input" type="text"
+            [placeholder]="isNew() ? 'Search invoice no, client, GSTIN, place' : 'Search invoice no, client, EWB no, vehicle'"
+            [ngModel]="searchText()" (ngModelChange)="onSearchChange($event)" />
+        </div>
+      </div>
+
+      <div class="tbl-wrap">
+        <table class="erp-table compact">
+          <thead>
+            <tr>
+              @if (isNew()) {
+                <th class="text-center" style="width: 44px;">
+                  <input type="checkbox" title="Select all invoices above ₹50,000"
+                    [checked]="allSelected()" [disabled]="!selectableRows().length"
+                    (change)="toggleAll($any($event.target).checked)" />
+                </th>
+              } @else {
+                <th class="text-center" style="width: 90px;">Action</th>
+              }
+              <th>Invoice Date</th>
+              <th>Client Name</th>
+              <th>Invoice No</th>
+              <th class="text-end">Amount</th>
+              @if (isNew()) {
+                <th>Ship To</th>
+                <th class="text-end">Distance (km)</th>
+              } @else {
+                <th>EWB No</th>
+                <th>EWB Date</th>
+                <th>Valid Upto</th>
+                <th>Vehicle No</th>
+              }
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            @if (loading()) {
+              <tr><td [attr.colspan]="isNew() ? 8 : 10" class="text-center ewb-empty">
+                <i class="pi pi-spin pi-spinner"></i> Loading…
+              </td></tr>
+            } @else {
+              @for (row of pagedRows(); track row.invoice_id) {
+                <tr [class.ewb-row-selected]="isSelected(row)">
+                  @if (isNew()) {
+                    <td class="text-center">
+                      <input type="checkbox"
+                        [checked]="isSelected(row)" [disabled]="!canSelect(row)"
+                        [title]="selectTitle(row)"
+                        (change)="toggleRow(row, $any($event.target).checked)" />
+                    </td>
+                  } @else {
+                    <td class="text-center ewb-actions">
+                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="View e-way bill" (click)="openView(row)">
+                        <i class="pi pi-eye"></i>
+                      </button>
+                      @if (canCancel(row)) {
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm ewb-cancel-btn" title="Cancel e-way bill (within 24 hours)" (click)="openCancel(row)">
+                          <i class="pi pi-ban"></i>
+                        </button>
+                      }
+                    </td>
+                  }
+                  <td>{{ formatDate(row.invoice_date) }}</td>
+                  <td>
+                    {{ row.customer_name || '-' }}
+                    <div class="ewb-subtext">{{ row.customer_gstin || 'URP (unregistered)' }}</div>
+                  </td>
+                  <td>
+                    @if (isNew()) {
+                      <strong>{{ row.invoice_no }}</strong>
+                    } @else {
+                      <a href="javascript:void(0)" class="ewb-link" title="View e-way bill" (click)="openView(row)"><strong>{{ row.invoice_no }}</strong></a>
+                    }
+                  </td>
+                  <td class="text-end">{{ formatAmount(row.total_amount) }}</td>
+                  @if (isNew()) {
+                    <td>
+                      {{ row.to_place }}
+                      <div class="ewb-subtext">{{ row.to_state }} - {{ row.to_pincode }}</div>
+                    </td>
+                    <td class="text-end">{{ row.distance_km || '-' }}</td>
+                  } @else {
+                    <td class="ewb-mono">{{ formatEwbNo(row.ewb_no) }}</td>
+                    <td>{{ formatDateTime(row.ewb_date) }}</td>
+                    <td [class.text-danger]="isExpired(row)">{{ formatDateTime(row.valid_upto) }}</td>
+                    <td>{{ row.vehicle_no || '-' }}</td>
+                  }
+                  <td>
+                    <span [class]="statusClass(row)">{{ statusLabel(row) }}</span>
+                    @if (row.error_message) {
+                      <div class="ewb-subtext text-danger">{{ row.error_message }}</div>
+                    }
+                  </td>
+                </tr>
+              } @empty {
+                <tr>
+                  <td [attr.colspan]="isNew() ? 8 : 10" class="text-center ewb-empty">
+                    @if (!loaded()) {
+                      Select the e-way bill type and date range, then click Show.
+                    } @else if (isNew()) {
+                      No Sales Invoices are waiting for an e-way bill in this period.
+                    } @else {
+                      No e-way bills were generated in this period.
+                    }
+                  </td>
+                </tr>
+              }
+            }
+          </tbody>
+        </table>
+      </div>
+
+      @if (filteredRows().length) {
+        <div class="ewb-pager">
+          <span>Page {{ page() }} of {{ totalPages() }} ({{ filteredRows().length }} items)</span>
+          <div class="ewb-pager-controls">
+            <select class="erp-input ewb-page-size" title="Rows per page"
+              [ngModel]="pageSize()" (ngModelChange)="setPageSize($event)">
+              @for (size of pageSizeOptions; track size) {
+                <option [ngValue]="size">{{ size }} / page</option>
+              }
+            </select>
+            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="First page" [disabled]="page() <= 1" (click)="goToPage(1)">
+              <i class="pi pi-angle-double-left"></i>
+            </button>
+            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Previous page" [disabled]="page() <= 1" (click)="goToPage(page() - 1)">
+              <i class="pi pi-angle-left"></i>
+            </button>
+            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Next page" [disabled]="page() >= totalPages()" (click)="goToPage(page() + 1)">
+              <i class="pi pi-angle-right"></i>
+            </button>
+            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Last page" [disabled]="page() >= totalPages()" (click)="goToPage(totalPages())">
+              <i class="pi pi-angle-double-right"></i>
+            </button>
+          </div>
+        </div>
+      }
+
+      @if (isNew()) {
+        <div class="inventory-form-actions">
+          <button type="button" class="erp-btn btn-white" [disabled]="!selectedIds().size" (click)="toggleAll(false)">
+            <i class="pi pi-times"></i> Clear Selection
+          </button>
+          <button type="button" class="erp-btn btn-primary" [disabled]="!selectedIds().size" (click)="openGenerate()">
+            <i class="pi pi-truck"></i>
+            Generate E-Way Bill{{ selectedIds().size ? ' (' + selectedIds().size + ')' : '' }}
+          </button>
+        </div>
+      }
+    </section>
+  </div>
+
+  <!-- Generate: transport details (Part-B) + distance per invoice -->
+  @if (generateOpen()) {
+    <div class="inventory-modal-backdrop" (click)="closeGenerate()">
+      <div class="inventory-card inventory-modal inventory-modal--wide" (click)="$event.stopPropagation()">
+        <div class="inventory-modal-header">
+          <div>
+            <h3>Generate E-Way Bill</h3>
+            <p>{{ selectedRows().length }} invoice(s) · {{ formatAmount(selectedTotal()) }}. The same transport details apply to all selected invoices.</p>
+          </div>
+          <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Close" [disabled]="generating()" (click)="closeGenerate()"><i class="pi pi-times"></i></button>
+        </div>
+
+        <div class="inventory-modal-body">
+          <h4 class="ewb-modal-subtitle">Transport Details</h4>
+          <div class="inventory-form-grid ewb-transport-grid">
+            <div class="erp-form-group">
+              <label class="erp-label">Mode of Transport <span class="text-danger">*</span></label>
+              <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+                [items]="transportModes" [searchable]="false" [clearable]="false"
+                [(ngModel)]="transport.transport_mode">
+              </ng-select>
+            </div>
+
+            @if (isRoad()) {
+              <div class="erp-form-group">
+                <label class="erp-label">Vehicle Type</label>
+                <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+                  [items]="vehicleTypes" bindLabel="label" bindValue="value"
+                  [searchable]="false" [clearable]="false"
+                  [(ngModel)]="transport.vehicle_type">
+                </ng-select>
+              </div>
+              <div class="erp-form-group">
+                <label class="erp-label">Vehicle No</label>
+                <input class="erp-input" type="text" maxlength="15" placeholder="e.g. TS09UB4521"
+                  [ngModel]="transport.vehicle_no" (ngModelChange)="onVehicleNoChange($event)" />
+              </div>
+            }
+
+            <div class="erp-form-group">
+              <label class="erp-label">Transporter ID (GSTIN)</label>
+              <input class="erp-input" type="text" maxlength="15" placeholder="15-character GSTIN / TRANSIN"
+                [ngModel]="transport.transporter_id" (ngModelChange)="onTransporterIdChange($event)" />
+            </div>
+            <div class="erp-form-group">
+              <label class="erp-label">Transporter Name</label>
+              <input class="erp-input" type="text" maxlength="100" [(ngModel)]="transport.transporter_name" />
+            </div>
+            <div class="erp-form-group">
+              <label class="erp-label">Transport Doc No @if (!isRoad()) { <span class="text-danger">*</span> }</label>
+              <input class="erp-input" type="text" maxlength="15"
+                [placeholder]="isRoad() ? 'LR / RR number (optional)' : 'RR / Airway bill / Bill of lading no'"
+                [(ngModel)]="transport.transport_doc_no" />
+            </div>
+            <div class="erp-form-group">
+              <label class="erp-label">Transport Doc Date @if (!isRoad()) { <span class="text-danger">*</span> }</label>
+              <div class="inventory-date-wrap">
+                <p-datepicker
+                  [(ngModel)]="transportDocDate"
+                  dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY"
+                  [readonlyInput]="true" [showIcon]="false" appendTo="body"
+                  styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100">
+                </p-datepicker>
+                <i class="pi pi-calendar inventory-date-icon"></i>
+              </div>
+            </div>
+          </div>
+          @if (isRoad()) {
+            <p class="ewb-hint">Vehicle No can be left empty when a Transporter ID is given; the transporter then adds the vehicle (Part-B) later.</p>
+          }
+
+          <h4 class="ewb-modal-subtitle">Invoices</h4>
+          <div class="tbl-wrap">
+            <table class="erp-table compact">
+              <thead>
+                <tr>
+                  <th>Invoice No</th>
+                  <th>Client Name</th>
+                  <th>Ship To</th>
+                  <th class="text-end">Amount</th>
+                  <th class="text-end" style="width: 130px;">Distance (km) <span class="text-danger">*</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of selectedRows(); track row.invoice_id) {
+                  <tr>
+                    <td><strong>{{ row.invoice_no }}</strong></td>
+                    <td>{{ row.customer_name }}</td>
+                    <td>{{ row.to_place }} - {{ row.to_pincode }}</td>
+                    <td class="text-end">{{ formatAmount(row.total_amount) }}</td>
+                    <td>
+                      <input class="erp-input text-end ewb-distance" type="number" min="1" max="4000" step="1"
+                        [ngModel]="distances()[row.invoice_id]" (ngModelChange)="setDistance(row.invoice_id, $event)" />
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+
+          @if (generateError()) {
+            <p class="inventory-error-msg"><i class="pi pi-exclamation-triangle"></i> {{ generateError() }}</p>
+          }
+        </div>
+
+        <div class="inventory-modal-footer">
+          <button type="button" class="erp-btn btn-white" [disabled]="generating()" (click)="closeGenerate()">Cancel</button>
+          <button type="button" class="erp-btn btn-primary" [disabled]="generating()" (click)="generate()">
+            <i [class]="generating() ? 'pi pi-spin pi-spinner' : 'pi pi-check'"></i>
+            {{ generating() ? 'Generating…' : 'Generate' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- View (Old) -->
+  @if (viewRow(); as row) {
+    <div class="inventory-modal-backdrop" (click)="closeView()">
+      <div class="inventory-card inventory-modal inventory-modal--wide" (click)="$event.stopPropagation()">
+        <div class="inventory-modal-header">
+          <div>
+            <h3>E-Way Bill {{ formatEwbNo(row.ewb_no) }}</h3>
+            <p>{{ row.invoice_no }} · <span [class]="statusClass(row)">{{ statusLabel(row) }}</span></p>
+          </div>
+          <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Close" (click)="closeView()"><i class="pi pi-times"></i></button>
+        </div>
+
+        <div class="inventory-modal-body">
+          <h4 class="ewb-modal-subtitle">Part A — Document</h4>
+          <div class="ewb-view-grid">
+            <div><span>EWB No</span><strong class="ewb-mono">{{ formatEwbNo(row.ewb_no) }}</strong></div>
+            <div><span>Generated On</span><strong>{{ formatDateTime(row.ewb_date) }}</strong></div>
+            <div><span>Valid Upto</span><strong [class.text-danger]="isExpired(row)">{{ formatDateTime(row.valid_upto) }}</strong></div>
+            <div><span>Invoice No / Date</span><strong>{{ row.invoice_no }} · {{ formatDate(row.invoice_date) }}</strong></div>
+            <div><span>Client</span><strong>{{ row.customer_name }}</strong></div>
+            <div><span>Client GSTIN</span><strong>{{ row.customer_gstin || 'URP (unregistered)' }}</strong></div>
+            <div><span>Ship To</span><strong>{{ row.to_place }}, {{ row.to_state }} - {{ row.to_pincode }}</strong></div>
+            <div><span>Invoice Value</span><strong>{{ formatAmount(row.total_amount) }}</strong></div>
+            <div><span>Distance</span><strong>{{ row.distance_km }} km</strong></div>
+            <div><span>Supply Type</span><strong>Outward · Supply</strong></div>
+            @if (row.irn) {
+              <div class="ewb-view-full"><span>IRN</span><strong class="ewb-mono ewb-break">{{ row.irn }}</strong></div>
+            }
+          </div>
+
+          <h4 class="ewb-modal-subtitle">Part B — Transport</h4>
+          <div class="ewb-view-grid">
+            <div><span>Mode</span><strong>{{ row.transport_mode || '-' }}</strong></div>
+            <div><span>Vehicle Type</span><strong>{{ row.vehicle_type === 'ODC' ? 'Over Dimensional Cargo' : (row.vehicle_type || '-') }}</strong></div>
+            <div><span>Vehicle No</span><strong>{{ row.vehicle_no || '-' }}</strong></div>
+            <div><span>Transporter</span><strong>{{ row.transporter_name || '-' }}</strong></div>
+            <div><span>Transporter ID</span><strong>{{ row.transporter_id || '-' }}</strong></div>
+            <div><span>Transport Doc No / Date</span><strong>{{ row.transport_doc_no || '-' }} · {{ formatDate(row.transport_doc_date) }}</strong></div>
+          </div>
+
+          @if (row.status === 'cancelled') {
+            <div class="ewb-cancel-note">
+              <i class="pi pi-ban"></i> Cancelled on {{ formatDateTime(row.cancelled_on) }} — {{ row.cancel_reason }}
+            </div>
+          }
+        </div>
+
+        <div class="inventory-modal-footer">
+          @if (canCancel(row)) {
+            <button type="button" class="erp-btn btn-white ewb-cancel-btn" (click)="openCancel(row)"><i class="pi pi-ban"></i> Cancel E-Way Bill</button>
+          }
+          <button type="button" class="erp-btn btn-primary" (click)="closeView()">Close</button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- Cancel (within 24 hours) -->
+  @if (cancelRow(); as row) {
+    <div class="inventory-modal-backdrop ewb-cancel-backdrop" (click)="closeCancel()">
+      <div class="inventory-card inventory-modal" (click)="$event.stopPropagation()">
+        <div class="inventory-modal-header">
+          <div>
+            <h3>Cancel E-Way Bill</h3>
+            <p>{{ formatEwbNo(row.ewb_no) }} · {{ row.invoice_no }}. This cannot be undone.</p>
+          </div>
+        </div>
+        <div class="inventory-modal-body">
+          <div class="erp-form-group">
+            <label class="erp-label">Reason <span class="text-danger">*</span></label>
+            <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+              [items]="cancelReasons" [searchable]="false" [clearable]="false"
+              placeholder="Select reason" [(ngModel)]="cancelReason">
+            </ng-select>
+          </div>
+          <div class="erp-form-group ewb-remarks">
+            <label class="erp-label">Remarks @if (cancelReason === 'Others') { <span class="text-danger">*</span> }</label>
+            <textarea class="erp-input" rows="3" maxlength="50" [(ngModel)]="cancelRemarks"></textarea>
+          </div>
+          @if (cancelError()) {
+            <p class="inventory-error-msg"><i class="pi pi-exclamation-triangle"></i> {{ cancelError() }}</p>
+          }
+        </div>
+        <div class="inventory-modal-footer">
+          <button type="button" class="erp-btn btn-white" [disabled]="cancelling()" (click)="closeCancel()">Back</button>
+          <button type="button" class="erp-btn btn-danger" [disabled]="cancelling()" (click)="confirmCancel()">
+            <i [class]="cancelling() ? 'pi pi-spin pi-spinner' : 'pi pi-ban'"></i> Cancel E-Way Bill
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+</div>

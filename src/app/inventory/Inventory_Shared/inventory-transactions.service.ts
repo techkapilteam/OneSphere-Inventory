@@ -2216,11 +2216,16 @@ export class InventoryTransactionsService {
     };
   }
 
+  /** Lists the login company's (sessionStorage companyId) invoices of the login branch (sessionStorage branchId). */
   getEInvoices(filters: { type: 'New' | 'Old'; fromDate: string; toDate: string }): Observable<ApiResponse<EInvoiceRow[]>> {
-    const params = new HttpParams()
+    let params = new HttpParams()
       .set('type', filters.type)
       .set('fromDate', filters.fromDate)
       .set('toDate', filters.toDate);
+    const companyId = Number(sessionStorage.getItem('companyId') || 0);
+    const branchId = Number(sessionStorage.getItem('branchId') || 0);
+    if (companyId > 0) params = params.set('companyId', companyId);
+    if (branchId > 0) params = params.set('branchId', branchId);
     return this.mapArray(
       this.http.get<ApiResponse<any[]>>(this.salesUrl('e-invoices'), { headers: this.headers(), params }),
       r => this.normEInvoice(r)
