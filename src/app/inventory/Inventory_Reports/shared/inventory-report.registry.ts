@@ -2,8 +2,7 @@ import {
   InventoryReportColumn,
   InventoryReportDefinition,
   InventoryReportFilterKey,
-  InventoryReportGroup,
-  InventoryReportRow
+  InventoryReportGroup
 } from './inventory-report.models';
 
 // No 'companyId' filter — a report is always scoped to the single company the
@@ -14,7 +13,6 @@ const baseFilters: InventoryReportFilterKey[] = ['branchId', 'segmentId', 'finan
 const productFilters: InventoryReportFilterKey[] = ['productId', 'productCategory', 'brand', 'hsnSac', 'uom', 'batchNo', 'serialNo'];
 const partyFilters: InventoryReportFilterKey[] = ['customerId', 'supplierId'];
 const controlFilters: InventoryReportFilterKey[] = ['project', 'department', 'createdBy', 'approvedBy'];
-const fallbackSegments = ['Electronics', 'Agro Product', 'Hotel / Restaurant', 'Drone Manufacturing', 'Co-working Space'];
 
 function cols(items: Array<[string, string, InventoryReportColumn['type']?, boolean?, boolean?]>): InventoryReportColumn[] {
   return items.map(([key, label, type = 'text', total = false, defaultVisible = true]) => ({
@@ -31,36 +29,14 @@ function withSegmentColumn(columns: InventoryReportColumn[]): InventoryReportCol
   return [{ key: 'segment', label: 'Segment', type: 'text', total: false, defaultVisible: true }, ...columns];
 }
 
-function withSegmentRows(rows: InventoryReportRow[]): InventoryReportRow[] {
-  return rows.map((row, index) => ({
-    segment: row['segment'] || inferSegment(row, index),
-    ...row
-  }));
-}
-
-function inferSegment(row: InventoryReportRow, index: number): string {
-  const text = Object.values(row).join(' ').toLowerCase();
-  const segmentNeedles: Array<[string, string[]]> = [
-    ['Electronics', ['ele-', 'led', 'laptop', 'display', 'sensor', 'cable', 'electromart', 'tenant works']],
-    ['Agro Product', ['agr-', 'agro', 'seed', 'paddy', 'fertilizer', 'greengrow']],
-    ['Hotel / Restaurant', ['hotel', 'restaurant', 'kitchen', 'fresh foods', 'basmati', 'cooking oil', 'paneer', 'diner']],
-    ['Drone Manufacturing', ['drn-', 'drone', 'battery', 'aerocore', 'aero labs', 'flight controller']],
-    ['Co-working Space', ['co-work', 'seat', 'cabin', 'meeting room', 'amc support', 'it services']],
-    ['Precast Panels', ['precast', 'panel', 'cement', 'metro site', 'villa site', 'tower site']],
-    ['Real Estate Inventory', ['flat', 'plot', 'skyline', 'green county']]
-  ];
-
-  return segmentNeedles.find(([, needles]) => needles.some(needle => text.includes(needle)))?.[0]
-    ?? fallbackSegments[index % fallbackSegments.length];
-}
-
+// No hardcoded sample / preview rows or fallback card values in any report --
+// every report shows only live data from the API (empty until generated).
 function phaseOneReport(definition: Omit<InventoryReportDefinition, 'phase' | 'filters'> & { filters?: InventoryReportFilterKey[] }): InventoryReportDefinition {
   return {
     ...definition,
     phase: 1,
     filters: definition.filters ?? [...baseFilters, ...productFilters, ...partyFilters, ...controlFilters],
-    columns: withSegmentColumn(definition.columns),
-    sampleRows: withSegmentRows(definition.sampleRows)
+    columns: withSegmentColumn(definition.columns)
   };
 }
 
@@ -94,18 +70,18 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
     audience: ['Business Owner', 'Admin', 'Warehouse', 'Purchase', 'Sales'],
     filters: [...baseFilters, 'productCategory', 'brand', 'project', 'department'],
     summaryCards: [
-      { label: 'Total stock value', valueKey: 'totalStockValue', fallback: 'Rs. 4.82 Cr', icon: 'pi pi-chart-bar', tone: 'blue' },
-      { label: 'Total products', valueKey: 'totalProducts', fallback: '1,248', icon: 'pi pi-list', tone: 'blue' },
-      { label: 'Low stock items', valueKey: 'lowStockItems', fallback: '14', icon: 'pi pi-exclamation-triangle', tone: 'rose' },
-      { label: 'Out of stock items', valueKey: 'outOfStockItems', fallback: '5', icon: 'pi pi-times-circle', tone: 'rose' },
-      { label: 'Negative stock items', valueKey: 'negativeStockItems', fallback: '2', icon: 'pi pi-minus-circle', tone: 'amber' },
-      { label: 'Near expiry items', valueKey: 'nearExpiryItems', fallback: '9', icon: 'pi pi-calendar-times', tone: 'amber' },
-      { label: 'Pending purchase orders', valueKey: 'pendingPurchaseOrders', fallback: '31', icon: 'pi pi-shopping-cart', tone: 'blue' },
-      { label: 'Pending sales orders', valueKey: 'pendingSalesOrders', fallback: '86', icon: 'pi pi-truck', tone: 'blue' },
-      { label: "Today's sales", valueKey: 'todaySales', fallback: 'Rs. 2.10 L', icon: 'pi pi-arrow-circle-up', tone: 'green' },
-      { label: "Today's purchases", valueKey: 'todayPurchases', fallback: 'Rs. 3.80 L', icon: 'pi pi-arrow-circle-down', tone: 'green' },
-      { label: 'Top selling products', valueKey: 'topSellingProducts', fallback: '12', icon: 'pi pi-star', tone: 'green' },
-      { label: 'Slow moving products', valueKey: 'slowMovingProducts', fallback: '18', icon: 'pi pi-clock', tone: 'amber' }
+      { label: 'Total stock value', valueKey: 'totalStockValue', icon: 'pi pi-chart-bar', tone: 'blue' },
+      { label: 'Total products', valueKey: 'totalProducts', icon: 'pi pi-list', tone: 'blue' },
+      { label: 'Low stock items', valueKey: 'lowStockItems', icon: 'pi pi-exclamation-triangle', tone: 'rose' },
+      { label: 'Out of stock items', valueKey: 'outOfStockItems', icon: 'pi pi-times-circle', tone: 'rose' },
+      { label: 'Negative stock items', valueKey: 'negativeStockItems', icon: 'pi pi-minus-circle', tone: 'amber' },
+      { label: 'Near expiry items', valueKey: 'nearExpiryItems', icon: 'pi pi-calendar-times', tone: 'amber' },
+      { label: 'Pending purchase orders', valueKey: 'pendingPurchaseOrders', icon: 'pi pi-shopping-cart', tone: 'blue' },
+      { label: 'Pending sales orders', valueKey: 'pendingSalesOrders', icon: 'pi pi-truck', tone: 'blue' },
+      { label: "Today's sales", valueKey: 'todaySales', icon: 'pi pi-arrow-circle-up', tone: 'green' },
+      { label: "Today's purchases", valueKey: 'todayPurchases', icon: 'pi pi-arrow-circle-down', tone: 'green' },
+      { label: 'Top selling products', valueKey: 'topSellingProducts', icon: 'pi pi-star', tone: 'green' },
+      { label: 'Slow moving products', valueKey: 'slowMovingProducts', icon: 'pi pi-clock', tone: 'amber' }
     ],
     columns: cols([
       ['indicatorGroup', 'Group'],
@@ -115,17 +91,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['ownerAction', 'Owner Action']
     ]),
     defaultGroupBy: 'indicatorGroup',
-    drillDown: true,
-    sampleRows: [
-      { segment: 'Electronics', indicatorGroup: 'Stock', indicator: 'Total stock value', currentValue: 'Rs. 2.24 Cr', risk: 'Good', ownerAction: 'Review LED, laptop and cable stock by HYD and BLR warehouses.' },
-      { segment: 'Electronics', indicatorGroup: 'Stock', indicator: 'Low stock items', currentValue: '6 items', risk: 'Critical', ownerAction: 'Approve purchase requisitions for laptop and CCTV shortage products.' },
-      { segment: 'Agro Product', indicatorGroup: 'Batch / Expiry', indicator: 'Season lots near expiry', currentValue: '3 lots', risk: 'Watch', ownerAction: 'Move paddy seed and fertilizer lots before season closes.' },
-      { segment: 'Hotel / Restaurant', indicatorGroup: 'Movement', indicator: 'Kitchen consumption today', currentValue: 'Rs. 1.84 L', risk: 'Watch', ownerAction: 'Consume expiring oil and rice lots through kitchen plan.' },
-      { segment: 'Drone Manufacturing', indicatorGroup: 'Manufacturing', indicator: 'QC stock hold', currentValue: '17 battery packs', risk: 'Critical', ownerAction: 'Release QC approval to unblock finished drone dispatch.' },
-      { segment: 'Co-working Space', indicatorGroup: 'Availability', indicator: 'Bookable seats', currentValue: '46 seats', risk: 'Good', ownerAction: 'Convert confirmed bookings to sales invoices.' },
-      { segment: 'IT Services', indicatorGroup: 'Profit', indicator: 'AMC billing queue', currentValue: '14 contracts', risk: 'Good', ownerAction: 'Invoice monthly AMC support milestones.' },
-      { segment: 'Real Estate Inventory', indicatorGroup: 'Availability', indicator: 'Available units', currentValue: '129 units', risk: 'Good', ownerAction: 'Open unit availability and booking status before billing.' }
-    ]
+    drillDown: true
   }),
   phaseOneReport({
     key: 'stockSummary',
@@ -138,11 +104,11 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
     audience: ['Business Owner', 'Accountant', 'Warehouse'],
     filters: [...baseFilters, ...productFilters],
     summaryCards: [
-      { label: 'Closing stock value', valueKey: 'stockValue', fallback: 'Rs. 4.82 Cr', icon: 'pi pi-wallet', tone: 'blue' },
-      { label: 'GST on stock', valueKey: 'gstAmount', fallback: 'Rs. 0', icon: 'pi pi-percentage', tone: 'amber' },
-      { label: 'Products covered', valueKey: 'productCount', fallback: '1,248', icon: 'pi pi-list', tone: 'green' },
-      { label: 'Inward quantity', valueKey: 'inwardQty', fallback: '8,420', icon: 'pi pi-arrow-down', tone: 'green' },
-      { label: 'Outward quantity', valueKey: 'outwardQty', fallback: '6,870', icon: 'pi pi-arrow-up', tone: 'amber' }
+      { label: 'Closing stock value', valueKey: 'stockValue', icon: 'pi pi-wallet', tone: 'blue' },
+      { label: 'GST on stock', valueKey: 'gstAmount', icon: 'pi pi-percentage', tone: 'amber' },
+      { label: 'Products covered', valueKey: 'productCount', icon: 'pi pi-list', tone: 'green' },
+      { label: 'Inward quantity', valueKey: 'inwardQty', icon: 'pi pi-arrow-down', tone: 'green' },
+      { label: 'Outward quantity', valueKey: 'outwardQty', icon: 'pi pi-arrow-up', tone: 'amber' }
     ],
     columns: cols([
       ['productCode', 'Product Code'],
@@ -161,12 +127,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['pendingInvoiceQty', 'Dispatched Without SI', 'number', true]
     ]),
     defaultGroupBy: 'category',
-    drillDown: true,
-    sampleRows: [
-      { productCode: 'ELE-1001', productName: 'LED Display 32 inch', category: 'Electronics', brand: 'VisionPro', uom: 'Nos', openingStock: 120, inwardQty: 40, outwardQty: 48, closingStock: 112, averageRate: 24500, stockValue: 2744000 },
-      { productCode: 'AGR-2201', productName: 'Agro Seed Premium', category: 'Agro Product', brand: 'GreenGrow', uom: 'Bag', openingStock: 640, inwardQty: 260, outwardQty: 382, closingStock: 518, averageRate: 1850, stockValue: 958300 },
-      { productCode: 'DRN-4007', productName: 'Drone Motor 2KW', category: 'Drone Manufacturing', brand: 'AeroCore', uom: 'Nos', openingStock: 420, inwardQty: 150, outwardQty: 220, closingStock: 350, averageRate: 3950, stockValue: 1382500 }
-    ]
+    drillDown: true
   }),
   phaseOneReport({
     key: 'stockLedger',
@@ -199,12 +160,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['remarks', 'Purchase / Sale Details']
     ]),
     defaultGroupBy: 'productName',
-    drillDown: true,
-    sampleRows: [
-      { transactionDate: '2026-05-12', documentType: 'GRN', documentNo: 'GRN-1104', referenceNo: 'PO-2241', productCode: 'ELE-1001', productName: 'LED Display 32 inch', warehouse: 'HYD Main WH', inwardQty: 40, outwardQty: 0, balanceQty: 112, rate: 24500, debitValue: 980000, creditValue: 0, totalValue: 2744000, remarks: 'Vendor receipt posted' },
-      { transactionDate: '2026-05-12', documentType: 'Sales Invoice', documentNo: 'INV-4481', referenceNo: 'SO-2218', productCode: 'ELE-1001', productName: 'LED Display 32 inch', warehouse: 'HYD Main WH', inwardQty: 0, outwardQty: 12, balanceQty: 100, rate: 31500, debitValue: 0, creditValue: 378000, totalValue: 2366000, remarks: 'Customer dispatch invoiced' },
-      { transactionDate: '2026-05-11', documentType: 'Stock Transfer', documentNo: 'ST-0442', referenceNo: 'REQ-144', productCode: 'DRN-4007', productName: 'Drone Motor 2KW', warehouse: 'Manufacturing Store', inwardQty: 0, outwardQty: 80, balanceQty: 350, rate: 3950, debitValue: 0, creditValue: 316000, totalValue: 1382500, remarks: 'Production issue' }
-    ]
+    drillDown: true
   }),
   phaseOneReport({
     key: 'warehouseWiseStock',
@@ -224,12 +180,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['quantity', 'Quantity', 'number', true],
       ['value', 'Value', 'currency', true]
     ]),
-    defaultGroupBy: 'warehouse',
-    sampleRows: [
-      { warehouse: 'HYD Main WH', productCode: 'ELE-1001', productName: 'LED Display 32 inch', uom: 'Nos', quantity: 112, value: 2744000 },
-      { warehouse: 'BLR Store', productCode: 'AGR-2201', productName: 'Agro Seed Premium', uom: 'Bag', quantity: 518, value: 958300 },
-      { warehouse: 'Main Kitchen Store', productCode: 'HOT-9002', productName: 'Cooking Oil 1L', uom: 'Nos', quantity: 180, value: 144000 }
-    ]
+    defaultGroupBy: 'warehouse'
   }),
   phaseOneReport({
     key: 'lowStockAlert',
@@ -250,12 +201,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['status', 'Status', 'status']
     ]),
     defaultGroupBy: 'warehouse',
-    drillDown: true,
-    sampleRows: [
-      { product: 'Laptop i5 Gen12', warehouse: 'HYD Main WH', currentStock: 2, reorderLevel: 10, shortageQty: 8, status: 'Critical' },
-      { product: 'Paddy Seeds Grade A', warehouse: 'BLR Store', currentStock: 240, reorderLevel: 300, shortageQty: 60, status: 'Watch' },
-      { product: 'Cooking Oil 1L', warehouse: 'Main Kitchen Store', currentStock: 180, reorderLevel: 200, shortageQty: 20, status: 'Watch' }
-    ]
+    drillDown: true
   }),
   phaseOneReport({
     key: 'purchaseOrderRegister',
@@ -280,12 +226,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['status', 'Status', 'status']
     ]),
     defaultGroupBy: 'supplier',
-    drillDown: true,
-    sampleRows: [
-      { poDate: '2026-05-04', poNo: 'PO-2241', supplier: 'ElectroMart Supplies', variant: 'I7', attribute: 'Memory: 128', productCount: 5, grossAmount: 480000, taxAmount: 86400, netAmount: 566400, status: 'Pending' },
-      { poDate: '2026-05-08', poNo: 'PO-2298', supplier: 'GreenGrow Traders', variant: '', attribute: '', productCount: 3, grossAmount: 310000, taxAmount: 15500, netAmount: 325500, status: 'Approved' },
-      { poDate: '2026-05-10', poNo: 'PO-2310', supplier: 'AeroCore Components', variant: 'Motor Kit', attribute: 'Power: 2KW', productCount: 8, grossAmount: 720000, taxAmount: 129600, netAmount: 849600, status: 'Open' }
-    ]
+    drillDown: true
   }),
   phaseOneReport({
     key: 'grnRegister',
@@ -311,12 +252,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['status', 'Status', 'status']
     ]),
     defaultGroupBy: 'supplier',
-    drillDown: true,
-    sampleRows: [
-      { grnDate: '2026-05-12', grnNo: 'GRN-1104', supplier: 'ElectroMart Supplies', poNo: 'PO-2241', variant: 'I7', attribute: 'Memory: 128', productCount: 4, receivedQty: 80, acceptedQty: 78, rejectedQty: 2, status: 'Posted' },
-      { grnDate: '2026-05-11', grnNo: 'GRN-1101', supplier: 'GreenGrow Traders', poNo: 'PO-2298', variant: '', attribute: '', productCount: 2, receivedQty: 260, acceptedQty: 260, rejectedQty: 0, status: 'Posted' },
-      { grnDate: '2026-05-10', grnNo: 'GRN-1098', supplier: 'AeroCore Components', poNo: 'PO-2310', variant: 'Motor Kit', attribute: 'Power: 2KW', productCount: 6, receivedQty: 420, acceptedQty: 400, rejectedQty: 20, status: 'QC Pending' }
-    ]
+    drillDown: true
   }),
   phaseOneReport({
     key: 'purchaseInvoiceRegister',
@@ -343,11 +279,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['status', 'Status', 'status']
     ]),
     defaultGroupBy: 'supplier',
-    drillDown: true,
-    sampleRows: [
-      { invoiceDate: '2026-05-12', invoiceNo: 'PINV-3104', supplier: 'ElectroMart Supplies', supplierInvoiceNo: 'EMS-9881', variant: 'I7', attribute: 'Memory: 128', taxableAmount: 480000, cgst: 43200, sgst: 43200, igst: 0, netAmount: 566400, status: 'Posted' },
-      { invoiceDate: '2026-05-11', invoiceNo: 'PINV-3097', supplier: 'GreenGrow Traders', supplierInvoiceNo: 'GGT-5520', variant: '', attribute: '', taxableAmount: 310000, cgst: 7750, sgst: 7750, igst: 0, netAmount: 325500, status: 'Pending' }
-    ]
+    drillDown: true
   }),
   // Vendor Dues (308): posted Purchase Invoices still unpaid or part-paid as on
   // "Date To" - same due as the Vendor Payment pending list. Layout follows the
@@ -375,9 +307,36 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['dueAmount', 'Due Amount', 'currency', true],
       ['ageDays', 'Age (Days)', 'number', false, false]
     ]),
-    defaultGroupBy: 'supplier',
-    // No hardcoded preview rows - only live data from the API is shown.
-    sampleRows: []
+    defaultGroupBy: 'supplier'  }),
+  // Vendor Payments (309): posted Inventory Vendor Payments between From / To
+  // date, one row per purchase invoice paid. Layout follows the old "VENDOR
+  // PAYMENTS REPORT": vendor code-name heading, Trans Date, vendor bill no,
+  // amount, Cheque No, Voucher No; plus a Total per vendor and a Grand Total.
+  // Paid Amount = what was paid on that invoice in that voucher (lines of one
+  // voucher add up to its cheque); Invoice Amount (full total) can be switched on.
+  phaseOneReport({
+    key: 'vendorPaymentReport',
+    slug: 'vendor-payment-report',
+    title: 'Vendor Payments Report',
+    groupId: 'purchase',
+    endpoint: 'vendor-payment-report',
+    icon: 'pi pi-money-bill',
+    purpose: 'Vendor-wise list of purchase invoices paid between two dates, with cheque and voucher number.',
+    audience: ['Accountant', 'Purchase', 'Business Owner'],
+    filters: ['branchId', 'fromDate', 'toDate', 'supplierId'],
+    columns: cols([
+      ['segment', 'Segment', 'text', false, false],
+      ['supplier', 'Vendor Name'],
+      ['transDate', 'Trans Date', 'date'],
+      ['invoiceNo', 'Invoice No'],
+      ['piNo', 'PI No', 'text', false, false],
+      ['invoiceAmount', 'Invoice Amount', 'currency', false, false],
+      ['paidAmount', 'Paid Amount', 'currency', true],
+      ['chequeNo', 'Cheque No'],
+      ['paymentMode', 'Payment Mode', 'text', false, false],
+      ['voucherNo', 'Voucher No']
+    ]),
+    defaultGroupBy: 'supplier'
   }),
   phaseOneReport({
     key: 'salesOrderRegister',
@@ -402,12 +361,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['status', 'Status', 'status']
     ]),
     defaultGroupBy: 'customer',
-    drillDown: true,
-    sampleRows: [
-      { soDate: '2026-05-12', soNo: 'SO-2218', customer: 'Tenant Works Pvt Ltd', variant: 'I7', attribute: 'Memory: 128', productCount: 3, grossAmount: 420000, taxAmount: 75600, netAmount: 495600, status: 'Approved' },
-      { soDate: '2026-05-12', soNo: 'SO-2227', customer: 'Fresh Foods Distributor', variant: '', attribute: '', productCount: 6, grossAmount: 180000, taxAmount: 9000, netAmount: 189000, status: 'Open' },
-      { soDate: '2026-05-11', soNo: 'SO-2209', customer: 'Aero Labs', variant: 'Motor Kit', attribute: 'Power: 2KW', productCount: 4, grossAmount: 960000, taxAmount: 172800, netAmount: 1132800, status: 'Pending' }
-    ]
+    drillDown: true
   }),
   phaseOneReport({
     key: 'deliveryChallanRegister',
@@ -433,11 +387,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['status', 'Status', 'status']
     ]),
     defaultGroupBy: 'customer',
-    drillDown: true,
-    sampleRows: [
-      { dcDate: '2026-05-12', dcNo: 'DC-1184', customer: 'Tenant Works Pvt Ltd', soNo: 'SO-2218', variant: 'I7', attribute: 'Memory: 128', productCount: 3, deliveredQty: 18, vehicleNo: 'TS09AB2211', transporter: 'SpeedLogix', status: 'Dispatched' },
-      { dcDate: '2026-05-11', dcNo: 'DC-1178', customer: 'Fresh Foods Distributor', soNo: 'SO-2227', variant: '', attribute: '', productCount: 6, deliveredQty: 420, vehicleNo: 'KA05MG9081', transporter: 'City Transport', status: 'Pending Invoice' }
-    ]
+    drillDown: true
   }),
   phaseOneReport({
     key: 'salesInvoiceRegister',
@@ -459,16 +409,10 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['cgst', 'CGST', 'currency', true],
       ['sgst', 'SGST', 'currency', true],
       ['igst', 'IGST', 'currency', true],
-      ['netAmount', 'Net Amount', 'currency', true],
-      ['status', 'Status', 'status']
+      ['netAmount', 'Net Amount', 'currency', true]
     ]),
     defaultGroupBy: 'customer',
-    drillDown: true,
-    sampleRows: [
-      { invoiceDate: '2026-05-12', invoiceNo: 'INV-4481', customer: 'Tenant Works Pvt Ltd', variant: 'I7', attribute: 'Memory: 128', taxableAmount: 420000, cgst: 37800, sgst: 37800, igst: 0, netAmount: 495600, status: 'Posted' },
-      { invoiceDate: '2026-05-12', invoiceNo: 'INV-4488', customer: 'Fresh Foods Distributor', variant: '', attribute: '', taxableAmount: 180000, cgst: 4500, sgst: 4500, igst: 0, netAmount: 189000, status: 'Posted' },
-      { invoiceDate: '2026-05-11', invoiceNo: 'INV-4479', customer: 'Aero Labs', variant: 'Motor Kit', attribute: 'Power: 2KW', taxableAmount: 960000, cgst: 86400, sgst: 86400, igst: 0, netAmount: 1132800, status: 'Draft' }
-    ]
+    drillDown: true
   }),
   // Dues List: posted Sales Invoices still unpaid or part-paid as on the
   // "Date To" (shown as "As on" in the PDF header). Fully paid invoices
@@ -484,7 +428,9 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
     icon: 'pi pi-wallet',
     purpose: 'Customer-wise list of unpaid and part-paid sales invoices with total, received and due amount as on a date.',
     audience: ['Accountant', 'Sales', 'Business Owner'],
-    filters: ['branchId', 'toDate', 'customerId'],
+    // Previous: filters: ['branchId', 'toDate', 'customerId'],
+    // From Date + To Date (user request 2026-11-23): invoices dated in the range, due as on To Date (310).
+    filters: ['branchId', 'fromDate', 'toDate', 'customerId'],
     columns: cols([
       // Segment is auto-added to every report; hidden here to match the Dues List layout.
       ['segment', 'Segment', 'text', false, false],
@@ -496,10 +442,38 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['dueAmount', 'Due Amount', 'currency', true],
       ['ageDays', 'Age (Days)', 'number']
     ]),
-    defaultGroupBy: 'customer',
-    // No hardcoded preview rows - only live data from the API is shown.
-    sampleRows: []
-  }),
+    defaultGroupBy: 'customer'  }),
+  // Product-wise Dues List (313): same invoices and due as the Dues List, one
+  // row per product line. A receipt is against the whole invoice, so its Total
+  // and Received are split across the invoice's products by line value; the
+  // Grand Total Due always equals the Dues List total for the same filters.
+  phaseOneReport({
+    key: 'productwiseDues',
+    slug: 'productwise-dues',
+    title: 'Product-wise Dues List',
+    groupId: 'customerSupplier',
+    endpoint: 'productwise-dues',
+    icon: 'pi pi-box',
+    purpose: 'Product-wise list of amounts still due from customers on unpaid and part-paid sales invoices as on a date.',
+    audience: ['Accountant', 'Sales', 'Business Owner'],
+    filters: ['branchId', 'fromDate', 'toDate', 'customerId', 'productId'],
+    columns: cols([
+      // Segment is auto-added to every report; hidden here, same as Dues List.
+      ['segment', 'Segment', 'text', false, false],
+      ['product', 'Product'],
+      ['productCode', 'Product Code', 'text', false, false],
+      ['variant', 'Variant', 'text', false, false],
+      ['customer', 'Customer'],
+      ['invoiceNo', 'Invoice No'],
+      ['invoiceDate', 'Invoice Date', 'date'],
+      ['qty', 'Qty', 'number', true],
+      ['uom', 'UOM', 'text', false, false],
+      ['totalAmount', 'Total Amount', 'currency', true],
+      ['receivedAmount', 'Received', 'currency', true],
+      ['dueAmount', 'Due Amount', 'currency', true],
+      ['ageDays', 'Age (Days)', 'number']
+    ]),
+    defaultGroupBy: 'product'  }),
   // Collection Report: money received from customers between "Date From" and
   // "Date To" (posted Customer Receipts), one row per customer. Cash = 'cash'
   // mode; Cheque = cheque / online / card / bank. "Pre" = receipts against
@@ -527,13 +501,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['jvAmount', 'JV', 'currency', true],
       ['preJvAmount', 'Pre JV', 'currency', true],
       ['grandTotal', 'Grand Total', 'currency', true]
-    ]),
-    sampleRows: [
-      { customer: 'Dakshin Infrastructures Private Limited', noOfInvoices: 3, cashAmount: 15000, preCashAmount: 0, chequeAmount: 40027, preChequeAmount: 24321, jvAmount: 0, preJvAmount: 0, grandTotal: 79348 },
-      { customer: 'Kapil Chits (Kakatiya) Private Limited', noOfInvoices: 1, cashAmount: 11772, preCashAmount: 0, chequeAmount: 0, preChequeAmount: 0, jvAmount: 0, preJvAmount: 0, grandTotal: 11772 },
-      { customer: 'Tenant Works Pvt Ltd', noOfInvoices: 2, cashAmount: 0, preCashAmount: 5000, chequeAmount: 120000, preChequeAmount: 0, jvAmount: 0, preJvAmount: 0, grandTotal: 125000 }
-    ]
-  }),
+    ])  }),
   phaseOneReport({
     key: 'pendingDocument',
     slug: 'pending-document',
@@ -554,12 +522,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['status', 'Status', 'status']
     ]),
     defaultGroupBy: 'documentType',
-    drillDown: true,
-    sampleRows: [
-      { documentType: 'Purchase Order', documentNo: 'PO-2241', documentDate: '2026-05-04', party: 'ElectroMart Supplies', pendingQty: 28, pendingAmount: 480000, status: 'Pending GRN' },
-      { documentType: 'Delivery Challan', documentNo: 'DC-1178', documentDate: '2026-05-11', party: 'Fresh Foods Distributor', pendingQty: 420, pendingAmount: 189000, status: 'Pending Invoice' },
-      { documentType: 'Sales Order', documentNo: 'SO-2209', documentDate: '2026-05-11', party: 'Aero Labs', pendingQty: 14, pendingAmount: 1132800, status: 'Pending Dispatch' }
-    ]
+    drillDown: true
   }),
   phaseOneReport({
     key: 'hsnSummary',
@@ -582,12 +545,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['totalTax', 'Total Tax', 'currency', true],
       ['netValue', 'Net Value', 'currency', true]
     ]),
-    defaultGroupBy: 'hsnSacCode',
-    sampleRows: [
-      { hsnSacCode: '8471', description: 'Computer and electronic equipment', quantity: 60, taxableValue: 1260000, cgst: 113400, sgst: 113400, igst: 0, totalTax: 226800, netValue: 1486800 },
-      { hsnSacCode: '1209', description: 'Seeds and agro products', quantity: 382, taxableValue: 706700, cgst: 17668, sgst: 17668, igst: 0, totalTax: 35336, netValue: 742036 },
-      { hsnSacCode: '998313', description: 'IT consulting and support services', quantity: 14, taxableValue: 960000, cgst: 86400, sgst: 86400, igst: 0, totalTax: 172800, netValue: 1132800 }
-    ]
+    defaultGroupBy: 'hsnSacCode'
   }),
   phaseOneReport({
     key: 'batchSerialExpiry',
@@ -614,12 +572,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['status', 'Status', 'status']
     ]),
     defaultGroupBy: 'status',
-    drillDown: true,
-    sampleRows: [
-      { product: 'Cooking Oil 1L', variant: '', attribute: '', batchNo: 'LOT-CLN-441', serialNo: '', manufacturingDate: '2026-02-18', expiryDate: '2026-05-31', daysToExpire: 18, warehouse: 'Main Kitchen Store', quantity: 80, value: 64000, status: 'Near Expiry' },
-      { product: 'LED Display 32 inch', variant: '32 inch', attribute: 'Panel: IPS', batchNo: 'LOT-ELE-0526', serialNo: 'SN-LED-88901', manufacturingDate: '2026-03-20', expiryDate: '', daysToExpire: 0, warehouse: 'HYD Main WH', quantity: 1, value: 24500, status: 'In Stock' },
-      { product: 'Agro Seed Premium', variant: 'Premium', attribute: 'Pack: 25Kg', batchNo: 'LOT-AGRO-0526-A', serialNo: '', manufacturingDate: '2026-04-08', expiryDate: '2026-06-17', daysToExpire: 35, warehouse: 'BLR Store', quantity: 118, value: 218300, status: 'Near Expiry' }
-    ]
+    drillDown: true
   }),
   phaseOneReport({
     key: 'productProfitability',
@@ -643,12 +596,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['marginPercent', 'Margin %', 'percent']
     ]),
     defaultGroupBy: 'category',
-    drillDown: true,
-    sampleRows: [
-      { product: 'LED Display 32 inch', category: 'Electronics', variant: '32 inch', attribute: 'Panel: IPS', salesQuantity: 48, salesValue: 1512000, purchaseCost: 1176000, grossProfit: 336000, marginPercent: 22.22 },
-      { product: 'AMC Support', category: 'IT Services', variant: '', attribute: '', salesQuantity: 14, salesValue: 960000, purchaseCost: 556800, grossProfit: 403200, marginPercent: 42 },
-      { product: 'Drone Motor 2KW', category: 'Drone Manufacturing', variant: 'Motor Kit', attribute: 'Power: 2KW', salesQuantity: 220, salesValue: 1100000, purchaseCost: 869000, grossProfit: 231000, marginPercent: 21 }
-    ]
+    drillDown: true
   }),
   phaseOneReport({
     key: 'lossSales',
@@ -674,12 +622,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['lossPercent', 'Loss %', 'percent']
     ]),
     defaultGroupBy: 'product',
-    drillDown: true,
-    sampleRows: [
-      { invoiceNumber: 'SI-2607', invoiceDate: '2026-08-05', customer: 'Metro Electronics', product: 'LED Display 32 inch', variant: '32 inch', attribute: 'Panel: IPS', qty: 4, rate: 28000, cost: 31500, lossAmount: 14000, lossPercent: 11.11 },
-      { invoiceNumber: 'SI-2611', invoiceDate: '2026-08-10', customer: 'AeroBuild Pvt Ltd', product: 'Drone Motor 2KW', variant: 'Motor Kit', attribute: 'Power: 2KW', qty: 10, rate: 3800, cost: 4200, lossAmount: 4000, lossPercent: 9.52 },
-      { invoiceNumber: 'SI-2618', invoiceDate: '2026-08-14', customer: 'Spice Route Restaurant', product: 'Cooking Oil 1L', variant: '', attribute: '', qty: 60, rate: 145, cost: 162, lossAmount: 1020, lossPercent: 10.49 }
-    ]
+    drillDown: true
   }),
   phaseOneReport({
     key: 'stockValuationComparison',
@@ -697,11 +640,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['quantity', 'Remaining Qty', 'number', true],
       ['rate', 'Unit Cost', 'currency'],
       ['value', 'Value', 'currency', true]
-    ]),
-    sampleRows: [
-      { product: 'Dell Computer-I7', receivedAt: '2026-08-10', sourceDocType: 'Purchase Invoice', quantity: 10, rate: 150000, value: 1500000 },
-      { product: 'Dell Computer-I7', receivedAt: '2026-08-15', sourceDocType: 'Purchase Invoice', quantity: 5, rate: 160000, value: 800000 }
-    ]
+    ])
   }),
   phaseOneReport({
     key: 'misReport',
@@ -719,11 +658,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['purchases', 'Purchases', 'currency', true],
       ['payables', 'Payables', 'currency', true],
       ['receivables', 'Receivables', 'currency', true]
-    ]),
-    sampleRows: [
-      { segment: 'Electronics', sales: 2450000, purchases: 1820000, payables: 640000, receivables: 512000 },
-      { segment: 'Agro Product', sales: 980000, purchases: 710000, payables: 210000, receivables: 165000 }
-    ]
+    ])
   }),
   phaseOneReport({
     key: 'auditTrail',
@@ -750,12 +685,7 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['remarks', 'Remarks']
     ]),
     defaultGroupBy: 'module',
-    drillDown: true,
-    sampleRows: [
-      { actionDate: '2026-06-30 10:42', module: 'Purchase Order', documentType: 'PO', documentNo: 'PO-2287', action: 'Approved', fieldChanged: 'Status', oldValue: 'Pending', newValue: 'Approved', performedBy: 'Ramesh Kumar', approvedBy: 'Suresh Rao', status: 'Approved', remarks: 'Approved within credit limit' },
-      { actionDate: '2026-06-29 16:05', module: 'Product Master', documentType: 'Product', documentNo: 'ELE-1001', action: 'Updated', fieldChanged: 'Sales Rate', oldValue: '29500', newValue: '31500', performedBy: 'Priya Sharma', approvedBy: '', status: 'Updated', remarks: 'Price revision effective June' },
-      { actionDate: '2026-06-28 09:18', module: 'Stock Adjustment', documentType: 'Adjustment', documentNo: 'ADJ-0091', action: 'Rejected', fieldChanged: 'Quantity', oldValue: '0', newValue: '-25', performedBy: 'Warehouse User', approvedBy: 'Suresh Rao', status: 'Rejected', remarks: 'Insufficient supporting documents' }
-    ]
+    drillDown: true
   })
 ];
 

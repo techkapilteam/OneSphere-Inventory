@@ -302,6 +302,18 @@ export const inventoryRoutes: Routes = [
         loadComponent: () => import('./Inventory_Transactions/sales-return/sales-return')
           .then(m => m.InventorySalesReturnComponent)
       },
+      {
+        path: 'e-invoice',
+        canActivate: [screenPermissionGuard('INV_T_EINVOICE')],
+        loadComponent: () => import('./Inventory_Transactions/e-invoice/e-invoice')
+          .then(m => m.InventoryEInvoiceComponent)
+      },
+      {
+        path: 'e-way-bill',
+        canActivate: [screenPermissionGuard('INV_T_EWAYBILL')],
+        loadComponent: () => import('./Inventory_Transactions/e-way-bill/e-way-bill')
+          .then(m => m.InventoryEWayBillComponent)
+      },
       // Inventory
       {
         path: 'stock-transfer',
@@ -447,6 +459,30 @@ export const inventoryRoutes: Routes = [
         canActivate: [screenPermissionGuard('INV_R_MIS')],
         loadComponent: () => import('./Inventory_Reports/mis-report/mis-report')
           .then(m => m.MisReportComponent)
+      },
+      {
+        // Profit & Loss (311_profit_loss_report.sql): two-sided Trading + P&L /
+        // Balance Sheet from accounts total transactions - bespoke layout, so its
+        // own static route; must stay ABOVE the ':reportKey' catch-all.
+        path: 'profit-loss',
+        loadComponent: () => import('./Inventory_Reports/profit-loss/profit-loss-report')
+          .then(m => m.ProfitLossReportComponent)
+      },
+      {
+        // Ageing Analysis (312_ageing_analysis_report.sql): FIFO ageing of the
+        // party ledgers under an account group - bespoke layout, so its own
+        // static route; must stay ABOVE the ':reportKey' catch-all.
+        path: 'ageing-analysis',
+        loadComponent: () => import('./Inventory_Reports/ageing-analysis/ageing-analysis-report')
+          .then(m => m.AgeingAnalysisReportComponent)
+      },
+      {
+        // Product-wise Ageing (314_productwise_ageing_report.sql): closing stock
+        // (= Stock Summary) aged FIFO by inward date - own layout, so its own
+        // static route; must stay ABOVE the ':reportKey' catch-all.
+        path: 'productwise-ageing',
+        loadComponent: () => import('./Inventory_Reports/productwise-ageing/productwise-ageing-report')
+          .then(m => m.ProductwiseAgeingReportComponent)
       },
       {
         path: ':reportKey',

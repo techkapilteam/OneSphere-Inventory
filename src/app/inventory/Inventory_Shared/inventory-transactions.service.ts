@@ -953,6 +953,95 @@ export interface ServiceBundleConsumption {
   items: ServiceBundleConsumptionItem[];
 }
 
+/** One row of the E-Invoice screen (a Sales Invoice plus its IRN details). */
+export interface EInvoiceRow {
+  invoice_id: number;
+  invoice_no: string;
+  invoice_date: string;
+  customer_name: string;
+  customer_gstin: string;
+  total_amount: number;
+  /** B2B (customer has a GSTIN, e-invoice applies) or B2C. */
+  supply_type: string;
+  customer_address: string;
+  taxable_amount: number;
+  tax_amount: number;
+  invoice_ack_number: string;
+  irn: string;
+  ack_no: string;
+  ack_date: string;
+  signed_qr_code: string;
+  /** generated | failed | cancelled ('' while pending). */
+  einvoice_status: string;
+  error_message: string;
+  items: EInvoiceItem[];
+}
+
+export interface EInvoiceItem {
+  product_name: string;
+  product_code: string;
+  uom_name: string;
+  qty: number;
+  cost_per_item: number;
+  gst_rate: number;
+  taxable_amount: number;
+  tax_amount: number;
+  total_amount: number;
+}
+
+/** GET sales/e-invoices/{id}/print (camelCase, as the API sends it). */
+export interface EInvoicePrintItem {
+  productName: string | null;
+  hsnCode: string | null;
+  qty: number;
+  costPerItem: number;
+  amount: number;
+  cgstRate: number;
+  cgstAmount: number;
+  sgstRate: number;
+  sgstAmount: number;
+  igstRate: number;
+  igstAmount: number;
+  total: number;
+}
+
+export interface EInvoicePrint {
+  invoiceId: number;
+  invoiceNo: string;
+  invoiceDate: string | null;
+  sellerName: string | null;
+  sellerAddress: string | null;
+  sellerPhone: string | null;
+  sellerEmail: string | null;
+  sellerCin: string | null;
+  sellerGstin: string | null;
+  sellerState: string | null;
+  sellerStateCode: string | null;
+  sellerLogo: string | null;
+  irn: string | null;
+  ackNo: string | null;
+  ackDate: string | null;
+  signedQrCode: string | null;
+  customerName: string | null;
+  customerAddress: string | null;
+  customerGstin: string | null;
+  customerState: string | null;
+  customerStateCode: string | null;
+  contactPersonName: string | null;
+  contactMobile: string | null;
+  items: EInvoicePrintItem[];
+  taxableAmount: number;
+  cgstAmount: number;
+  sgstAmount: number;
+  igstAmount: number;
+  taxAmount: number;
+  totalAfterTax: number;
+  discount: number;
+  roundOff: number;
+  grandTotal: number;
+  amountInWords: string;
+}
+
 // ── Service ───────────────────────────────────────────────────────────────────
 
 @Injectable({ providedIn: 'root' })
@@ -2090,6 +2179,103 @@ export class InventoryTransactionsService {
   // draft / not found, printed without a copy type).
   markSalesInvoicePrinted(id: number): Observable<ApiResponse<{ previousPrintCount: number | null }>> {
     return this.http.post<ApiResponse<{ previousPrintCount: number | null }>>(this.salesUrl(`invoices/${id}/printed`), {}, { headers: this.headers() });
+  }
+
+  // ── E-Invoice (GST IRN) ─────────────────────────────────────────────────────
+  // "New" = posted Sales Invoices still waiting for an IRN, "Old" = invoices
+  // that already have one. Backend endpoints: GET  /inventory/sales/e-invoices
+  // ?type=New|Old&fromDate&toDate and POST /inventory/sales/e-invoices/generate
+  // { invoiceIds }. The IRN itself is issued by the IRP through the backend's
+  // GSP integration; the screen only lists, selects and shows the result.
+
+  private normEInvoice(r: any): EInvoiceRow {
+    const items: any[] = r?.items || [];
+    const lineTotal = items.reduce((sum, i) => sum + Number(i?.totalAmount ?? i?.amount ?? 0), 0);
+    const total = r?.totalAmount ?? r?.total_amount;
+    const gstin = r?.customerGstin || r?.customer_gstin || '';
+    return {
+      invoice_id: Number(r?.invoiceId ?? r?.invoice_id ?? r?.id ?? 0),
+      invoice_no: r?.invoiceNo || r?.invoice_no || r?.docNumber || r?.doc_number || '',
+      invoice_date: r?.invoiceDate || r?.invoice_date || r?.docDate || r?.doc_date || '',
+      customer_name: r?.customerName || r?.customer_name || '',
+      customer_gstin: gstin,
+      total_amount: total != null
+        ? Number(total) || 0
+        : lineTotal + (Number(r?.roundOff ?? r?.round_off ?? 0) || 0),
+      supply_type: r?.supplyType || r?.supply_type || (gstin ? 'B2B' : 'B2C'),
+      customer_address: r?.customerAddress || r?.customer_address || '',
+      taxable_amount: Number(r?.taxableAmount ?? r?.taxable_amount ?? 0) || 0,
+      tax_amount: Number(r?.taxAmount ?? r?.tax_amount ?? 0) || 0,
+      invoice_ack_number: r?.invoiceAckNumber || r?.invoice_acknumber || '',
+      irn: r?.irn || r?.irnno || '',
+      ack_no: r?.ackNo || r?.ackno || r?.ack_no || r?.invoiceAckNumber || '',
+      ack_date: r?.ackDate || r?.ackdate || r?.ack_date || '',
+      signed_qr_code: r?.signedQrCode || r?.signedqrcode || '',
+      einvoice_status: r?.einvoiceStatus || r?.einvoice_status || '',
+      error_message: r?.errorMessage || r?.error_message || '',
+      items: items.map((i: any) => ({
+        product_name: i?.productName || i?.product_name || '',
+        product_code: i?.productCode || i?.product_code || '',
+        uom_name: i?.uomName || i?.uom_name || '',
+        qty: Number(i?.qty ?? 0) || 0,
+        cost_per_item: Number(i?.costPerItem ?? i?.cost_per_item ?? i?.rate ?? 0) || 0,
+        gst_rate: Number(i?.gstRate ?? i?.gst_rate ?? 0) || 0,
+        taxable_amount: Number(i?.taxableAmount ?? i?.taxable_amount ?? 0) || 0,
+        tax_amount: Number(i?.taxAmount ?? i?.tax_amount ?? 0) || 0,
+        total_amount: Number(i?.totalAmount ?? i?.total_amount ?? i?.amount ?? 0) || 0
+      }))
+    };
+  }
+
+  /** Lists the login company's (sessionStorage companyId) invoices of the login branch (sessionStorage branchId). */
+  getEInvoices(filters: { type: 'New' | 'Old'; fromDate: string; toDate: string }): Observable<ApiResponse<EInvoiceRow[]>> {
+    let params = new HttpParams()
+      .set('type', filters.type)
+      .set('fromDate', filters.fromDate)
+      .set('toDate', filters.toDate);
+    const companyId = Number(sessionStorage.getItem('companyId') || 0);
+    const branchId = Number(sessionStorage.getItem('branchId') || 0);
+    if (companyId > 0) params = params.set('companyId', companyId);
+    if (branchId > 0) params = params.set('branchId', branchId);
+    return this.mapArray(
+      this.http.get<ApiResponse<any[]>>(this.salesUrl('e-invoices'), { headers: this.headers(), params }),
+      r => this.normEInvoice(r)
+    );
+  }
+
+  /**
+   * Generates the IRN (Alankit) for the selected invoices. The seller is the logged-in
+   * company: companyCode (sessionStorage 'companyCode') and companyName
+   * (sessionStorage 'authCompany'.companyName); the API reads its GSTIN/address from
+   * global.companies.
+   */
+  generateEInvoices(invoiceIds: number[]): Observable<ApiResponse<EInvoiceRow[]>> {
+    const { companyCode, companyName } = this.loginCompany();
+    return this.mapArray(
+      this.http.post<ApiResponse<any[]>>(
+        this.salesUrl('e-invoices/generate'),
+        { invoiceIds, companyCode, companyName },
+        { headers: this.headers() }
+      ),
+      r => this.normEInvoice(r)
+    );
+  }
+
+  /** Printable e-invoice (seller, IRN/Ack/QR, buyer, items with CGST/SGST/IGST) for an invoice that has an IRN. */
+  getEInvoicePrint(invoiceId: number): Observable<ApiResponse<EInvoicePrint>> {
+    const { companyCode, companyName } = this.loginCompany();
+    const params = new HttpParams().set('companyCode', companyCode).set('companyName', companyName);
+    return this.http.get<ApiResponse<EInvoicePrint>>(
+      this.salesUrl(`e-invoices/${invoiceId}/print`), { headers: this.headers(), params });
+  }
+
+  private loginCompany(): { companyCode: string; companyName: string } {
+    let company: any = {};
+    try { company = JSON.parse(sessionStorage.getItem('authCompany') || '{}') || {}; } catch { company = {}; }
+    return {
+      companyCode: sessionStorage.getItem('companyCode') || company.companyCode || company.company_code || '',
+      companyName: company.companyName || company.company_name || ''
+    };
   }
 
   // Copy type (migration 274): same as markSalesInvoicePrinted, for Purchase Invoice.

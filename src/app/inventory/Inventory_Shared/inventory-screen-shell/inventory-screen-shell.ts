@@ -629,7 +629,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
   // Product / Service Master: a product whose name exactly matches (ignoring
   // case and extra spaces) another saved product in this segment, or another
-  // row already in the pending list, is a duplicate and must not be saved.
+  // row already in the pending list, AND has the same Product Nature, is a
+  // duplicate and must not be saved.
   // The record currently open for edit is left out of the comparison.
   productNameDuplicateOf(name: string): string {
     if (this.config?.key !== 'productServiceMaster') return '';
@@ -637,13 +638,22 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const q = norm(name);
     if (!q) return '';
     const editingId = this.editingId();
+    // The same name is allowed when the Product Nature differs (e.g. a Fixed
+    // Asset and a Trading Goods "Canon Printer"). Until a nature is chosen the
+    // name is treated as taken.
+    const natureId = Number(this.formValues()['productNatureId']) || 0;
+    const sameNature = (other: any) => {
+      const otherId = Number(other?.product_nature_id ?? other?.productNatureId) || 0;
+      return !natureId || !otherId || otherId === natureId;
+    };
     const saved = this.savedRecordObjects().find((r: any) =>
       norm(r?.product_name ?? r?.productName) === q
+      && sameNature(r)
       && !(editingId !== null && Number(r?.id) === Number(editingId)));
     if (saved) return String(saved?.product_name ?? saved?.productName ?? name).trim();
     const editingPending = this.editingPendingIndex();
     const pending = this.pendingRows().find((r, i) =>
-      i !== editingPending && norm(r?.payload?.['product_name']) === q);
+      i !== editingPending && norm(r?.payload?.['product_name']) === q && sameNature(r?.payload));
     return pending ? String(pending.payload['product_name']).trim() : '';
   }
 
@@ -2904,6 +2914,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const raw = String(value ?? '').trim();
     if (!raw) return null;
     const selectedKey = this.normalizeKey(raw);
+    // Products of different Product Natures may share a name (e.g. a Fixed Asset
+    // and a Trading Goods "Canon Printer"). Such names are looked up the careful
+    // way below; every other name keeps the plain first-match lookup.
+    if (this.twinProductNames().has(selectedKey)) return this.pickAmongSameNameProducts(selectedKey);
     return this.loadedProductObjects().find(item =>
       this.normalizeKey(item.product_name) === selectedKey
       || this.normalizeKey(item.product_code) === selectedKey
@@ -2911,11 +2925,84 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     ) ?? null;
   }
 
+  // ── Same name, different Product Nature ───────────────────────────────────
+  /** Names (lower-case) that more than one active product carries. */
+  private readonly twinProductNames = computed<Set<string>>(() => {
+    const seen = new Map<string, number>();
+    for (const product of this.loadedProductObjects()) {
+      const key = this.normalizeKey(product.product_name);
+      if (key) seen.set(key, (seen.get(key) ?? 0) + 1);
+    }
+    return new Set(Array.from(seen.entries()).filter(([, n]) => n > 1).map(([k]) => k));
+  });
+
+  /** The product the user picked (or the saved document holds) for a shared name. */
+  private readonly chosenProductIdByName = new Map<string, number>();
+
+  /** All products that carry exactly this name. */
+  productsNamed(value: any): ProductItem[] {
+    const key = this.normalizeKey(value);
+    return key ? this.loadedProductObjects().filter(p => this.normalizeKey(p.product_name) === key) : [];
+  }
+
+  chosenProductIdFor(value: any): number | null {
+    return this.chosenProductIdByName.get(this.normalizeKey(value)) ?? null;
+  }
+
+  productNameIsShared(value: any): boolean {
+    return this.twinProductNames().has(this.normalizeKey(value));
+  }
+
+  /** Remember which same-name product a line or document uses. */
+  rememberProductChoice(product: ProductItem | null | undefined): void {
+    const key = this.normalizeKey(product?.product_name);
+    const id = Number(product?.id);
+    if (key && Number.isFinite(id) && id > 0) this.chosenProductIdByName.set(key, id);
+  }
+
+  /** The same-name products of one nature, for a picker that already knows the nature. */
+  productNamedWithNature(value: any, natureName: string | null | undefined): ProductItem | null {
+    const nature = this.normalizeKey(natureName);
+    return this.productsNamed(value).find(p => this.normalizeKey(p.product_nature_name) === nature) ?? null;
+  }
+
+  /** Seed the choices from the products a saved document already holds. */
+  private rememberRecordProducts(record: any): void {
+    const lists = [record?.items, record?.lines, record?.line_items];
+    for (const list of lists) {
+      if (!Array.isArray(list)) continue;
+      for (const item of list) {
+        const id = Number(item?.product_id ?? item?.productId);
+        if (!Number.isFinite(id) || id <= 0) continue;
+        const product = this.loadedProductObjects().find(p => Number(p.id) === id);
+        if (product && this.productNameIsShared(product.product_name)) this.rememberProductChoice(product);
+      }
+    }
+  }
+
+  private pickAmongSameNameProducts(key: string): ProductItem | null {
+    const products = this.loadedProductObjects();
+    // a product code or SKU typed exactly is always unambiguous
+    const byCode = products.find(p => this.normalizeKey(p.product_code) === key || this.normalizeKey(p.sku) === key);
+    if (byCode) return byCode;
+    const same = products.filter(p => this.normalizeKey(p.product_name) === key);
+    if (!same.length) return null;
+    const chosen = this.chosenProductIdByName.get(key);
+    const picked = chosen ? same.find(p => Number(p.id) === chosen) : undefined;
+    if (picked) return picked;
+    // nothing chosen yet: sales documents sell goods, so prefer the non-asset one
+    if (this.transactionUomUsageForKey() === 'sales') return same.find(p => !p.is_asset) ?? same[0];
+    return same[0];
+  }
+
   private findProductForReferenceItem(item: any, fallbackSelection: any): ProductItem | null {
     const productId = this.optionalNumber(item?.product_id ?? item?.productId);
     if (productId) {
       const byId = this.loadedProductObjects().find(product => Number(product.id) === productId);
-      if (byId) return byId;
+      if (byId) {
+        if (this.productNameIsShared(byId.product_name)) this.rememberProductChoice(byId);
+        return byId;
+      }
     }
     return this.findProductBySelection(fallbackSelection);
   }
@@ -3124,6 +3211,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     return this.variantAttributeItemList(this.findVariantById(Number(variantId) || 0));
   }
 
+  /** A Fixed Asset sharing its name with a trading product is not offered on sales documents. */
+  private assetTwinHiddenForSales(product: ProductItem, key: string): boolean {
+    if (!product.is_asset || this.transactionUomUsageForKey(key) !== 'sales') return false;
+    return this.productsNamed(product.product_name).some(other => other.id !== product.id && !other.is_asset);
+  }
+
   private productAllowedForTransaction(product: ProductItem, key = this.config?.key || ''): boolean {
     if (this.normalizeKey(product.item_status || product.status || 'active') === 'inactive') return false;
     if (this.isManufacturingTransactionKey(key)) {
@@ -3135,6 +3228,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     // Semi-Finished, Consumable, Fixed Asset, Service ...) — the nature's
     // "Allows Sale" flag no longer hides them here (client request 2026-11-20).
     // Other sales screens (Sales Order, DC, Sales Return) keep the flag.
+    if (this.assetTwinHiddenForSales(product, key)) return false;
     if (key === 'salesInvoice') return true;
     const usage = this.transactionUomUsageForKey(key);
     if (usage === 'purchase') return product.allows_purchase !== false;
@@ -18613,6 +18707,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   clearConfigForm(): void {
+    this.chosenProductIdByName.clear();
     this.formValues.set({});
     this.deliveryAddressOverride.set(null);
     this.transportDetailsForm.set({});
@@ -22532,6 +22627,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.saveError.set('');
     this.saveMsg.set('');
     this.editingId.set(record.id ?? null);
+    this.rememberRecordProducts(record);
     this._autoCodeFields.clear();
     this.loadTransportDetailsForRecord(record.id ?? null);
     switch (this.config?.key) {
@@ -26288,7 +26384,9 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       case 'channelPartnerMaster':
         return duplicate(r => same(r.partner_name, payload['partner_name']) || same(r.partner_code, payload['partner_code'])) ? 'Channel Partner already exists. Edit the existing row instead of adding duplicate.' : '';
       case 'productServiceMaster':
-        return duplicate(r => same(r.product_name, payload['product_name']) && same(r.segment_name, payload['segment_name'])) ? 'Product / Service already exists in this segment. Edit the existing row instead of adding duplicate.' : '';
+        return duplicate(r => same(r.product_name, payload['product_name']) && same(r.segment_name, payload['segment_name'])
+          // the same name is allowed when the Product Nature differs
+          && (!(Number(r.product_nature_id) > 0) || !(Number(payload['product_nature_id']) > 0) || Number(r.product_nature_id) === Number(payload['product_nature_id']))) ? 'Product / Service already exists in this segment. Edit the existing row instead of adding duplicate.' : '';
       default:
         return '';
     }
