@@ -666,6 +666,9 @@ export interface PurchaseRefDoc {
   status: string;
   remarks?: string;
   items: any[];
+  // migration 300: pending kit materials of Service Bundle lines (Sales Order references)
+  kit_items?: any[];
+  delivery_challans?: any[];
 }
 
 export interface PurchaseReturnItem {
@@ -1954,6 +1957,9 @@ export class InventoryTransactionsService {
       invoiced_qty: i.invoicedQty ?? i.invoiced_qty,
       direct_invoiced_qty: i.directInvoicedQty ?? i.direct_invoiced_qty,
       pending_qty: i.pendingQty ?? i.pending_qty,
+      //migration 300: Service Bundle line and its kit
+      is_bundle: !!(i.isBundle ?? i.is_bundle),
+      kit: (i.kit || []).map((k: any) => this.normSalesOrderKitItem(k)),
       amount: Number(i.amount || 0), remarks: i.remarks
     };
   }
@@ -2167,6 +2173,50 @@ export class InventoryTransactionsService {
     return this.http.post<ApiResponse<any>>(this.salesUrl(`orders/${id}/close`), { closeReason, reopen }, { headers: this.headers() }).pipe(
       map(res => ({ ...res, data: res.data ? this.normSalesOrder(res.data) : res.data }))
     );
+  }
+
+    normSalesOrderKitItem(k: any) {
+    return {
+      id: k?.id,
+      sno: k?.sno,
+      product_id: k?.productId ?? k?.product_id,
+      product_name: k?.productName || k?.product_name || '',
+      product_code: k?.productCode || k?.product_code,
+      uom_name: k?.uomName || k?.uom_name || '',
+      planned_qty: Number(k?.plannedQty ?? k?.planned_qty ?? 0),
+      dispatched_qty: Number(k?.dispatchedQty ?? k?.dispatched_qty ?? 0),
+      pending_qty: Number(k?.pendingQty ?? k?.pending_qty ?? 0),
+      returned_qty: Number(k?.returnedQty ?? k?.returned_qty ?? 0),   // migration 301
+      used_qty: Number(k?.usedQty ?? k?.used_qty ?? 0),               // migration 301
+      remarks: k?.remarks ?? null
+    };
+  }
+
+  /** Change the kit of one Service Bundle line of a saved Sales Order (migration 300). */
+  saveSalesOrderKit(soId: number, lineSno: number, kit: { productId: number; qty: number; remarks?: string | null }[]): Observable<ApiResponse<any>> {
+    return this.http.post<ApiResponse<any>>(this.salesUrl(`orders/${soId}/kit`), { lineSno, kit }, { headers: this.headers() }).pipe(
+      map(res => ({
+        ...res,
+        data: res.data ? {
+          lineSno: res.data.lineSno ?? res.data.line_sno,
+          deliveryStatus: res.data.deliveryStatus ?? res.data.delivery_status,
+          kit: (res.data.kit || []).map((k: any) => this.normSalesOrderKitItem(k))
+        } : res.data
+      }))
+    );
+  }
+
+    /** Material that went out on a Service Bundle SO's DCs and can come back (migration 301). */
+  getSoReturnableMaterials(soId: number): Observable<ApiResponse<any>> {
+    return this.http.get<ApiResponse<any>>(this.salesUrl(`orders/${soId}/returnable-materials`), { headers: this.headers() });
+  }
+
+  saveMaterialReturn(body: any): Observable<ApiResponse<any>> {
+    return this.http.post<ApiResponse<any>>(this.salesUrl('material-returns'), body, { headers: this.headers() });
+  }
+
+  cancelMaterialReturn(id: number): Observable<ApiResponse<any>> {
+    return this.http.post<ApiResponse<any>>(this.salesUrl(`material-returns/${id}/cancel`), {}, { headers: this.headers() });
   }
 
   saveSalesOrder(payload: Record<string, any>, id?: number | null): Observable<ApiResponse<any>> {
@@ -2697,7 +2747,9 @@ export class InventoryTransactionsService {
           so_number: (r as any).soNumber || (r as any).so_number,
           grn_id: (r as any).grnId ?? (r as any).grn_id,
           status: (r as any).status || '', remarks: (r as any).remarks,
-          items: (r as any).items || []
+          items: (r as any).items || [],
+          kit_items: (r as any).kitItems || (r as any).kit_items || [],
+          delivery_challans: (r as any).deliveryChallans || (r as any).delivery_challans || []
         }));
         const filteredDocs = docType.toUpperCase() === 'PR'
           ? docs.filter(doc => String(doc.status || '').trim().toLowerCase() === 'approved')

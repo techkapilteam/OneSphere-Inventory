@@ -278,6 +278,9 @@
                       <div class="inventory-row-actions">
                         <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Add row" (click)="addEntryLineRow()"><i class="pi pi-plus"></i></button>
                         <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove row" (click)="removeEntryLineRow(rowIndex)"><i class="pi pi-trash"></i></button>
+                        @if (soRowBundleProduct(row)) {
+                          <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Kit (materials for this package)" (click)="openSoDraftKit(row)"><i class="pi pi-box"></i></button>
+                        }
                       </div>
                     </td>
                     @let rowView = rowViews[rowIndex];
@@ -388,6 +391,49 @@
               </tfoot>
             </table>
           </div>
+                    @if (soDraftKitOpen() !== null) {
+            <div class="pr-expand-content" style="margin-top:12px;">
+              <div class="pr-expand-hdr">
+                <i class="pi pi-box"></i>
+                <span>Kit for {{ soDraftKitBundleName() }}</span>
+              </div>
+              <table class="pr-expand-items-table">
+                <thead><tr><th style="width:55%;">Product</th><th>UOM</th><th>Qty</th><th></th></tr></thead>
+                <tbody>
+                  @for (k of soDraftKitRows(); track $index; let ki = $index) {
+                    <tr>
+                      <td>
+                        <ng-select class="erp-ng-select inventory-ng-select" appendTo="body" style="width:100%; max-width:420px;"
+                          [items]="soKitProductOptions()" bindLabel="product_name" bindValue="id"
+                          [searchable]="true" [clearable]="false"
+                          [ngModel]="k.product_id" (ngModelChange)="setSoDraftKitProduct(ki, $event)"
+                          placeholder="Select product">
+                        </ng-select>
+                      </td>
+                      <td>{{ k.uom_name }}</td>
+                      <td>
+                        <input class="erp-input" type="number" min="0" step="any" style="width:100px;"
+                          [ngModel]="k.qty" (ngModelChange)="setSoDraftKitQty(ki, $event)" />
+                      </td>
+                      <td>
+                        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Remove" (click)="removeSoDraftKitRow(ki)"><i class="pi pi-trash"></i></button>
+                      </td>
+                    </tr>
+                  } @empty {
+                    <tr><td colspan="4"><span class="inventory-field-hint">No kit items. Add the materials this job needs.</span></td></tr>
+                  }
+                </tbody>
+              </table>
+              @if (soDraftKitError()) {
+                <div class="inventory-save-error" style="margin-top:8px;"><span>{{ soDraftKitError() }}</span></div>
+              }
+              <div class="grn-expand-actions">
+                <button type="button" class="erp-btn btn-white btn-sm" (click)="addSoDraftKitRow()"><i class="pi pi-plus"></i> Add item</button>
+                <button type="button" class="erp-btn btn-white btn-sm" (click)="resetSoDraftKitToTemplate()"><i class="pi pi-refresh"></i> Reset to template</button>
+                <button type="button" class="erp-btn btn-primary btn-sm" (click)="closeSoDraftKit()"><i class="pi pi-check"></i> Done</button>
+              </div>
+            </div>
+          }
           @if (isLineGridFullscreen()) {
             <div class="inventory-line-fullscreen-actions">
               @if (saveError()) {
@@ -616,6 +662,198 @@
                         </table>
                       } @else {
                         <span class="inventory-field-hint">No items found.</span>
+                      }
+                      <!-- Service Bundle kits (migration 300) -->
+                      @for (bl of salesOrderBundleLines(row); track bl.lineSno) {
+                        @let editing = isSoKitEditing(row, bl.lineSno);
+                        <div class="pr-expand-hdr" style="margin-top:12px;">
+                          <i class="pi pi-box"></i>
+                          <span>Kit for {{ bl.name }} (line {{ bl.lineSno }}, qty {{ bl.qty }})</span>
+                          @if (!editing && salesOrderKitEditable(row)) {
+                            <button type="button" class="erp-btn btn-white btn-sm" style="margin-left:auto;" (click)="startSoKitEdit(row, bl.lineSno, bl.kit)">
+                              <i class="pi pi-pencil"></i> Edit kit
+                            </button>
+                          }
+                        </div>
+                        <table class="pr-expand-items-table">
+                          <thead>
+                            <tr>
+                              <th>Product</th><th>UOM</th><th>Planned</th><th>Dispatched</th><th>Pending</th>
+                              @if (editing) { <th></th> } @else { <th>Returned</th><th>Used</th> }
+                            </tr>
+                          </thead>
+                          <tbody>
+                            @if (editing) {
+                              @for (k of soKitEditRows(row, bl.lineSno); track $index; let ki = $index) {
+                                <tr>
+                                  <td style="min-width:240px;">
+                                    <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+                                      [items]="soKitProductOptions()" bindLabel="product_name" bindValue="id"
+                                      [searchable]="true" [clearable]="false" [disabled]="k.dispatched_qty > 0"
+                                      [ngModel]="k.product_id" (ngModelChange)="setSoKitProduct(row, bl.lineSno, ki, $event)"
+                                      placeholder="Select product">
+                                    </ng-select>
+                                  </td>
+                                  <td>{{ k.uom_name }}</td>
+                                  <td>
+                                    <input class="erp-input" type="number" min="0" step="any" style="width:100px;"
+                                      [ngModel]="k.planned_qty" (ngModelChange)="setSoKitQty(row, bl.lineSno, ki, $event)" />
+                                  </td>
+                                  <td>{{ k.dispatched_qty }}</td>
+                                  <td>{{ k.planned_qty > k.dispatched_qty ? (k.planned_qty - k.dispatched_qty) : 0 }}</td>
+                                  <td>
+                                    <button type="button" class="erp-btn btn-white btn-icon btn-sm"
+                                      [disabled]="k.dispatched_qty > 0"
+                                      [title]="k.dispatched_qty > 0 ? 'Already dispatched: cannot be removed' : 'Remove'"
+                                      (click)="removeSoKitRow(row, bl.lineSno, ki)"><i class="pi pi-trash"></i></button>
+                                  </td>
+                                </tr>
+                              }
+                            } @else {
+                              @for (k of bl.kit; track $index) {
+                                <tr>
+                                  <td><strong>{{ k.product_name }}</strong></td>
+                                  <td>{{ k.uom_name }}</td>
+                                  <td>{{ k.planned_qty }}</td>
+                                  <td>{{ k.dispatched_qty }}</td>
+                                  <td>{{ k.pending_qty }}</td>
+                                  <td>{{ k.returned_qty || 0 }}</td>
+                                  <td>{{ k.used_qty ?? k.dispatched_qty }}</td>
+                                </tr>
+                              } @empty {
+                                <tr><td colspan="7"><span class="inventory-field-hint">No kit items.</span></td></tr>
+                              }
+                            }
+                          </tbody>
+                        </table>
+                         <!-- kit save error, shown under this kit -->
+                        @if (soKitError(row, bl.lineSno); as kitError) {
+                          <div class="inventory-save-error" style="margin-top:8px;">
+                            <span>{{ kitError }}</span>
+                          </div>
+                        }
+                        @if (editing) {
+                          <div class="grn-expand-actions">
+                            <button type="button" class="erp-btn btn-white btn-sm" (click)="addSoKitRow(row, bl.lineSno)"><i class="pi pi-plus"></i> Add item</button>
+                            <button type="button" class="erp-btn btn-white btn-sm" (click)="cancelSoKitEdit(row, bl.lineSno)"><i class="pi pi-times"></i> Cancel</button>
+                            <button type="button" class="erp-btn btn-primary btn-sm" [disabled]="!!soKitSaving()" (click)="saveSoKit(row, bl.lineSno)">
+                              <i [class]="soKitSaving() ? 'pi pi-spin pi-spinner' : 'pi pi-check'"></i> Save kit
+                            </button>
+                          </div>
+                        }
+                      }
+                                            <!-- Material Return against this SO (migration 301) -->
+                      @if (soReturnAvailable(row)) {
+                        <div class="pr-expand-hdr" style="margin-top:12px;">
+                          <i class="pi pi-replay"></i>
+                          <span>Material returned from site</span>
+                          @if (!isSoReturnOpen(row)) {
+                            <button type="button" class="erp-btn btn-white btn-sm" style="margin-left:auto;" (click)="openSoReturn(row)">
+                              <i class="pi pi-replay"></i> Return materials
+                            </button>
+                          } @else {
+                            <button type="button" class="erp-btn btn-white btn-sm" style="margin-left:auto;" (click)="closeSoReturn()">
+                              <i class="pi pi-times"></i> Close
+                            </button>
+                          }
+                        </div>
+                        @if (isSoReturnOpen(row)) {
+                          @let ret = soReturn();
+                          @if (ret?.loading) {
+                            <span class="inventory-field-hint">Loading…</span>
+                          } @else {
+                            @if (soReturnLocations().length > 1) {
+                              <div class="erp-form-group" style="max-width:320px;">
+                                <label class="erp-label">Returned to</label>
+                                <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+                                  [items]="soReturnLocations()" bindLabel="label" bindValue="key" [clearable]="false"
+                                  [ngModel]="ret?.locationKey" (ngModelChange)="setSoReturnLocation($event)">
+                                </ng-select>
+                              </div>
+                            } @else if (soReturnLocations().length === 1) {
+                              <span class="inventory-field-hint">Returned to: {{ soReturnLocations()[0].label }}</span>
+                            }
+                            <table class="pr-expand-items-table">
+                              <thead>
+                                <tr><th>Product</th><th>UOM</th><th>Sent</th><th>Returned</th><th>Can return</th><th>Return qty</th><th>Serial numbers</th></tr>
+                              </thead>
+                              <tbody>
+                                @for (l of soReturnLines(); track soReturnLineKey(l)) {
+                                  <tr>
+                                    <td><strong>{{ l.product_name }}</strong>@if (l.is_extra) { <br><small class="inventory-grid-subtitle">extra (not in kit)</small> }</td>
+                                    <td>{{ l.uom_name }}</td>
+                                    <td>{{ l.sent_qty }}</td>
+                                    <td>{{ l.returned_qty }}</td>
+                                    <td>{{ l.returnable_qty }}</td>
+                                    <td>
+                                      @if (l.serial_applicable) {
+                                        {{ ret?.qty?.[soReturnLineKey(l)] || 0 }}
+                                      } @else {
+                                        <input class="erp-input" type="number" min="0" step="any" style="width:100px;"
+                                          [disabled]="!(l.returnable_qty > 0)"
+                                          [ngModel]="ret?.qty?.[soReturnLineKey(l)]" (ngModelChange)="setSoReturnQty(l, $event)" />
+                                      }
+                                    </td>
+                                    <td style="min-width:220px;">
+                                      @if (l.serial_applicable) {
+                                        <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+                                          [items]="l.serials || []" [multiple]="true" [closeOnSelect]="false"
+                                          [ngModel]="ret?.serials?.[soReturnLineKey(l)] || []"
+                                          (ngModelChange)="setSoReturnSerials(l, $event)"
+                                          placeholder="Select returned serials">
+                                        </ng-select>
+                                      } @else {
+                                        <span class="inventory-field-hint">—</span>
+                                      }
+                                    </td>
+                                  </tr>
+                                } @empty {
+                                  <tr><td colspan="7"><span class="inventory-field-hint">Nothing was sent on this Sales Order's Delivery Challans yet.</span></td></tr>
+                                }
+                              </tbody>
+                            </table>
+                            <div class="erp-form-group" style="margin-top:8px;">
+                              <label class="erp-label">Reason</label>
+                              <input class="erp-input" type="text" placeholder="e.g. leftover from site"
+                                [ngModel]="ret?.reason || ''" (ngModelChange)="setSoReturnReason($event)" />
+                            </div>
+                            @if (ret?.error) {
+                              <div class="inventory-save-error" style="margin-top:8px;"><span>{{ ret?.error }}</span></div>
+                            }
+                            <div class="grn-expand-actions">
+                              <button type="button" class="erp-btn btn-primary btn-sm" [disabled]="ret?.saving" (click)="postSoReturn()">
+                                <i [class]="ret?.saving ? 'pi pi-spin pi-spinner' : 'pi pi-check-circle'"></i> Post Material Return
+                              </button>
+                            </div>
+
+                            @if (ret?.returns?.length) {
+                              <div class="pr-expand-hdr" style="margin-top:12px;"><i class="pi pi-history"></i><span>Returns of this Sales Order</span></div>
+                              <table class="pr-expand-items-table">
+                                <thead><tr><th>Return No</th><th>Date</th><th>Items</th><th>Reason</th><th>Status</th><th></th></tr></thead>
+                                <tbody>
+                                  @for (mr of ret?.returns || []; track mr.id) {
+                                    <tr>
+                                      <td>{{ mr.mr_number }}</td>
+                                      <td>{{ mr.mr_date }}</td>
+                                      <td>
+                                        @for (it of mr.items || []; track it.id) {
+                                          <div>{{ it.product_name }} × {{ it.return_qty }}@if (it.serial_numbers?.length) { ({{ it.serial_numbers.join(', ') }}) }</div>
+                                        }
+                                      </td>
+                                      <td>{{ mr.reason }}</td>
+                                      <td>{{ mr.status === 'cancelled' ? 'Cancelled' : 'Posted' }}</td>
+                                      <td>
+                                        @if (mr.status === 'posted') {
+                                          <button type="button" class="erp-btn btn-white btn-sm" (click)="cancelSoReturnDoc(mr)"><i class="pi pi-ban"></i> Cancel</button>
+                                        }
+                                      </td>
+                                    </tr>
+                                  }
+                                </tbody>
+                              </table>
+                            }
+                          }
+                        }
                       }
                       @if (isSalesTransactionDraftRow(row)) {
                         <div class="grn-expand-actions">

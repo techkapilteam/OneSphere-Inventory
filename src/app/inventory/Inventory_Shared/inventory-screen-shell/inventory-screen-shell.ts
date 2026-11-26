@@ -378,6 +378,12 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private readonly router = inject(Router, { optional: true });
   private readonly activatedRoute = inject(ActivatedRoute, { optional: true });
 
+  // ── Sales Order kits (Service Bundle lines, migration 300) ──────────────────
+  /** Kit lines being edited, keyed "soId:lineSno". Absent = view mode. */
+  readonly soKitEdits = signal<Record<string, { product_id: number | null; product_name: string; uom_name: string; planned_qty: number; dispatched_qty: number }[]>>({});
+  readonly soKitSaving = signal<string | null>(null);
+  readonly soKitErrors = signal<Record<string, string>>({});
+
   // ── Reference picker ─────────────────────────────────────────────────────
   readonly refPickerOpen = signal(false);
   readonly refPickerType = signal('');
@@ -792,7 +798,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // rows; purchaseReturnItems()/salesReturnItems() fall back to
   // resolveLineAttribute() only for manually-added rows with no entry here.
   readonly lineRefItemIdMap = signal<Record<number, {
-    soItemId?: number; dcItemId?: number; siItemId?: number;
+    soItemId?: number; dcItemId?: number; siItemId?: number; soKitItemId?: number;
     productionPlanItemId?: number | null; materialIssueItemId?: number | null;
     attributeId?: number | null; attributeName?: string | null; attributeValue?: string | null;
     // Purchase Return only (298): the referenced PI line's own qty / taxable /
@@ -9876,7 +9882,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // save-payload fallback (docDate() in the payload builders is unaffected
   // by this change). Cached once (not `new Date()` per call) so the same
   // reference is returned across renders — no change-detection churn.
-  private readonly _todayDateValue = new Date();
+  // private readonly _todayDateValue = new Date();
+    private readonly _todayDateValue = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
 
   // Public alias bound to [maxDate] on the header transaction-date picker
   // (PO Date, GRN Date, PI Date, RFQ Date, PR Date, SO/SI Date, Return Date,
@@ -9925,6 +9932,15 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   }
 
   transactionReferenceOptions(field: InventoryField): string[] {
+    if (this.config?.key === 'salesInvoice') {
+      const labels = this.salesInvoiceRefGroups().map(g => g.label);
+      const siKey = `salesInvoice:${field.key}:${labels.join('|')}`;
+      if (siKey !== this.transactionReferenceOptionsCacheKey) {
+        this.transactionReferenceOptionsCacheKey = siKey;
+        this.transactionReferenceOptionsCache = labels;
+      }
+      return this.transactionReferenceOptionsCache;
+    }
     const docs = this.transactionReferenceDocsForField(field).map(doc => doc.doc_number).filter(Boolean);
     const options = this.config?.key === 'purchaseInvoice'
       ? ['Direct Purchase Invoice', ...docs]
@@ -9964,6 +9980,23 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     if (this.config?.key === 'purchaseReturn' && !selected) {
       this.clearPurchaseReturnReference(field);
       return;
+    }
+
+        // Sales Invoice: clearing the Reference removes the picked SO / DCs and their lines
+      if (this.config?.key === 'salesInvoice') {
+      if (!selected) {
+        this.siRefGroupKey.set(null);
+        this.siCheckedDcIds.set(new Set());
+        this.formValues.update(values => ({ ...values, [field.key]: '', soId: null, soNumber: '', soReference: '', referenceNo: '' }));
+        this.entryLineRows.set([this.clearedEntryLineRow()]);
+        this.lineRefItemIdMap.set({});
+        this.lineSerialUnitsMap.set({});
+        this.boundReferenceLabels.set([]);
+        this.boundReferenceFields.set({});
+        return;
+      }
+      const group = this.salesInvoiceRefGroups().find(g => g.label === selected);
+      if (group) { this.selectSalesInvoiceGroup(group); return; }
     }
     // Customer is read-only on Sales Return (bound from the invoice), so
     // clearing the invoice must clear the customer it brought in too.
@@ -10576,12 +10609,16 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // path on the very next render.
   private readonly datePickerValueCache = new Map<string, Date>();
 
-  private datePickerValue(value: any): any {
+    private datePickerValue(value: any): any {
     if (!value || value instanceof Date) return value || null;
     const key = String(value);
     const cached = this.datePickerValueCache.get(key);
     if (cached) return cached;
-    const date = new Date(value);
+    // "yyyy-mm-dd" is a calendar date: build it at local midnight. new Date("yyyy-mm-dd")
+    // would read it as UTC midnight (05:30 in India), which a date picker whose
+    // min/max is today can show as empty.
+    const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+    const date = iso ? new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])) : new Date(value);
     if (Number.isNaN(date.getTime())) return value;
     this.datePickerValueCache.set(key, date);
     return date;
@@ -13675,6 +13712,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
 
     const product = this.findProductBySelection(this.lineValue(row, ['product', 'item', 'sku']));
     if (!product) return null;
+        // No stock hint for products that carry no stock (services, Service Bundles)
+    if ((product as any).tracks_inventory === false || (product as any).is_service === true) return null;
     const variantText = this.lineValue(row, ['variant']);
     const variantId = variantText
       ? this.productVariantOptionObjects(product).find(option => this.productVariantOptionMatches(option, variantText))?.id ?? null
@@ -14944,10 +14983,18 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   // from every reference-doc list (inline dropdown and the "Pick" button's
   // modal both flow through here) so the same SO/SI can't be picked a
   // second time and double its rows.
-  private excludeAlreadyBoundReferenceDocs(docs: PurchaseRefDoc[]): PurchaseRefDoc[] {
-    if (this.config?.key !== 'deliveryChallan') return docs;
+    private excludeAlreadyBoundReferenceDocs(docs: PurchaseRefDoc[]): PurchaseRefDoc[] {
+    const key = this.config?.key;
+    if (key !== 'deliveryChallan' && key !== 'salesInvoice') return docs;
     const used = new Set(this.boundReferenceLabels().map(label => this.normalizeKey(label)));
-    return used.size ? docs.filter(doc => !used.has(this.normalizeKey(doc.doc_number))) : docs;
+    let out = used.size ? docs.filter(doc => !used.has(this.normalizeKey(doc.doc_number))) : docs;
+    // Sales Invoice holding DCs: offer only the other DCs of the same Sales Order
+    if (key === 'salesInvoice' && this.salesInvoiceHasBoundDc()) {
+      const soId = this.optionalNumber(this.formValues()['soId']);
+      out = out.filter(doc => this.referenceDocType(doc) === 'DC'
+        && (this.optionalNumber((doc as any).so_id) ?? null) === (soId ?? null));
+    }
+    return out;
   }
 
   private availableReferenceDocsForCurrentTransaction(docs: PurchaseRefDoc[]): PurchaseRefDoc[] {
@@ -15498,7 +15545,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     const soDocs = so.success
       ? this.referenceDocsForType('SO', so.data || [])
         .map(doc => ({ ...doc, doc_type: 'SO' }))
-        .filter(doc => !this.salesOrderHasDirectInvoiceProgress(doc))
+        .filter(doc => !this.salesOrderHasDirectInvoiceProgress({
+          ...doc,
+          items: (doc.items || []).filter((item: any) => !(item?.is_bundle ?? item?.isBundle))
+        }))
       : [];
     const siDocs = si.success
       ? this.referenceDocsForType('SI', si.data || [])
@@ -15590,6 +15640,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           this.refPickerLoading.set(false);
           const docs = this.salesInvoiceReferenceDocsFromResponses(so, dc);
           this.refPickerDocs.set(docs);
+          this.transactionReferenceDocs.set(docs);     // the picker shows the same SO groups
           if (!so.success && !dc.success) {
             this.txSaveError.set(so.message || dc.message || 'Reference documents could not be loaded.');
             return;
@@ -16364,7 +16415,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // openSalesInvoiceReferencePicker); a DC row picked from it appends
       // rather than replacing, same as the pending-DC-banner pull.
       if (this.config?.key === 'salesInvoice' && this.referenceDocType(doc) === 'DC') {
-        this.appendDeliveryChallanToSalesInvoice(doc);
+        // A DC is ADDED to the DCs already on the invoice (several DCs of one SO, one invoice)
+        this.appendDeliveryChallanToSalesInvoice(doc, 'append');
         return;
       }
       this.selectSalesReference(doc);
@@ -16529,6 +16581,24 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
   }
 
+    /** Lines a picked reference contributes. For a DC picking a Sales Order, Service Bundle
+   *  lines are replaced by their pending KIT materials (migration 300); everything else
+   *  uses the reference's own lines, as before. */
+  private salesReferenceItemsFor(doc: PurchaseRefDoc, key: string): any[] {
+    const items = doc.items || [];
+    if (key !== 'deliveryChallan' || this.referenceDocType(doc) !== 'SO') return items;
+    const goods = items.filter((i: any) => !(i?.is_bundle ?? i?.isBundle));
+    const kit = (doc.kit_items || []).map((k: any) => ({
+      id: null,                                            // not an SO line
+      so_kit_item_id: k.so_kit_item_id ?? k.soKitItemId,
+      product_id: k.product_id, product_name: k.product_name, product_code: k.product_code,
+      uom_id: k.uom_id, uom_name: k.uom_name,
+      qty: k.planned_qty, delivered_qty: k.dispatched_qty, remaining_qty: k.remaining_qty,
+      bundle_name: k.bundle_name
+    }));
+    return [...goods, ...kit];
+  }
+
   selectSalesReference(doc: PurchaseRefDoc, hydrated = false): void {
     const key = this.config?.key || '';
     const docType = this.referenceDocType(doc);
@@ -16546,7 +16616,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         });
       return;
     }
-    const rows = (doc.items || []).map(item => this.referenceItemToLineRow(item, key, doc));
+    const refItems = this.salesReferenceItemsFor(doc, key);
+    const rows = refItems.map(item => this.referenceItemToLineRow(item, key, doc));
     const closeBeforeRows = this.refPickerOpen();
     const patch: Record<string, any> = {
       segmentId: doc.segment_id ?? null,
@@ -16613,8 +16684,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       // (user can still change it) — same "in loop" carry-through as customer.
       patch['channelPartnerId'] = doc.channel_partner_id ?? this.optionalNumber(this.formValues()['channelPartnerId']);
       patch['channelPartner'] = doc.channel_partner_name || this.formValues()['channelPartner'] || '';
-      patch['warehouseId'] = doc.warehouse_id ?? null;
-      patch['warehouse'] = doc.warehouse_name || doc.remarks || this.formValues()['warehouse'] || '';
+      patch['warehouseId'] = doc.warehouse_id ?? this.formValues()['warehouseId'] ?? null;
+      patch['warehouse'] = doc.warehouse_name
+        || (docType === 'DC' ? doc.remarks : '')
+        || this.formValues()['warehouse'] || '';
       patch['invoiceDate'] = invoiceDate;
       patch['paymentTerms'] = paymentTerms;
       patch['dueDate'] = paymentTerms ? this.purchaseInvoiceDueDate(invoiceDate, paymentTerms) : null;
@@ -16714,15 +16787,17 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
           // picker and save payload need that too, same reasoning as
           // Purchase/Sales Return below.
           const attrMap = this.attributeRefMapFromItems(doc.items || []);
-          const nextMap: Record<number, { soItemId?: number; dcItemId?: number; siItemId?: number; attributeId?: number | null; attributeName?: string | null; attributeValue?: string | null }> = {};
-          (doc.items || []).forEach((item: any, i: number) => {
+          const nextMap: Record<number, { soItemId?: number; dcItemId?: number; siItemId?: number; soKitItemId?: number; attributeId?: number | null; attributeName?: string | null; attributeValue?: string | null }> = {};
+          refItems.forEach((item: any, i: number) => {
             nextMap[startIndex + i] = {
               ...attrMap[i],
-              ...(key === 'deliveryChallan' && docType === 'SI'
-                ? { siItemId: item?.id ?? null }
-                : key === 'salesInvoice' && docType === 'DC'
-                  ? { dcItemId: item?.id ?? null, soItemId: item?.so_item_id ?? item?.soItemId ?? null }
-                  : { soItemId: item?.id ?? null })
+              ...(item?.so_kit_item_id
+                ? { soKitItemId: Number(item.so_kit_item_id) }          // migration 300: kit material
+                : key === 'deliveryChallan' && docType === 'SI'
+                  ? { siItemId: item?.id ?? null }
+                  : key === 'salesInvoice' && docType === 'DC'
+                    ? { dcItemId: item?.id ?? null, soItemId: item?.so_item_id ?? item?.soItemId ?? null }
+                    : { soItemId: item?.id ?? null })
             };
           });
           if (appendMode) {
@@ -16756,6 +16831,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       this.closePurchaseReferencePicker();
     }
   }
+
+
 
   // ── Secondary reference picker (DC: pick SI; SI: pick DC, repeatable) ────
   // The primary "Pick Sales Order" flow above covers flows A/B via the
@@ -16933,7 +17010,24 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
   private appendDeliveryChallanToSalesInvoice(doc: PurchaseRefDoc, mode: 'append' | 'replace' = 'replace'): void {
     const key = 'salesInvoice';
     const rows = (doc.items || []).map((item: any) => this.referenceItemToLineRow(item, key, doc));
-    const effectiveMode: 'append' | 'replace' = mode === 'append' && this.activeSalesLineRows().length ? 'append' : 'replace';
+
+    const effectiveMode: 'append' | 'replace' =
+      mode === 'append' && this.activeSalesLineRows().length && this.salesInvoiceHasBoundDc() ? 'append' : 'replace';    
+    
+      // One Sales Order per invoice: a DC of another SO can't be added.
+    const docSoId = this.optionalNumber((doc as any).so_id);
+    const docSoNumber = String((doc as any).so_number || '').trim();
+    if (effectiveMode === 'append') {
+      const currentSoId = this.optionalNumber(this.formValues()['soId']);
+      if ((currentSoId ?? null) !== (docSoId ?? null)) {
+        const current = String(this.formValues()['soReference'] || '').trim();
+        this.txSaveError.set(docSoId
+          ? `${doc.doc_number} belongs to ${docSoNumber || 'another Sales Order'}; this invoice is for ${current || 'Delivery Challans without a Sales Order'}. Invoice each Sales Order separately.`
+          : `${doc.doc_number} has no Sales Order; this invoice is for ${current}. Invoice them separately.`);
+        this.closePurchaseReferencePicker();
+        return;
+      }
+    }
     const startIndex = effectiveMode === 'append' ? this.entryLineRows().length : 0;
     this.entryLineRowsKey.set(key);
     if (effectiveMode === 'append') {
@@ -16958,10 +17052,139 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       customer: effectiveMode === 'append' ? (values['customer'] || doc.party_name || '') : (doc.party_name || values['customer'] || ''),
       warehouseId: effectiveMode === 'append' ? (values['warehouseId'] ?? (doc.warehouse_id ?? null)) : (doc.warehouse_id ?? values['warehouseId']),
       warehouse: effectiveMode === 'append' ? (values['warehouse'] || doc.warehouse_name || doc.remarks || '') : (doc.warehouse_name || doc.remarks || values['warehouse'] || ''),
-      referenceNo: effectiveMode === 'append' ? (values['referenceNo'] || doc.doc_number) : doc.doc_number
+      referenceNo: effectiveMode === 'append' ? (values['referenceNo'] || doc.doc_number) : doc.doc_number,
+      // the DCs' Sales Order -> invoice so_id / so_number
+      soId: effectiveMode === 'append' ? (values['soId'] ?? docSoId) : docSoId,
+      soReference: effectiveMode === 'append' ? (values['soReference'] || docSoNumber) : docSoNumber
     }));
     this.boundReferenceLabels.update(labels => effectiveMode === 'append' ? [...labels, doc.doc_number] : [doc.doc_number]);
     this.closePurchaseReferencePicker();
+  }
+
+    /** True when the invoice's lines came from Delivery Challans (not from an SO pick). */
+  private salesInvoiceHasBoundDc(): boolean {
+    const dcNumbers = new Set(this.transactionReferenceDocs()
+      .filter(d => this.referenceDocType(d) === 'DC')
+      .map(d => this.normalizeKey(d.doc_number)));
+    return this.boundReferenceLabels().some(label => dcNumbers.has(this.normalizeKey(label)));
+  }
+
+    // ── Sales Invoice reference: one entry per Sales Order (with its DCs) ───────
+  readonly siRefGroupKey = signal<string | null>(null);
+  readonly siCheckedDcIds = signal<Set<number>>(new Set());
+
+  /** SO with its DCs to invoice (goods), Service Bundle SO, SO without DC, DC without SO. */
+  readonly salesInvoiceRefGroups = computed(() => {
+    const docs = this.transactionReferenceDocs();
+    const groups = new Map<string, any>();
+    for (const dc of docs.filter(d => this.referenceDocType(d) === 'DC')) {
+      const soId = this.optionalNumber((dc as any).so_id);
+      if (soId) {
+        const key = `so:${soId}`;
+        const g = groups.get(key) || { key, kind: 'dcs', soId, soNumber: (dc as any).so_number || '', dcs: [], soDoc: null };
+        g.dcs.push(dc);
+        groups.set(key, g);
+      } else {
+        groups.set(`dc:${dc.id}`, { key: `dc:${dc.id}`, kind: 'dc', soId: null, soNumber: '', dcs: [dc], soDoc: null });
+      }
+    }
+    for (const so of docs.filter(d => this.referenceDocType(d) === 'SO')) {
+      const key = `so:${so.id}`;
+      if (groups.has(key)) { groups.get(key).soDoc = so; continue; }      // has DCs: billed through them
+      const items: any[] = so.items || [];
+      const bundleLines = items.filter(i => i?.is_bundle ?? i?.isBundle);
+      if (bundleLines.length) {
+        // already invoiced bundle with nothing else to bill: not offered
+        const open = bundleLines.some(i => Number(i.invoiced_qty || 0) < Number(i.qty || 0));
+        if (!open) continue;
+        groups.set(key, { key, kind: 'bundle', soId: so.id, soNumber: so.doc_number, dcs: [], soDoc: so,
+                          infoDcs: so.delivery_challans || [] });
+      } else {
+        groups.set(key, { key, kind: 'so', soId: so.id, soNumber: so.doc_number, dcs: [], soDoc: so });
+      }
+    }
+    return [...groups.values()].map(g => ({
+      ...g,
+      label: g.kind === 'dcs' ? `${g.soNumber} · ${g.dcs.length} DC${g.dcs.length > 1 ? 's' : ''} to invoice`
+           : g.kind === 'bundle' ? `${g.soNumber} · service bundle`
+           : g.kind === 'so' ? `${g.soNumber} · bill directly (no DC)`
+           : `${g.dcs[0].doc_number} · without Sales Order`
+    }));
+  });
+
+  siSelectedGroup() {
+    const key = this.siRefGroupKey();
+    return key ? this.salesInvoiceRefGroups().find(g => g.key === key) || null : null;
+  }
+
+  isSiDcChecked(id: any): boolean { return this.siCheckedDcIds().has(Number(id)); }
+
+
+    selectSalesInvoiceGroup(g: any): void {
+    if (!g) return;
+    this.siRefGroupKey.set(g.key);
+    if (g.kind === 'dcs') {
+      this.siCheckedDcIds.set(new Set(g.dcs.map((d: any) => Number(d.id))));   // all ticked by default
+      this.rebuildSalesInvoiceFromCheckedDcs();
+    } else if (g.kind === 'dc') {
+      this.appendDeliveryChallanToSalesInvoice(g.dcs[0], 'replace');
+      this.formValues.update(v => ({ ...v, soId: null, soNumber: '', referenceNo: g.dcs[0].doc_number }));
+    } else {
+      this.selectSalesReference(g.soDoc);                      // bundle line, or the SO's own lines
+      this.formValues.update(v => ({ ...v, soId: g.soId, soNumber: g.soNumber, referenceNo:
+        g.kind === 'bundle' ? this.joinSiRefs((g.infoDcs || []).map((d: any) => d.dc_number)) || g.soNumber : g.soNumber }));
+    }
+    this.formValues.update(v => ({ ...v, soReference: g.label }));
+    this.closePurchaseReferencePicker();
+  }
+
+  /** Invoice lines = the ticked DCs of the selected SO (rebuilt on every tick / untick). */
+  toggleSiDc(id: any): void {
+    const next = new Set(this.siCheckedDcIds());
+    const n = Number(id);
+    next.has(n) ? next.delete(n) : next.add(n);
+    this.siCheckedDcIds.set(next);
+    this.rebuildSalesInvoiceFromCheckedDcs();
+  }
+
+  toggleAllSiDcs(): void {
+    const g = this.siSelectedGroup();
+    if (!g) return;
+    const all = g.dcs.every((d: any) => this.isSiDcChecked(d.id));
+    this.siCheckedDcIds.set(all ? new Set() : new Set(g.dcs.map((d: any) => Number(d.id))));
+    this.rebuildSalesInvoiceFromCheckedDcs();
+  }
+
+  private rebuildSalesInvoiceFromCheckedDcs(): void {
+    const g = this.siSelectedGroup();
+    if (!g) return;
+    const picked = g.dcs.filter((d: any) => this.isSiDcChecked(d.id));
+    this.entryLineRows.set([this.clearedEntryLineRow()]);
+    this.lineRefItemIdMap.set({});
+    this.lineSerialUnitsMap.set({});
+    this.boundReferenceLabels.set([]);
+    picked.forEach((d: any, i: number) => this.appendDeliveryChallanToSalesInvoice(d, i === 0 ? 'replace' : 'append'));
+    this.formValues.update(v => ({
+      ...v, soId: g.soId, soNumber: g.soNumber, soReference: g.label,
+      referenceNo: this.joinSiRefs(picked.map((d: any) => d.doc_number))
+    }));
+  }
+
+  /** Document numbers for reference_no (100 characters): "DC-1, DC-2, +3 more". */
+  private joinSiRefs(numbers: string[]): string {
+    const all = numbers.join(', ');
+    if (all.length <= 100) return all;
+    const out: string[] = [];
+    for (const n of numbers) {
+      const rest = numbers.length - out.length - 1;
+      if ([...out, n].join(', ').length + `, +${rest} more`.length > 100) break;
+      out.push(n);
+    }
+    return `${out.join(', ')}, +${numbers.length - out.length} more`;
+  }
+
+    siGroupDcNumbers(g: any): string {
+    return (g?.dcs || []).map((d: any) => d.doc_number).join(', ');
   }
 
   // ── Pending-DC banner (rule 10) — read-only hint, dismissible, never blocks.
@@ -17264,6 +17487,13 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       set('GST', gst);
       set('Amount', String(item?.amount ?? ''));
       if (refProduct) this.applyProductPricingDefaults(row, refProduct);
+      // Invoiced from a Sales Order / Delivery Challan: bill at the agreed SO rate
+      // (a Service Bundle has no cost / MRP, so the defaults above leave it empty).
+      const referenceRate = Number(item?.rate ?? 0);
+      if (referenceRate > 0) {
+        const rateIdx = this.lineColumnIndex('Rate');
+        if (rateIdx >= 0) row[rateIdx] = String(Math.round(referenceRate * 100) / 100);
+      }
       this.recalculateLineRow(row);
       return row;
     }
@@ -18412,6 +18642,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     this.bundleConsumptionLoading.set(false);
     this.boundReferenceFields.set({});
     this.boundReferenceLabels.set([]);
+    this.siRefGroupKey.set(null);
+    this.siCheckedDcIds.set(new Set());
+    this.soDraftKits.set({});
+    this.soDraftKitOpen.set(null);
     this.fieldDefaultValues.clear();
     this.saveError.set('');
     this.lineAttrValueMap.set({});
@@ -18647,6 +18881,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
     if (this.config?.key === 'salesInvoice' && (key === 'customer' || key === 'soReference')) {
       this.checkPendingDcBanner();
+    }
+    // Customer chosen / changed: list only that customer's SOs and DCs (no customer = all)
+    if (this.config?.key === 'salesInvoice' && key === 'customer') {
+      this.loadSalesInvoiceReferenceDocs(false, false);
     }
   }
 
@@ -24632,8 +24870,8 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         doc_date: docDate('invoiceDate'),
         due_date: v['dueDate'] || null,
         so_id: this.optionalNumber(v['soId']),
-        so_number: this.optionalNumber(v['soId']) ? (v['soReference'] || null) : null,
-        reference_no: v['referenceNo'] || v['soReference'] || null,
+        so_number: this.optionalNumber(v['soId']) ? (v['soNumber'] || null) : null,
+        reference_no: v['referenceNo'] || null,
         customer_id: customerId,
         customer_name: customerName,
         // the GSTIN shown on the screen (registered in the delivery state, else primary)
@@ -24707,7 +24945,11 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         reference_no: null,
         remarks: v['remarks'] || null,
         status: status(v['status'], 'draft'),
-        items
+        // Service Bundle lines carry the kit adjusted on the form (null = template / keep the saved kit)
+        items: (items || []).map((it: any) => {
+          const kit = this.soDraftKitForProduct(it.product_id);
+          return kit ? { ...it, kit } : it;
+        })
       };
     }
 
@@ -25862,6 +26104,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       return {
         sno: index + 1,
         so_item_id: ref?.soItemId ?? null,
+        so_kit_item_id: (ref as any)?.soKitItemId ?? null,     // migration 300
         si_item_id: ref?.siItemId ?? null,
         product_id: product?.id ?? null,
         product_name: product?.product_name || productName,
@@ -25879,7 +26122,10 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
         dispatch_qty: this.dcColumnNumber(row, 'Dispatch Qty'),
         serial_numbers: this.lineSerialUnitsMap()[index] || null
       };
-    });
+    })
+    // A line with Dispatch Qty 0 means "not sent this time": don't save it
+      .filter(item => Number(item.dispatch_qty ?? 0) > 0)
+      .map((item, i) => ({ ...item, sno: i + 1 }));
   }
 
     /** Number in a DC grid column, by its exact name; null when empty / not a number. */
@@ -26431,6 +26677,14 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       if (invoiceItemsError) return invoiceItemsError;
     }
 
+    // Delivery Challan: lines with Dispatch Qty 0 are left out of the DC
+    // (deliveryChallanItems), so at least one line must remain.
+    if (this.config?.key === 'deliveryChallan') {
+      if (!Array.isArray(payload['items']) || !payload['items'].length) {
+        return 'Enter a Dispatch Qty on at least one line.';
+      }
+    }
+
     // The MRP-ceiling check that used to live here (validateSalesRateBounds)
     // is no longer fatal — see salesRateBoundsNotice(), which saveConfigRecord()
     // now captures and shows as an info notice next to the save confirmation.
@@ -26549,7 +26803,7 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
       const bundleRows = payload['bundle_composition'] || [];
       if (!Array.isArray(bundleRows) || !bundleRows.length) return 'Add at least one item to Bundle Composition for a Service Bundle.';
       const badBundleRow = bundleRows.find((row: any) => !row.item_id || !(Number(row.quantity) >= 1));
-      if (badBundleRow) return 'Each Bundle Composition row needs an Item / Asset and a quantity of at least 1.';
+      if (badBundleRow) return 'Each kit item needs a product and a quantity of at least 1.';
     }
     if (payload['pricing_type'] === 'Rental' && !hasValue(payload['rental_unit'])) return 'Rental Unit is required when Pricing Type is Rental.';
 
@@ -27012,19 +27266,417 @@ export class InventoryScreenShell implements OnInit, AfterViewInit, AfterViewChe
     }
   }
 
-    /** Status text for a saved Sales Order: Draft, or its delivery progress once posted. */
+  /** Status text for a saved Sales Order: Draft, or its progress once posted.
+   *  Goods SOs: Open / Partially Delivered / Delivered / Closed.
+   *  Service Bundle SOs (a job): Open / In Progress / Completed. */
   salesOrderStatusLabel(r: any): string {
     const status = String(r?.status || 'draft').toLowerCase();
     if (status !== 'posted') return status.charAt(0).toUpperCase() + status.slice(1);
     const delivery = String(r?.delivery_status ?? r?.deliveryStatus ?? '').toLowerCase();
-    const labels: Record<string, string> = {
-      open: 'Open',
-      partially_delivered: 'Partially Delivered',
-      delivered: 'Delivered',
-      closed: 'Closed'
-    };
+    const isBundleSo = (r?.items || []).some((i: any) => i?.is_bundle ?? i?.isBundle);
+    const labels: Record<string, string> = isBundleSo
+      ? { open: 'Open', partially_delivered: 'In Progress', delivered: 'In Progress', closed: 'Completed' }
+      : { open: 'Open', partially_delivered: 'Partially Delivered', delivered: 'Delivered', closed: 'Closed' };
     return labels[delivery] || 'Posted';
   }
+
+  /** Products that may be kit items: active, and not a Service Bundle themselves. */
+  readonly soKitProductOptions = computed(() => {
+    const bundleNatureIds = new Set((this.productNatureObjects || [])
+      .filter((n: any) => n.is_bundle_parent === true).map((n: any) => Number(n.id)));
+    return this.loadedProductObjects().filter((p: any) =>
+      (p.status || 'active') === 'active'
+      && !bundleNatureIds.has(Number(p.product_nature_id))
+      && p.product_nature_name !== 'Service Bundle');
+  });
+
+  /** Service Bundle lines of a saved Sales Order row. */
+  salesOrderBundleLines(row: string[]): { lineSno: number; name: string; qty: number; kit: any[] }[] {
+    if (this.config?.key !== 'salesOrder') return [];
+    const r = this.salesOrderRecordForRow(row);
+    return (r?.items || [])
+      .filter((i: any) => i.is_bundle)
+      .map((i: any) => ({ lineSno: Number(i.sno), name: i.product_name, qty: Number(i.qty || 0), kit: i.kit || [] }));
+  }
+
+  /** The kit can change while the SO is posted and not closed (also after DCs / the invoice). */
+  salesOrderKitEditable(row: string[]): boolean {
+    const r = this.salesOrderRecordForRow(row);
+    return !!r && String(r.status || '').toLowerCase() === 'posted'
+      && String(r.delivery_status || '').toLowerCase() !== 'closed';
+  }
+
+  private soKitKey(row: string[], lineSno: number): string {
+    return `${this.salesOrderRecordForRow(row)?.id}:${lineSno}`;
+  }
+
+  isSoKitEditing(row: string[], lineSno: number): boolean {
+    return !!this.soKitEdits()[this.soKitKey(row, lineSno)];
+  }
+
+  soKitEditRows(row: string[], lineSno: number) {
+    return this.soKitEdits()[this.soKitKey(row, lineSno)] || [];
+  }
+
+  startSoKitEdit(row: string[], lineSno: number, kit: any[]): void {
+    const rows = kit.map((k: any) => ({
+      product_id: k.product_id ?? null, product_name: k.product_name || '', uom_name: k.uom_name || '',
+      planned_qty: Number(k.planned_qty || 0), dispatched_qty: Number(k.dispatched_qty || 0)
+    }));
+    this.soKitEdits.update(m => ({ ...m, [this.soKitKey(row, lineSno)]: rows }));
+  }
+
+  cancelSoKitEdit(row: string[], lineSno: number): void {
+    const key = this.soKitKey(row, lineSno);
+    this.soKitEdits.update(m => { const n = { ...m }; delete n[key]; return n; });
+    this.setSoKitError(key, '');
+  }
+
+  private updateSoKitRows(row: string[], lineSno: number, fn: (rows: any[]) => any[]): void {
+    const key = this.soKitKey(row, lineSno);
+    this.soKitEdits.update(m => ({ ...m, [key]: fn([...(m[key] || [])]) }));
+  }
+
+  addSoKitRow(row: string[], lineSno: number): void {
+    this.updateSoKitRows(row, lineSno, rows => [...rows, { product_id: null, product_name: '', uom_name: '', planned_qty: 1, dispatched_qty: 0 }]);
+  }
+
+  removeSoKitRow(row: string[], lineSno: number, index: number): void {
+    this.updateSoKitRows(row, lineSno, rows => rows.filter((r, i) => i !== index || r.dispatched_qty > 0));
+  }
+
+  setSoKitProduct(row: string[], lineSno: number, index: number, productId: number | null): void {
+    const p: any = this.soKitProductOptions().find((x: any) => Number(x.id) === Number(productId));
+    this.updateSoKitRows(row, lineSno, rows => rows.map((r, i) => i !== index ? r : {
+      ...r, product_id: p ? Number(p.id) : null, product_name: p?.product_name || '',
+      uom_name: p?.base_uom_name || p?.uom_name || r.uom_name || ''
+    }));
+  }
+
+  setSoKitQty(row: string[], lineSno: number, index: number, value: any): void {
+    const qty = Number(value);
+    this.updateSoKitRows(row, lineSno, rows => rows.map((r, i) => i !== index ? r : { ...r, planned_qty: Number.isFinite(qty) ? qty : 0 }));
+  }
+
+  saveSoKit(row: string[], lineSno: number): void {
+    const r = this.salesOrderRecordForRow(row);
+    const rows = this.soKitEditRows(row, lineSno);
+    if (!r?.id) return;
+    const key = this.soKitKey(row, lineSno);
+    this.setSoKitError(key, '');
+    if (rows.some(k => !k.product_id)) { this.setSoKitError(key, 'Select a product on every kit row (or remove the empty row).'); return; }
+    const ids = rows.map(k => k.product_id);
+    if (new Set(ids).size !== ids.length) { this.setSoKitError(key, 'The same product appears twice in the kit. Combine the quantities into one row.'); return; }
+    const bad = rows.find(k => k.planned_qty < k.dispatched_qty || k.planned_qty < 0);
+    if (bad) { this.setSoKitError(key, `Kit "${bad.product_name}": planned qty cannot be less than already dispatched (${bad.dispatched_qty}).`); return; }
+
+    this.soKitSaving.set(key);
+    this.txService.saveSalesOrderKit(Number(r.id), lineSno, rows.map(k => ({ productId: Number(k.product_id), qty: k.planned_qty })))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: res => {
+          this.soKitSaving.set(null);
+          if (!res?.success) { this.setSoKitError(key, res?.message || 'Failed to save the kit.'); return; }
+          const kit = res.data?.kit || [];
+          this.savedRecordObjects.update((list: any[]) => list.map(x => Number(x.id) !== Number(r.id) ? x : {
+            ...x,
+            delivery_status: res.data?.deliveryStatus ?? x.delivery_status,
+            items: (x.items || []).map((it: any) => Number(it.sno) === lineSno ? { ...it, kit } : it)
+          }));
+          this.cancelSoKitEdit(row, lineSno);
+          this.saveMsg.set(`Kit saved for ${r.doc_number}.`);
+        },
+        error: (err: any) => {
+          this.soKitSaving.set(null);
+          this.setSoKitError(key, this.apiErrorMessage(err, 'Failed to save the kit.'));
+        }
+      });
+  }
+
+   soKitError(row: string[], lineSno: number): string {
+    return this.soKitErrors()[this.soKitKey(row, lineSno)] || '';
+  }
+
+  private setSoKitError(key: string, message: string): void {
+    this.soKitErrors.update(m => {
+      const n = { ...m };
+      if (message) n[key] = message; else delete n[key];
+      return n;
+    });
+  }
+
+
+    // ── Material Return against a Service Bundle SO (migration 301) ─────────────
+  readonly soReturn = signal<{
+    soId: number; docNumber: string; loading: boolean; saving: boolean;
+    lines: any[]; returns: any[]; locationKey: string;
+    qty: Record<string, number | null>; serials: Record<string, string[]>;
+    reason: string; error: string;
+  } | null>(null);
+
+  /** Posted Service Bundle SOs (also closed ones: leftovers often come back after handover). */
+  soReturnAvailable(row: string[]): boolean {
+    const r = this.salesOrderRecordForRow(row);
+    return !!r && String(r.status || '').toLowerCase() === 'posted' && this.salesOrderBundleLines(row).length > 0;
+  }
+
+  isSoReturnOpen(row: string[]): boolean {
+    const r = this.salesOrderRecordForRow(row);
+    return !!r && this.soReturn()?.soId === Number(r.id);
+  }
+
+  private soReturnLocationKey(l: any): string {
+    return `${l.branch_id ?? ''}|${l.warehouse_id ?? ''}`;
+  }
+
+  soReturnLineKey(l: any): string {
+    return [l.branch_id, l.warehouse_id, l.product_id, l.variant_id, l.attribute_value, l.so_kit_item_id].map(v => v ?? '').join('|');
+  }
+
+  /** The locations the materials were sent from (the return always goes back there). */
+  soReturnLocations(): { key: string; label: string }[] {
+    const seen = new Map<string, string>();
+    for (const l of this.soReturn()?.lines || []) {
+      const key = this.soReturnLocationKey(l);
+      if (!seen.has(key)) seen.set(key, l.warehouse_name || l.branch_name || 'Location');
+    }
+    return [...seen.entries()].map(([key, label]) => ({ key, label }));
+  }
+
+  soReturnLines(): any[] {
+    const s = this.soReturn();
+    return (s?.lines || []).filter(l => this.soReturnLocationKey(l) === s?.locationKey);
+  }
+
+  openSoReturn(row: string[]): void {
+    const r = this.salesOrderRecordForRow(row);
+    if (!r?.id) return;
+    this.soReturn.set({ soId: Number(r.id), docNumber: r.doc_number, loading: true, saving: false,
+                        lines: [], returns: [], locationKey: '', qty: {}, serials: {}, reason: '', error: '' });
+    this.loadSoReturn(Number(r.id));
+  }
+
+  private loadSoReturn(soId: number): void {
+    this.txService.getSoReturnableMaterials(soId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: res => {
+          const lines = res?.data?.lines || [];
+          this.soReturn.update(s => s && s.soId === soId ? {
+            ...s, loading: false, lines, returns: res?.data?.returns || [],
+            locationKey: s.locationKey || (lines[0] ? this.soReturnLocationKey(lines[0]) : ''),
+            error: res?.success ? '' : (res?.message || 'Could not load the materials.')
+          } : s);
+        },
+        error: (err: any) => this.soReturn.update(s => s ? { ...s, loading: false, error: this.apiErrorMessage(err, 'Could not load the materials.') } : s)
+      });
+  }
+
+  closeSoReturn(): void { this.soReturn.set(null); }
+
+  setSoReturnLocation(key: string): void {
+    this.soReturn.update(s => s ? { ...s, locationKey: key, qty: {}, serials: {}, error: '' } : s);
+  }
+
+  setSoReturnQty(line: any, value: any): void {
+    const qty = value === '' || value === null || value === undefined ? null : Number(value);
+    const key = this.soReturnLineKey(line);
+    this.soReturn.update(s => s ? { ...s, qty: { ...s.qty, [key]: qty } } : s);
+  }
+
+  setSoReturnSerials(line: any, serials: string[]): void {
+    const key = this.soReturnLineKey(line);
+    this.soReturn.update(s => s ? { ...s, serials: { ...s.serials, [key]: serials || [] },
+                                   qty: { ...s.qty, [key]: (serials || []).length || null } } : s);
+  }
+
+  setSoReturnReason(value: string): void {
+    this.soReturn.update(s => s ? { ...s, reason: value } : s);
+  }
+
+  postSoReturn(): void {
+    const s = this.soReturn();
+    if (!s || s.saving) return;
+    const items: any[] = [];
+    for (const l of this.soReturnLines()) {
+      const key = this.soReturnLineKey(l);
+      const qty = Number(s.qty[key] || 0);
+      if (qty <= 0) continue;
+      if (qty > Number(l.returnable_qty || 0)) {
+        this.soReturn.update(x => x ? { ...x, error: `"${l.product_name}": return qty (${qty}) is more than what can come back (${l.returnable_qty}).` } : x);
+        return;
+      }
+      const serials = s.serials[key] || [];
+      if (l.serial_applicable && serials.length !== qty) {
+        this.soReturn.update(x => x ? { ...x, error: `"${l.product_name}": select ${qty} serial number(s) to return.` } : x);
+        return;
+      }
+      items.push({
+        productId: l.product_id, variantId: l.variant_id ?? null, attributeValue: l.attribute_value ?? null,
+        soKitItemId: l.so_kit_item_id ?? null, returnQty: qty,
+        serialNumbers: l.serial_applicable ? serials : null
+      });
+    }
+    if (!items.length) {
+      this.soReturn.update(x => x ? { ...x, error: 'Enter a return qty on at least one line.' } : x);
+      return;
+    }
+    const loc = this.soReturnLines()[0];
+    this.soReturn.update(x => x ? { ...x, saving: true, error: '' } : x);
+    this.txService.saveMaterialReturn({
+      soId: s.soId, mrDate: this.todayIso(), branchId: loc?.branch_id ?? null, warehouseId: loc?.warehouse_id ?? null,
+      reason: s.reason || null, items
+    }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: res => {
+        if (!res?.success) {
+          this.soReturn.update(x => x ? { ...x, saving: false, error: res?.message || 'Material Return failed.' } : x);
+          return;
+        }
+        this.soReturn.update(x => x ? { ...x, saving: false, qty: {}, serials: {}, reason: '' } : x);
+        this.saveMsg.set(`Material Return ${res.data?.mr_number || ''} posted for ${s.docNumber}.`);
+        this.loadSoReturn(s.soId);
+        this.refreshSalesOrderRecord(s.soId);
+      },
+      error: (err: any) => this.soReturn.update(x => x ? { ...x, saving: false, error: this.apiErrorMessage(err, 'Material Return failed.') } : x)
+    });
+  }
+
+  cancelSoReturnDoc(mr: any): void {
+    const s = this.soReturn();
+    if (!s || !mr?.id || !window.confirm(`Cancel Material Return ${mr.mr_number}? The returned material will go out of stock again.`)) return;
+    this.txService.cancelMaterialReturn(Number(mr.id))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: res => {
+          if (!res?.success) { this.soReturn.update(x => x ? { ...x, error: res?.message || 'Cancel failed.' } : x); return; }
+          this.saveMsg.set(`Material Return ${mr.mr_number} cancelled.`);
+          this.loadSoReturn(s.soId);
+          this.refreshSalesOrderRecord(s.soId);
+        },
+        error: (err: any) => this.soReturn.update(x => x ? { ...x, error: this.apiErrorMessage(err, 'Cancel failed.') } : x)
+      });
+  }
+
+  /** Re-reads one Sales Order (its kit now shows returned / used) without reloading the page. */
+  private refreshSalesOrderRecord(soId: number): void {
+    this.txService.getSalesOrders(undefined, this.selectedSegmentId())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(res => {
+        const fresh = (res?.data || []).find((x: any) => Number(x.id) === soId);
+        if (fresh) this.savedRecordObjects.update((list: any[]) => list.map(x => Number(x.id) === soId ? fresh : x));
+      });
+  }
+
+
+    // ── Kit of Service Bundle lines while CREATING a Sales Order (sent as items[].kit) ──
+  /** Draft kits keyed by the bundle's product id. */
+  readonly soDraftKits = signal<Record<number, { product_id: number | null; product_name: string; uom_name: string; qty: number }[]>>({});
+  /** Bundle product id whose kit panel is open (null = closed). */
+  readonly soDraftKitOpen = signal<number | null>(null);
+  readonly soDraftKitError = signal('');
+
+  private isServiceBundleProduct(p: any): boolean {
+    if (!p) return false;
+    const nature: any = (this.productNatureObjects || []).find((n: any) => Number(n.id) === Number(p.product_nature_id));
+    return nature?.is_bundle_parent === true || p.product_nature_name === 'Service Bundle';
+  }
+
+  /** The Service Bundle product of an SO grid row, or null. */
+  soRowBundleProduct(row: string[]): any {
+    if (this.config?.key !== 'salesOrder') return null;
+    const p: any = this.findProductBySelection(this.lineValue(row, ['product', 'item', 'sku']));
+    return this.isServiceBundleProduct(p) ? p : null;
+  }
+
+  /** Template kit of a bundle (Bundle Composition) x line qty. */
+  private soTemplateKit(bundle: any, lineQty: number) {
+    const comp: any[] = bundle?.bundle_composition || bundle?.bundleComposition || bundle?.bundle_items || [];
+    return comp.map((c: any) => {
+      const p: any = this.loadedProductObjects().find((x: any) => Number(x.id) === Number(c.item_id ?? c.itemId));
+      return {
+        product_id: Number(c.item_id ?? c.itemId) || null,
+        product_name: p?.product_name || c.item_name || c.itemName || '',
+        uom_name: p?.base_uom_name || p?.uom_name || '',
+        qty: Math.round(Number(c.quantity || 0) * (lineQty || 1) * 10000) / 10000
+      };
+    });
+  }
+
+  openSoDraftKit(row: string[]): void {
+    const bundle = this.soRowBundleProduct(row);
+    if (!bundle) return;
+    const id = Number(bundle.id);
+    if (!this.soDraftKits()[id]) {
+      const qty = this.parseDecimalNumber(this.lineValue(row, ['qty'])) || 1;
+      this.soDraftKits.update(m => ({ ...m, [id]: this.soTemplateKit(bundle, qty) }));
+    }
+    this.soDraftKitError.set('');
+    this.soDraftKitOpen.set(id);
+  }
+
+  closeSoDraftKit(): void {
+    const id = this.soDraftKitOpen();
+    if (id === null) return;
+    const rows = this.soDraftKits()[id] || [];
+    if (rows.some(k => !k.product_id)) { this.soDraftKitError.set('Select a product on every kit row (or remove the empty row).'); return; }
+    const ids = rows.map(k => k.product_id);
+    if (new Set(ids).size !== ids.length) { this.soDraftKitError.set('The same product appears twice in the kit. Combine the quantities into one row.'); return; }
+    if (rows.some(k => !(k.qty >= 0))) { this.soDraftKitError.set('Kit quantities cannot be negative.'); return; }
+    this.soDraftKitError.set('');
+    this.soDraftKitOpen.set(null);
+  }
+
+  soDraftKitBundleName(): string {
+    const id = this.soDraftKitOpen();
+    return (this.loadedProductObjects().find((p: any) => Number(p.id) === id) as any)?.product_name || '';
+  }
+
+  soDraftKitRows() {
+    const id = this.soDraftKitOpen();
+    return id === null ? [] : (this.soDraftKits()[id] || []);
+  }
+
+  private updateSoDraftKitRows(fn: (rows: any[]) => any[]): void {
+    const id = this.soDraftKitOpen();
+    if (id === null) return;
+    this.soDraftKits.update(m => ({ ...m, [id]: fn([...(m[id] || [])]) }));
+  }
+
+  addSoDraftKitRow(): void {
+    this.updateSoDraftKitRows(rows => [...rows, { product_id: null, product_name: '', uom_name: '', qty: 1 }]);
+  }
+
+  removeSoDraftKitRow(index: number): void {
+    this.updateSoDraftKitRows(rows => rows.filter((_, i) => i !== index));
+  }
+
+  setSoDraftKitProduct(index: number, productId: number | null): void {
+    const p: any = this.soKitProductOptions().find((x: any) => Number(x.id) === Number(productId));
+    this.updateSoDraftKitRows(rows => rows.map((r, i) => i !== index ? r : {
+      ...r, product_id: p ? Number(p.id) : null, product_name: p?.product_name || '', uom_name: p?.base_uom_name || p?.uom_name || ''
+    }));
+  }
+
+  setSoDraftKitQty(index: number, value: any): void {
+    const qty = Number(value);
+    this.updateSoDraftKitRows(rows => rows.map((r, i) => i !== index ? r : { ...r, qty: Number.isFinite(qty) ? qty : 0 }));
+  }
+
+  resetSoDraftKitToTemplate(row: string[] | null = null): void {
+    const id = this.soDraftKitOpen();
+    if (id === null) return;
+    const bundle = this.loadedProductObjects().find((p: any) => Number(p.id) === id);
+    const qty = row ? (this.parseDecimalNumber(this.lineValue(row, ['qty'])) || 1) : 1;
+    this.soDraftKits.update(m => ({ ...m, [id]: this.soTemplateKit(bundle, qty) }));
+  }
+
+  /** items[].kit for the save payload: only for bundle lines whose kit was opened / changed. */
+  soDraftKitForProduct(productId: any): { product_id: number; qty: number }[] | null {
+    const rows = this.soDraftKits()[Number(productId)];
+    if (!rows) return null;
+    return rows.filter(k => k.product_id).map(k => ({ product_id: Number(k.product_id), qty: Number(k.qty || 0) }));
+  }
+
 
     /** DC: "2 more than pending" when Dispatch Qty exceeds the SO line's pending qty (allowed, but flagged). */
   private dcOverDispatchText(row: string[], qty: number): string {
