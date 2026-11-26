@@ -336,6 +336,13 @@ export class InventoryBusinessSegmentsComponent implements OnInit {
       serial_applicable: !!category.serial_applicable,
       serial_policy_id: category.serial_applicable ? category.serial_policy_id ?? null : null,
       serial_policy_name: category.serial_policy_name ?? null,
+      // Policies (migration 265): the server builds serial tracking from these rows only
+      // and ignores serial_applicable / serial_policy_id above. They were dropped here,
+      // so a category added from this screen was saved with no policy at all.
+      // Sent only when the staged category carries them, so nothing else changes.
+      ...(Array.isArray(category.policies)
+        ? { policy_applicable: !!category.policy_applicable, policies: category.policies }
+        : {}),
       batch_applicable: !!category.batch_applicable,
       batch_policy_id: category.batch_applicable ? category.batch_policy_id ?? null : null,
       batch_policy_name: category.batch_policy_name ?? null,

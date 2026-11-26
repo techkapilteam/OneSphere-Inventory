@@ -7,7 +7,7 @@ import { InventoryLeaseBillingComponent } from './lease-billing';
 
 // Billing: pick the customer (shared picker), then the running contracts grid; no tabs / bulk mode.
 describe('InventoryLeaseBillingComponent (shared shell)', () => {
-  it('renders the customer picker and the running contracts grid only', async () => {
+  it('renders the customer picker and the ready-to-invoice grid only', async () => {
     await TestBed.configureTestingModule({
       imports: [InventoryLeaseBillingComponent],
       providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([]), DatePipe]
@@ -18,7 +18,8 @@ describe('InventoryLeaseBillingComponent (shared shell)', () => {
     fixture.detectChanges();
     const el: HTMLElement = fixture.nativeElement;
     expect(fixture.componentInstance.bodyFieldByKey('customer')?.addMaster).toBe('Customer');
-    expect(el.textContent).toContain('Running Contracts');
+    expect(el.textContent).toContain('Ready to Invoice');
+    expect(el.textContent).toContain('Billing History');
     expect(el.textContent).not.toContain('All due contracts');
     expect(el.textContent).not.toContain('One contract');
   });
