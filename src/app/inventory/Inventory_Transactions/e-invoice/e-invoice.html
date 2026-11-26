@@ -1,0 +1,218 @@
+<div class="module-page inventory-page einv-page">
+  <div class="inventory-shell">
+
+    <!-- Filters -->
+    <section class="inventory-section">
+      <div class="inventory-section-title">
+        <div>
+          <h3><i class="pi pi-qrcode"></i> E-Invoice</h3>
+          <p>Generate GST e-invoices (IRN) for posted B2B Sales Invoices, or view the ones already generated.</p>
+        </div>
+      </div>
+
+      <div class="inventory-form-grid inventory-config-grid einv-filter-grid">
+        <div class="erp-form-group">
+          <label class="erp-label">E-Invoice Type</label>
+          <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+            [items]="typeOptions" bindLabel="label" bindValue="value"
+            [searchable]="false" [clearable]="false"
+            [ngModel]="einvoiceType()" (ngModelChange)="onTypeChange($event)">
+          </ng-select>
+        </div>
+
+        <div class="erp-form-group">
+          <label class="erp-label">From Date <span class="text-danger">*</span></label>
+          <div class="inventory-date-wrap">
+            <p-datepicker
+              [ngModel]="fromDate()" (ngModelChange)="onFromDateChange($event)"
+              [maxDate]="maxDate"
+              dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY"
+              [readonlyInput]="true" [showIcon]="false" appendTo="body"
+              styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100">
+            </p-datepicker>
+            <i class="pi pi-calendar inventory-date-icon"></i>
+          </div>
+        </div>
+
+        <div class="erp-form-group">
+          <label class="erp-label">To Date <span class="text-danger">*</span></label>
+          <div class="inventory-date-wrap">
+            <p-datepicker
+              [ngModel]="toDate()" (ngModelChange)="onToDateChange($event)"
+              [minDate]="fromDate()" [maxDate]="maxDate"
+              dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY"
+              [readonlyInput]="true" [showIcon]="false" appendTo="body"
+              styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100">
+            </p-datepicker>
+            <i class="pi pi-calendar inventory-date-icon"></i>
+          </div>
+        </div>
+
+        <div class="erp-form-group einv-show-group">
+          <button type="button" class="erp-btn btn-primary" [disabled]="loading()" (click)="show()">
+            <i [class]="loading() ? 'pi pi-spin pi-spinner' : 'pi pi-search'"></i> Show
+          </button>
+        </div>
+      </div>
+
+      @if (filterError()) {
+        <div class="text-danger einv-filter-error"><i class="pi pi-exclamation-triangle"></i> {{ filterError() }}</div>
+      }
+    </section>
+
+    <!-- Invoices -->
+    <section class="inventory-section">
+      <div class="inventory-section-title">
+        <div>
+          <h3>{{ isNew() ? 'Pending Invoices' : 'Generated E-Invoices' }}</h3>
+          <p>
+            {{ filteredRows().length }} invoice(s)
+            @if (isNew() && selectedIds().size) {
+              · <strong>{{ selectedIds().size }} selected ({{ formatAmount(selectedTotal()) }})</strong>
+            }
+          </p>
+        </div>
+        <div class="einv-search">
+          <input class="erp-input" type="text" placeholder="Search invoice no, client, GSTIN, ACK no"
+            [ngModel]="searchText()" (ngModelChange)="onSearchChange($event)" />
+        </div>
+      </div>
+
+      <div class="tbl-wrap">
+        <table class="erp-table compact">
+          <thead>
+            <tr>
+              @if (isNew()) {
+                <th class="text-center" style="width: 44px;">
+                  <input type="checkbox" title="Select all B2B invoices"
+                    [checked]="allSelected()" [disabled]="!selectableRows().length"
+                    (change)="toggleAll($any($event.target).checked)" />
+                </th>
+              } @else {
+                <th class="text-center" style="width: 60px;">View</th>
+              }
+              <th>Invoice Date</th>
+              <th>Client Name</th>
+              <th>Invoice No</th>
+              <th class="text-end">Amount</th>
+              @if (!isNew()) {
+                <th>ACK No</th>
+                <th>ACK Date</th>
+              }
+              <th>Invoice Type</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            @if (loading()) {
+              <tr><td [attr.colspan]="isNew() ? 7 : 9" class="text-center einv-empty">
+                <i class="pi pi-spin pi-spinner"></i> Loading…
+              </td></tr>
+            } @else {
+              @for (row of pagedRows(); track row.invoice_id) {
+                <tr [class.einv-row-selected]="isSelected(row)">
+                  @if (isNew()) {
+                    <td class="text-center">
+                      <input type="checkbox"
+                        [checked]="isSelected(row)" [disabled]="!canSelect(row)"
+                        [title]="selectTitle(row)"
+                        (change)="toggleRow(row, $any($event.target).checked)" />
+                    </td>
+                  } @else {
+                    <td class="text-center">
+                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="View e-invoice" (click)="openView(row)">
+                        <i class="pi pi-eye"></i>
+                      </button>
+                    </td>
+                  }
+                  <td>{{ formatDate(row.invoice_date) }}</td>
+                  <td>
+                    {{ row.customer_name || '-' }}
+                    @if (row.customer_gstin) {
+                      <div class="einv-subtext">{{ row.customer_gstin }}</div>
+                    }
+                  </td>
+                  <td>
+                    @if (isNew()) {
+                      <strong>{{ row.invoice_no }}</strong>
+                    } @else {
+                      <a href="javascript:void(0)" class="einv-link" title="View / print e-invoice" (click)="openView(row)"><strong>{{ row.invoice_no }}</strong></a>
+                    }
+                  </td>
+                  <td class="text-end">{{ formatAmount(row.total_amount) }}</td>
+                  @if (!isNew()) {
+                    <td>{{ row.ack_no || '-' }}</td>
+                    <td>{{ formatDate(row.ack_date) }}</td>
+                  }
+                  <td>{{ row.supply_type }}</td>
+                  <td>
+                    <span [class]="statusClass(row)">{{ statusLabel(row) }}</span>
+                    @if (row.error_message) {
+                      <div class="einv-subtext text-danger">{{ row.error_message }}</div>
+                    }
+                  </td>
+                </tr>
+              } @empty {
+                <tr>
+                  <td [attr.colspan]="isNew() ? 7 : 9" class="text-center einv-empty">
+                    @if (!loaded()) {
+                      Select the e-invoice type and date range, then click Show.
+                    } @else if (isNew()) {
+                      No posted Sales Invoices are waiting for an e-invoice in this period.
+                    } @else {
+                      No e-invoices were generated in this period.
+                    }
+                  </td>
+                </tr>
+              }
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Footer: paging + Generate -->
+      @if (filteredRows().length) {
+        <div class="einv-pager">
+          <span>Page {{ page() }} of {{ totalPages() }} ({{ filteredRows().length }} items)</span>
+          <div class="einv-pager-controls">
+            <select class="erp-input einv-page-size" title="Rows per page"
+              [ngModel]="pageSize()" (ngModelChange)="setPageSize($event)">
+              @for (size of pageSizeOptions; track size) {
+                <option [ngValue]="size">{{ size }} / page</option>
+              }
+            </select>
+            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="First page" [disabled]="page() <= 1" (click)="goToPage(1)">
+              <i class="pi pi-angle-double-left"></i>
+            </button>
+            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Previous page" [disabled]="page() <= 1" (click)="goToPage(page() - 1)">
+              <i class="pi pi-angle-left"></i>
+            </button>
+            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Next page" [disabled]="page() >= totalPages()" (click)="goToPage(page() + 1)">
+              <i class="pi pi-angle-right"></i>
+            </button>
+            <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Last page" [disabled]="page() >= totalPages()" (click)="goToPage(totalPages())">
+              <i class="pi pi-angle-double-right"></i>
+            </button>
+          </div>
+        </div>
+      }
+
+      @if (isNew()) {
+        <div class="inventory-form-actions">
+          <button type="button" class="erp-btn btn-white" [disabled]="generating() || !selectedIds().size" (click)="toggleAll(false)">
+            <i class="pi pi-times"></i> Clear Selection
+          </button>
+          <button type="button" class="erp-btn btn-primary" [disabled]="generating() || !selectedIds().size" (click)="generate()">
+            <i [class]="generating() ? 'pi pi-spin pi-spinner' : 'pi pi-check'"></i>
+            {{ generating() ? 'Generating…' : 'Generate E-Invoice' + (selectedIds().size ? ' (' + selectedIds().size + ')' : '') }}
+          </button>
+        </div>
+      }
+    </section>
+  </div>
+
+  <!-- View e-invoice (Old): printable e-invoice with QR -->
+  @if (viewRow(); as row) {
+    <app-inventory-e-invoice-print [invoiceId]="row.invoice_id" [invoiceNo]="row.invoice_no" (closed)="closeView()" />
+  }
+</div>
