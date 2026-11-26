@@ -228,7 +228,7 @@ export class InventoryProductServiceMasterComponent extends InventoryScreenShell
   );
 
   private static readonly PRICING_TYPE_VISIBLE_NATURES = new Set(['Service', 'Service Bundle', 'Digital / Subscription']);
-  private static readonly BUNDLE_ELIGIBLE_NATURES = new Set(['Fixed Asset', 'Service', 'Consumable']);
+  // private static readonly BUNDLE_ELIGIBLE_NATURES = new Set(['Fixed Asset', 'Service', 'Consumable']);
 
   readonly pricingTypeVisible = computed(() => {
     const natureName = this.selectedProductNature()?.type_name;
@@ -239,17 +239,29 @@ export class InventoryProductServiceMasterComponent extends InventoryScreenShell
     this.pricingTypeVisible() && this.formValues()['pricingType'] === 'Rental'
   );
 
-  readonly bundleCompositionVisible = computed(() =>
-    this.selectedProductNature()?.type_name === 'Service Bundle'
-  );
+   // Service Bundle (or any nature flagged as a bundle parent) has a kit / composition
+  readonly bundleCompositionVisible = computed(() => {
+    const nature: any = this.selectedProductNature();
+    return !!nature && (nature.is_bundle_parent === true || nature.type_name === 'Service Bundle');
+  });
 
   readonly bundleSectionExpanded = signal(true);
 
-  readonly bundleEligibleProductOptions = computed(() =>
-    this.loadedProductObjects().filter(p =>
-      !!p.product_nature_name && InventoryProductServiceMasterComponent.BUNDLE_ELIGIBLE_NATURES.has(p.product_nature_name) && p.id !== this.editingId()
-    )
-  );
+   // Kit items: products whose nature is flagged "allowed in bundle" (migration 300:
+  // every nature except Service Bundle itself), active, and not this product.
+  readonly bundleEligibleProductOptions = computed(() => {
+    const products = this.loadedProductObjects();
+    const natures: any[] = this.productNatureObjects || [];
+    const allowedIds = new Set(natures.filter(n => n.allowed_in_bundle === true && n.is_bundle_parent !== true).map(n => Number(n.id)));
+    return products.filter(p =>
+      p.id !== this.editingId()
+      && (p.status || 'active') === 'active'
+      && (allowedIds.size
+            ? allowedIds.has(Number(p.product_nature_id))
+            // natures not loaded yet: anything that is not a Service Bundle
+            : !!p.product_nature_name && p.product_nature_name !== 'Service Bundle')
+    );
+  });
 
   findBundleEligibleProductById(id: number | null): ProductItem | null {
     if (!id) return null;
