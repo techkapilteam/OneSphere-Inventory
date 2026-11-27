@@ -816,13 +816,16 @@ export class InventoryReportPageComponent implements OnInit {
       }));
     }
 
+
+    const exportTitle = this.report().key === 'vendorDues' ? 'Vendor Dues List' : this.report().title;
+
     return {
-      title: this.report().title,
+      title: exportTitle,
       columns: columns.map(column => column.label),
       rows,
       groupRowIndexes,
       periodText,
-      fileName: this.report().title
+      fileName: exportTitle
     };
   }
 
