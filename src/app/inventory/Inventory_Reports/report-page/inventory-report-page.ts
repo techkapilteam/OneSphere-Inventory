@@ -347,7 +347,9 @@ export class InventoryReportPageComponent implements OnInit {
   readonly branchOnlyLocation = computed(() => this.report().key === 'stockSummary');
 
   // Upper limit for the To Date picker (no future dates).
-  readonly todayDate = new Date();
+  // Previous: readonly todayDate = new Date();
+  // End of today, so any time today passes PrimeNG's maxDate check (user 2026-11-27).
+  readonly todayDate = (() => { const d = new Date(); d.setHours(23, 59, 59, 999); return d; })();
 
   readonly activeLocationOption = computed<BranchWarehouseOption | null>(() => {
     const scope = this.reportLocationScope();
@@ -913,7 +915,10 @@ export class InventoryReportPageComponent implements OnInit {
       segmentId: singleSegment ? [singleSegment] : [],
       financialYear: [String(context.financialYear || this.currentFinancialYear())],
       fromDate: start,
-      toDate: today,
+      // Previous: toDate: today,
+      // Midnight today: a `new Date()` with the current time is a few ms past
+      // the picker's maxDate, so PrimeNG blanked the To Date box (user 2026-11-27).
+      toDate: this.startOfDay(today),
       status: []
     };
   }

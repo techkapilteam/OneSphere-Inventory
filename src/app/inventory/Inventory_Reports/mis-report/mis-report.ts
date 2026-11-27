@@ -39,7 +39,15 @@ export class MisReportComponent {
   readonly canView = computed(() => this.authService.can('INV_R_MIS', 'view'));
 
   readonly dateFrom = signal('');
-  readonly dateTo = signal('');
+  // Previous: readonly dateTo = signal('');
+  // To Date binds today's date by default, like every other inventory report (user 2026-11-27).
+  readonly dateTo = signal(MisReportComponent.todayIso());
+
+  private static todayIso(): string {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  }
 
   readonly report = signal<MisReport | null>(null);
   readonly loading = signal(false);

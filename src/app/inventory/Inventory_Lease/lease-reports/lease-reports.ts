@@ -115,7 +115,13 @@ export class InventoryLeaseReportsComponent implements OnInit {
 
   days = 30;
   fromDate = '';
-  toDate = '';
+  // Previous: toDate = '';
+  // To Date binds today's date by default, like every other inventory report (user 2026-11-27).
+  toDate = (() => {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  })();
 
   def(): ReportDef { return REPORTS.find(r => r.key === this.reportKey()) ?? REPORTS[0]; }
 
