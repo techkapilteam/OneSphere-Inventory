@@ -107,13 +107,8 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
             </div>
           }
           <div class="erp-form-group">
-            <label class="erp-label">Site / Location</label>
-            <input class="erp-input" type="text" [(ngModel)]="leaseDraft.site_name" placeholder="Short name, e.g. Warangal shop" />
-          </div>
-
-          <div class="erp-form-group">
             <label class="erp-label">Start Date</label>
-            <app-lease-date [value]="leaseDraft.start_date" (valueChange)="leaseDraft.start_date = $event || leaseDraft.start_date" />
+            <app-lease-date [value]="leaseDraft.start_date" (valueChange)="leaseOnStartDateChange($event)" />
           </div>
           <div class="erp-form-group">
             <label class="erp-label">End Date</label>
@@ -246,7 +241,7 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
           <div class="tbl-wrap">
             <table class="erp-table compact inventory-resizable-table">
               <thead>
-                <tr><th class="text-center">Actions</th><th class="text-center">S.No</th><th>Meter Item</th><th>UOM</th><th>Label</th><th>Opening Reading</th><th>Rate / unit</th><th>Free units</th><th>Min. charge</th><th>Rates / Slabs</th></tr>
+                <tr><th class="text-center">Actions</th><th class="text-center">S.No</th><th>Meter Item</th><th>UOM</th><th>Opening Reading</th><th>Rate / unit</th><th>Free units</th><th>Min. charge</th><th>Rates / Slabs</th></tr>
               </thead>
               <tbody>
                 @for (row of directEntryLineRows(); track $index; let i = $index) {
@@ -268,7 +263,6 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
                       </app-inventory-line-product-picker>
                     </td>
                     <td>{{ leaseUnitOfRow(row) }}</td>
-                    <td><input class="erp-input inventory-grid-input" type="text" [(ngModel)]="m.meter_label" /></td>
                     <td><input class="erp-input inventory-grid-input" type="number" min="0" [(ngModel)]="m.opening_reading" /></td>
                     <td>
                       @if (leaseHasSlabs(m)) { <span class="inventory-grid-static-value">Slabs</span> }
@@ -329,11 +323,11 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
       </div>
       <div class="tbl-wrap">
         <table class="erp-table compact">
-          <thead><tr><th>Contract</th><th>Customer</th><th>Site / Location</th><th>Period</th><th>Billing</th><th>Assets</th><th>Meters</th><th>Billed to</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Contract</th><th>Customer</th><th>Leased Items</th><th>Site / Location</th><th>Period</th><th>Billing</th><th>Assets</th><th>Meters</th><th>Billed to</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
             @for (c of leasePageRows(); track c.id) {
               <tr>
-                <td>{{ c.contract_no }}</td><td>{{ c.customer_name }}</td><td>{{ c.site_name }}</td>
+                <td>{{ c.contract_no }}</td><td>{{ c.customer_name }}</td><td>{{ c.lease_items || '-' }}</td><td>{{ c.site_name }}</td>
                 <td>{{ c.start_date }} → {{ c.end_date || 'open' }}</td><td>{{ c.billing_cycle }} / {{ c.billing_mode }}</td>
                 <td>{{ c.asset_count }}</td><td>{{ c.meter_count }}</td><td>{{ c.last_billed_to || '-' }}</td><td>{{ c.status }}</td>
                 <td class="d-flex gap-1">
@@ -350,7 +344,7 @@ function rentKey(a: { rent_applicable: boolean; rent_uom_id: number | null; rent
                 </td>
               </tr>
             } @empty {
-              <tr><td colspan="10" class="text-center">No lease contracts.</td></tr>
+              <tr><td colspan="11" class="text-center">No lease contracts.</td></tr>
             }
           </tbody>
         </table>
@@ -610,6 +604,16 @@ export class InventoryLeaseContractsComponent extends InventoryScreenShell imple
     });
   }
 
+  /** The handover date of a new asset row is the contract start date by default: rows still on the old
+   *  start date follow the new one (a date the user picked by hand is left alone). */
+  leaseOnStartDateChange(value: string | null): void {
+    const next = value || this.leaseDraft.start_date;
+    const previous = this.leaseDraft.start_date;
+    this.leaseDraft.start_date = next;
+    if (next === previous) return;
+    for (const a of this.leaseAssets) if (!a.id && a.handover_date === previous) a.handover_date = next;
+  }
+
   private leaseNewRate(): LeaseRate {
     return { effective_from: this.leaseDraft.start_date, rate: null, free_qty: 0, min_charge: 0, slabs: [] };
   }
@@ -617,7 +621,7 @@ export class InventoryLeaseContractsComponent extends InventoryScreenShell imple
   // ── assets grid ────────────────────────────────────────────────────────
   leaseAddAssetRow(): void {
     this.leaseAssets.push({
-      product_id: null, product_name: '', serial_unit_id: null, serial_tracked: false, asset_ref: '', handover_date: today(), handover_condition: '',
+      product_id: null, product_name: '', serial_unit_id: null, serial_tracked: false, asset_ref: '', handover_date: this.leaseDraft.start_date || today(), handover_condition: '',
       rent_applicable: false, rent_uom_id: null, rent_rate: null
     });
   }

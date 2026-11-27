@@ -64,6 +64,48 @@ describe('InventoryMeterReadingsComponent', () => {
     expect(c.defaultTypeOf(c.rows()[0].meter)).toBe('normal');
   });
 
+
+  it('has no Void; the latest unbilled reading of a meter can be corrected in place', () => {
+    c.readings.set([
+      { id: 50, lease_meter_id: 1, reading_date: '2026-11-01', reading_value: 250, reading_type: 'normal', status: 'billed' },
+      { id: 51, lease_meter_id: 1, reading_date: '2026-11-10', reading_value: 300, reading_type: 'normal', status: 'verified' },
+      { id: 52, lease_meter_id: 2, reading_date: '2026-11-10', reading_value: 40, reading_type: 'normal', status: 'billed' }
+    ]);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).not.toContain('Void');
+    expect(c.canEditReading(c.readings()[1])).toBe(true);    // latest of meter 1, verified
+    expect(c.canEditReading(c.readings()[0])).toBe(false);   // older / billed
+    expect(c.editableOf(c.rows()[1].meter)).toBe(false);     // meter 2: its latest is billed
+
+    const save = vi.spyOn(api, 'saveReading').mockImplementation((b: any) => of({ success: true, message: '', data: { id: b.id, status: 'verified' } } as any));
+    const verify = vi.spyOn(api, 'verifyReadings');
+    c.editLast(c.rows()[0]);
+    expect(c.rows()[0].value).toBe(300);
+    expect(c.previousOf(c.rows()[0].meter, c.rows()[0].editId)).toBe(250);   // continues from the reading before it
+    c.rows()[0].value = 320;
+    c.save();
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ id: 51, lease_meter_id: 1, reading_value: 320 }));
+    expect(verify).not.toHaveBeenCalled();                   // already verified: nothing to verify again
+  });
+
+  it('inside billing: only that customer contracts are offered, and a single contract is opened for them', async () => {
+    const f2 = TestBed.createComponent(InventoryMeterReadingsComponent);
+    f2.componentRef.setInput('embedded', true);
+    (api.getContracts as any).mockReturnValue(of({ success: true, message: '', data: [
+      { id: 9, contract_no: 'LSE-9', customer_id: 1, customer_name: 'Alpha', status: 'active' },
+      { id: 10, contract_no: 'LSE-10', customer_id: 2, customer_name: 'Beta', status: 'active' }
+    ] }));
+    f2.detectChanges();
+    f2.componentRef.setInput('customerId', 1);
+    f2.detectChanges();
+    const c2: any = f2.componentInstance;
+    expect(c2.contractOptions().map((o: any) => o.id)).toEqual([9]);
+    expect(c2.contractId()).toBe(9);
+    f2.componentRef.setInput('customerId', 2);
+    expect(c2.contractOptions().map((o: any) => o.id)).toEqual([10]);
+    expect(f2.nativeElement.textContent).not.toContain('Reading History');
+  });
+
   it('saves all filled rows and verifies them; refuses a lower reading', () => {
     const save = vi.spyOn(api, 'saveReading').mockImplementation((b: any) => of({ success: true, message: '', data: { id: b.lease_meter_id * 10 } } as any));
     const verify = vi.spyOn(api, 'verifyReadings').mockReturnValue(of({ success: true, message: '', data: { verified: 2, requested: 2 } }));

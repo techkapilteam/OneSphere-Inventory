@@ -1,12 +1,13 @@
 import { createInventoryToast } from '../../Inventory_Shared/inventory-save-toast/inventory-save-toast.component';
 import { CommonModule } from '@angular/common';
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, ViewChild, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { NgSelectModule } from '@ng-select/ng-select';
 import { InventoryQuickAddModalComponent } from '../../Inventory_Shared/inventory-quick-add-modal/inventory-quick-add-modal.component';
 import { InventoryScreenShell } from '../../Inventory_Shared/inventory-screen-shell/inventory-screen-shell';
 import { LeaseDateComponent } from '../lease-dialogs';
+import { InventoryMeterReadingsComponent } from '../meter-readings/meter-readings';
 import { BillingCandidate, BillingPreview, LeaseMeterService } from '../lease-meter.service';
 import { leaseBillingConfig } from '../lease-screen-configs';
 
@@ -32,7 +33,7 @@ interface BillRow {
 @Component({
   selector: 'app-inventory-lease-billing',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, NgSelectModule, InventoryScreenShell, InventoryQuickAddModalComponent, LeaseDateComponent],
+  imports: [CommonModule, FormsModule, RouterModule, NgSelectModule, InventoryScreenShell, InventoryQuickAddModalComponent, LeaseDateComponent, InventoryMeterReadingsComponent],
   template: `
 <div class="module-page inventory-page">
   <div class="inventory-shell">
@@ -60,8 +61,6 @@ interface BillRow {
         }
         <div class="erp-form-group"><label class="erp-label">Invoice Date</label>
           <app-lease-date [value]="billInvoiceDate" (valueChange)="billInvoiceDate = $event || billInvoiceDate" /></div>
-        <div class="erp-form-group"><label class="erp-label">Place of Supply <span class="erp-label-hint">optional</span></label>
-          <input class="erp-input" type="text" [(ngModel)]="billPlaceOfSupply" placeholder="Blank = the site's GST state of each contract" /></div>
         <div class="erp-form-group inventory-header-col-6"><label class="erp-label">Note on invoice</label>
           <input class="erp-input" type="text" [(ngModel)]="billRemarks" /></div>
       </div>
@@ -73,32 +72,41 @@ interface BillRow {
           <button type="button" class="inventory-alert-close" (click)="billCreated.set(false)" aria-label="Dismiss"><i class="pi pi-times"></i></button></div>
       }
 
-      <div class="inventory-line-items grn-grid-compact">
-        <div class="inventory-line-title">
-          <div>
-            <strong>Running Contracts</strong>
-            <span>The period of each contract comes from its billing cycle. To bill part-way through a cycle, set "Bill up to" to an earlier date (not after today).</span>
-          </div>
+    </section>
+
+    <!-- Add the meter readings here: the same entry grid as the Meter Readings page -->
+    @if (billCustomerId()) {
+      <app-inventory-meter-readings #billReadings [embedded]="true" [customerId]="billCustomerId()" (saved)="billAfterReadings()"></app-inventory-meter-readings>
+    }
+
+    <section class="inventory-section">
+      <div class="inventory-section-title">
+        <div>
+          <h3>Ready to Invoice</h3>
+          <p>Saved readings and rent of each running contract, for the period its billing cycle gives. To invoice part-way through a cycle, set "Bill up to" to an earlier date (not after today).</p>
         </div>
+      </div>
+      <div class="inventory-line-items grn-grid-compact">
         <div class="tbl-wrap">
           <table class="erp-table compact">
             <thead>
-              <tr><th class="text-center">Actions</th><th class="text-center">S.No</th><th>Contract</th><th>Site / Location</th><th>GST State</th><th>Cycle</th><th>Last billed to</th><th>Bill from</th><th>Bill up to</th><th class="text-end">Amount (before GST)</th><th>Status</th></tr>
+              <tr><th class="text-center">Actions</th><th class="text-center">S.No</th><th>Contract</th><th>GST State</th><th>Cycle</th><th>Last billed to</th><th>Bill from</th><th>Bill up to</th><th class="text-end">Amount (before GST)</th><th>Status</th></tr>
             </thead>
             <tbody>
               @for (r of billRows(); track r.c.contract_id; let i = $index) {
                 <tr>
                   <td class="text-center">
                     <div class="inventory-row-actions">
-                      <button type="button" class="erp-btn btn-primary btn-sm" [disabled]="!billCanGenerate(r)" (click)="billGenerate(r)">
-                        <i [class]="r.busy ? 'pi pi-spin pi-spinner' : 'pi pi-file-export'"></i> Generate Bill
+                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Toggle details" (click)="r.open = !r.open"><i [class]="r.open ? 'pi pi-chevron-down' : 'pi pi-chevron-right'"></i></button>
+                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Edit readings" (click)="billEditReadings(r)"><i class="pi pi-pencil"></i></button>
+                      <button type="button" class="erp-btn btn-primary btn-icon btn-sm" title="Raise invoice (posts a Sales Invoice)" [disabled]="!billCanGenerate(r)" (click)="billGenerate(r)">
+                        <i [class]="r.busy ? 'pi pi-spin pi-spinner' : 'pi pi-file-export'"></i>
                       </button>
-                      <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Details" (click)="r.open = !r.open"><i [class]="r.open ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"></i></button>
                     </div>
                   </td>
                   <td class="text-center">{{ i + 1 }}</td>
-                  <td>{{ r.c.contract_no }}</td>
-                  <td>{{ r.c.site_name }}</td><td>{{ r.c.place_of_supply }}@if (r.c.site_state && r.c.site_state_registered === false) { <small class="text-warning" title="The customer has no GSTIN in the site state">(site: {{ r.c.site_state }})</small> }</td>
+                  <td>{{ r.c.contract_no }}@if (r.c.lease_items) { <br><small class="text-muted">{{ r.c.lease_items }}</small> }</td>
+                  <td>{{ r.c.place_of_supply }}@if (r.c.site_state && r.c.site_state_registered === false) { <small class="text-warning" title="The customer has no GSTIN in the site state">(site: {{ r.c.site_state }})</small> }</td>
                   <td>{{ r.c.billing_cycle }} / {{ r.c.billing_mode }}</td>
                   <td>{{ r.c.last_billed_to || '-' }}</td>
                   <td>{{ r.c.period_from }}</td>
@@ -111,7 +119,7 @@ interface BillRow {
                 @if (r.open || billNeedsInput(r)) {
                   <tr>
                     <td></td>
-                    <td colspan="9">
+                    <td colspan="8">
                       @for (w of (r.preview?.warnings ?? []); track $index) { <div class="inventory-duplicate-advice"><strong>Check</strong><span>{{ w }}</span></div> }
                       @if (r.info) { <div class="inventory-duplicate-advice"><strong>Info</strong><span>{{ r.info }}</span></div> }
                       @for (inp of (r.preview?.rent_inputs ?? []); track inp.asset_id) {
@@ -146,19 +154,23 @@ interface BillRow {
     <section class="inventory-section">
       <div class="inventory-section-title">
         <div><h3>Billing History</h3><p>{{ billCustomerId() ? 'Bills of the selected customer.' : 'All lease bills.' }}</p></div>
-        <button type="button" class="erp-btn btn-white" (click)="billLoadBills()"><i class="pi pi-refresh"></i> Refresh</button>
+        <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Refresh" (click)="billLoadBills()"><i class="pi pi-refresh"></i></button>
       </div>
       <div class="tbl-wrap">
         <table class="erp-table compact">
-          <thead><tr><th>Contract</th><th>Customer</th><th>Period</th><th class="text-end">Amount</th><th>Invoice</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th class="text-center">Actions</th><th>Contract</th><th>Customer</th><th>Period</th><th class="text-end">Amount</th><th>Invoice</th><th>Status</th></tr></thead>
           <tbody>
             @for (b of billHistory(); track b.id) {
               <tr>
-                <td>{{ b.contract_no }}</td><td>{{ b.customer_name }}</td><td>{{ b.period_from }} → {{ b.period_to }}</td>
+                <td class="text-center">
+                  <div class="inventory-row-actions">
+                    <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Release bill" [disabled]="b.status === 'cancelled'" (click)="billRelease(b)"><i class="pi pi-undo"></i></button>
+                  </div>
+                </td>
+                <td>{{ b.contract_no }}@if (b.lease_items) { <br><small class="text-muted">{{ b.lease_items }}</small> }</td><td>{{ b.customer_name }}</td><td>{{ b.period_from }} → {{ b.period_to }}</td>
                 <td class="text-end">{{ b.total_amount | number:'1.2-2' }}</td>
                 <td>{{ b.invoice_number || '-' }} {{ b.invoice_status ? '(' + b.invoice_status + ')' : '' }}</td>
                 <td>{{ b.status }}</td>
-                <td>@if (b.status !== 'cancelled') { <button type="button" class="erp-btn btn-white btn-sm" (click)="billRelease(b)">Release</button> }</td>
               </tr>
             } @empty {
               <tr><td colspan="7" class="text-center">No bills yet.</td></tr>
@@ -166,7 +178,7 @@ interface BillRow {
           </tbody>
         </table>
       </div>
-      <div class="inventory-optional-hint">Release is available only after the linked invoice is cancelled; it frees the readings and the period so they can be billed again.</div>
+      <div class="inventory-optional-hint">The undo icon releases a bill once its invoice is cancelled; the readings and the period can then be billed again.</div>
     </section>
   </div>
 </div>
@@ -177,6 +189,8 @@ export class InventoryLeaseBillingComponent extends InventoryScreenShell impleme
   override readonly config = leaseBillingConfig;
 
   private readonly billApi = inject(LeaseMeterService);
+
+  @ViewChild('billReadings') private billReadings?: InventoryMeterReadingsComponent;
 
   readonly billRows = signal<BillRow[]>([]);
   readonly billBills = signal<any[]>([]);
@@ -224,6 +238,18 @@ export class InventoryLeaseBillingComponent extends InventoryScreenShell impleme
     this.billMessage.set(''); this.billError.set('');
     this.billRows.set([]);
     if (customer?.id) this.billLoadCandidates(customer.id);
+  }
+
+  /** Readings were just saved (or corrected): work out what each contract can now be invoiced for. */
+  billAfterReadings(): void {
+    const id = this.billCustomerId();
+    if (id) this.billLoadCandidates(id);
+  }
+
+  /** The pencil on a contract row: bring that contract's meters into the readings grid above. */
+  billEditReadings(r: BillRow): void {
+    this.billReadings?.openContract(r.c.contract_id);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   // ── contracts of the customer ──────────────────────────────────────────
@@ -292,18 +318,20 @@ export class InventoryLeaseBillingComponent extends InventoryScreenShell impleme
   billGenerate(r: BillRow): void {
     const p = r.preview;
     if (!p || !this.billCanGenerate(r)) return;
-    if (!confirm(`Create the bill for ${p.contract_no} (${p.period_from} to ${p.period_to}) totalling ${p.total.toFixed(2)} and a draft invoice?`)) return;
+    if (!confirm(`Raise the invoice for ${p.contract_no} (${p.period_from} to ${p.period_to}) totalling ${p.total.toFixed(2)} before GST? It is posted as a Sales Invoice and reaches the accounts.`)) return;
     this.billError.set(''); this.billMessage.set(''); this.billCreated.set(false);
     r.busy = true;
     this.billApi.generateBill({
       contractId: p.contract_id, periodFrom: p.period_from, periodTo: p.period_to, expectedTotal: p.total,
       rentQuantities: this.billQtyPayload(r), invoiceDate: this.billInvoiceDate,
-      placeOfSupply: this.billPlaceOfSupply.trim() || undefined, remarks: this.billRemarks.trim() || undefined
+      placeOfSupply: this.billPlaceOfSupply.trim() || undefined, remarks: this.billRemarks.trim() || undefined,
+      // the invoice carries the selected segment, so it shows in the Sales Invoice list
+      segmentId: this.currentSegmentId ?? null, segmentName: this.selectedSegment() || null
     }).subscribe({
       next: res => {
         r.busy = false;
         this.billCreated.set(true);
-        this.billNote(`Bill created for ${p.contract_no}. Draft invoice ${res.data?.invoice_number ?? ''} is ready for review.`);
+        this.billNote(`Invoice ${res.data?.invoice_number ?? ''} posted for ${p.contract_no}.`);
         this.billLoadBills();
         const id = this.billCustomerId();
         if (id) this.billLoadCandidates(id);

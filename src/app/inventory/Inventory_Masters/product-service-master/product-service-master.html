@@ -943,8 +943,8 @@
                 <div class="inventory-line-items">
                   <div class="inventory-line-title">
                     <div>
-                      <strong>Mapped Assets / Services / Consumables</strong>
-                      <span>Items billed or tracked as part of this Service Bundle. At least one item is required.</span>
+                      <strong>Kit Items</strong>
+                      <span>Materials normally needed for one unit of this package (adjusted per Sales Order). At least one item is required</span>
                     </div>
                     <button type="button" class="erp-btn btn-white btn-sm" (click)="addBundleCompositionRow()"><i class="pi pi-plus"></i> Add Item</button>
                   </div>
@@ -952,41 +952,29 @@
                     <table class="erp-table compact">
                       <thead>
                         <tr>
-                          <th>Item / Asset Name</th>
-                          <th class="text-center">Quantity</th>
-                          <th class="text-center">Condition Tracked</th>
-                          <th class="text-center">Depreciation Linked</th>
-                          <th class="text-center">Actions</th>
+                          <th style="width:45%;">Product</th>
+                          <th class="text-center"  style="width:30%;">Quantity</th>
+                          <!-- <th class="text-center">Condition Tracked</th>
+                          <th class="text-center">Depreciation Linked</th> -->
+                          <th class="text-center" style="width:25%;">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        @for (item of bundleCompositionItems(); track $index) {
+                          @for (item of bundleCompositionItems(); track $index) {
                           <tr>
                             <td>
-                              <ng-select class="erp-ng-select inventory-ng-select" appendTo="body"
+                              <ng-select class="erp-ng-select inventory-ng-select" appendTo="body" style="width:100%; max-width:420px;"
                                 [items]="bundleEligibleProductOptions()" [searchable]="true" [clearable]="true"
                                 bindLabel="product_name" bindValue="id"
                                 [ngModel]="item.item_id || null"
                                 (ngModelChange)="onBundleCompositionItemChange($index, findBundleEligibleProductById($event))"
-                                placeholder="Select Item / Asset">
+                                placeholder="Select product">
                               </ng-select>
                             </td>
                             <td class="text-center">
-                              <input class="erp-input" type="number" min="1" style="width:90px;text-align:center;"
+                              <input class="erp-input" type="number" min="0.001" step="any" style="width:90px;text-align:center;"
                                 [ngModel]="item.quantity"
                                 (ngModelChange)="updateBundleCompositionRow($index, { quantity: $event })" />
-                            </td>
-                            <td class="text-center">
-                              <label class="inventory-labeled-switch yes-no">
-                                <input type="checkbox" [checked]="item.condition_tracked" (change)="updateBundleCompositionRow($index, { condition_tracked: $any($event.target).checked })" />
-                                <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
-                              </label>
-                            </td>
-                            <td class="text-center">
-                              <label class="inventory-labeled-switch yes-no">
-                                <input type="checkbox" [checked]="item.depreciation_linked" (change)="updateBundleCompositionRow($index, { depreciation_linked: $any($event.target).checked })" />
-                                <span class="inventory-switch-track"><span class="switch-text switch-on">Yes</span><span class="switch-text switch-off">No</span></span>
-                              </label>
                             </td>
                             <td class="text-center">
                               <div class="inventory-row-actions">
@@ -996,7 +984,7 @@
                           </tr>
                         } @empty {
                           <tr>
-                            <td colspan="5" class="text-center erp-label-hint">No bundle items added yet.</td>
+                            <td colspan="3" class="text-center erp-label-hint">No kit items added yet.</td>
                           </tr>
                         }
                       </tbody>

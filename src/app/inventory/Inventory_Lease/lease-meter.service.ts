@@ -96,6 +96,8 @@ export interface LeaseContract {
   remarks?: string | null;
   asset_count?: number;
   meter_count?: number;
+  /** Names of the leased items, shown next to the contract no. so a contract is easy to recognise. */
+  lease_items?: string | null;
   last_billed_to?: string | null;
   meters?: LeaseMeter[];
   assets?: LeaseAsset[];
@@ -134,6 +136,7 @@ export interface BillingCandidate {
   contract_no: string;
   customer_id: number;
   customer_name: string;
+  lease_items?: string | null;
   site_name?: string | null;
   site_state?: string | null;
   /** State (and GSTIN) the bill uses: the customer registration in the site state, else the customer's own. */
@@ -264,7 +267,7 @@ export class LeaseMeterService {
   getBillingCandidates(customerId: number): Observable<LeaseApiResponse<BillingCandidate[]>> {
     return this.get('billing/candidates', { customerId });
   }
-  generateBill(body: { contractId: number; periodFrom: string; periodTo: string; expectedTotal: number; rentQuantities?: Record<number, number>; invoiceDate?: string; placeOfSupply?: string; segmentId?: number | null; remarks?: string }):
+  generateBill(body: { contractId: number; periodFrom: string; periodTo: string; expectedTotal: number; rentQuantities?: Record<number, number>; invoiceDate?: string; placeOfSupply?: string; segmentId?: number | null; segmentName?: string | null; remarks?: string }):
     Observable<LeaseApiResponse<{ bill_id: number; invoice_id: number; invoice_number: string; total_amount: number }>> {
     return this.post('billing/generate', body);
   }

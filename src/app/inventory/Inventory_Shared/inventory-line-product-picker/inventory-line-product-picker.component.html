@@ -91,14 +91,33 @@
 
       <div class="inventory-line-product-popup-body">
         <div class="inv-line-picker-fields-row">
+          @if (showNatureFilter()) {
+            <div class="inv-line-picker-field">
+              <label>Nature</label>
+              <ng-select class="erp-ng-select inventory-ng-select inventory-line-product-select" appendTo=".inventory-line-product-popup"
+                dropdownPosition="auto"
+                [items]="natureOptions()" [searchable]="false" [clearable]="false"
+                [ngModel]="natureShown()" (ngModelChange)="onNatureChange($event)"
+                placeholder="Select nature">
+              </ng-select>
+              @if (natureNeeded()) {
+                <small class="text-danger d-block mt-1">This product exists under more than one nature. Choose the Nature.</small>
+              }
+            </div>
+          }
           <div class="inv-line-picker-field">
             <label>Product</label>
-            <ng-select class="erp-ng-select inventory-ng-select inventory-line-product-select" appendTo=".inventory-line-product-popup"
-              dropdownPosition="auto"
-              [items]="productOptions()" [searchable]="true" [clearable]="false"
-              [ngModel]="productValue()" (ngModelChange)="pickProduct($event)"
-              placeholder="Select product">
-            </ng-select>
+            @if (productValue() || pickedSharedName()) {
+              <!-- the product was already picked in the grid: shown for reference, not picked again -->
+              <span class="inventory-grid-static-value">{{ productValue() || pickedSharedName() }}</span>
+            } @else {
+              <ng-select class="erp-ng-select inventory-ng-select inventory-line-product-select" appendTo=".inventory-line-product-popup"
+                dropdownPosition="auto"
+                [items]="productOptions()" [searchable]="true" [clearable]="false"
+                [ngModel]="productValue()" (ngModelChange)="pickProduct($event)"
+                placeholder="Select product">
+              </ng-select>
+            }
           </div>
 
           @if (showVariantStep()) {
