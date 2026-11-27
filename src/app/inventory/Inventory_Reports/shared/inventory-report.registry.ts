@@ -294,7 +294,9 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
     icon: 'pi pi-wallet',
     purpose: 'Vendor-wise list of unpaid and part-paid purchase invoices with total and due amount as on a date.',
     audience: ['Accountant', 'Purchase', 'Business Owner'],
-    filters: ['branchId', 'toDate', 'supplierId'],
+    // Previous: filters: ['branchId', 'toDate', 'supplierId'],
+    // From Date + To Date with the As On checkbox, like the Dues List (317).
+    filters: ['branchId', 'fromDate', 'toDate', 'supplierId'],
     columns: cols([
       ['segment', 'Segment', 'text', false, false],
       ['supplier', 'Vendor Name'],

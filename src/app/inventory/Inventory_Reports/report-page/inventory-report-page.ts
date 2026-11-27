@@ -308,7 +308,9 @@ export class InventoryReportPageComponent implements OnInit {
   // unticked = From Date + To Date.
   // Previous: readonly asOnToggleAvailable = computed(() => this.report().key === 'duesList');
   // Product-wise Dues List (313) gets the same As On checkbox.
-  readonly asOnToggleAvailable = computed(() => ['duesList', 'productwiseDues'].includes(this.report().key));
+  // Previous: readonly asOnToggleAvailable = computed(() => ['duesList', 'productwiseDues'].includes(this.report().key));
+  // Vendor Wise Dues List gets the same As On checkbox (user 2026-11-26, SP 317).
+  readonly asOnToggleAvailable = computed(() => ['duesList', 'productwiseDues', 'vendorDues'].includes(this.report().key));
   readonly asOnMode = signal(true);
   // Default state of the As On checkbox per report: Dues List starts ticked;
   // Product-wise Dues List starts unticked = From Date + To Date (user 2026-11-24).
@@ -323,8 +325,12 @@ export class InventoryReportPageComponent implements OnInit {
   readonly hasToDateFilter = computed(() => this.report().filters.includes('toDate'));
   // Vendor Dues only: its To Date is an "as on" date - label it "As On" (user request).
   // Previous: readonly toDateLabel = computed(() => this.report().key === 'vendorDues' ? 'As On' : 'To Date');
+  // Previous: readonly toDateLabel = computed(() =>
+  //   this.report().key === 'vendorDues' || (this.asOnToggleAvailable() && this.asOnMode()) ? 'As On' : 'To Date'
+  // );
+  // Vendor Dues now follows the As On checkbox like the Dues List.
   readonly toDateLabel = computed(() =>
-    this.report().key === 'vendorDues' || (this.asOnToggleAvailable() && this.asOnMode()) ? 'As On' : 'To Date'
+    this.asOnToggleAvailable() && this.asOnMode() ? 'As On' : 'To Date'
   );
 
   setAsOnMode(checked: boolean): void {
