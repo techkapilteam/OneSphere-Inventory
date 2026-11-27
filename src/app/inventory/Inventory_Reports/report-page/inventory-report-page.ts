@@ -825,11 +825,26 @@ export class InventoryReportPageComponent implements OnInit {
   }
 
   formatCell(value: InventoryReportRow[string], column: InventoryReportColumn): string {
+    // Previous: every empty cell showed '-'. A missing date (e.g. Vendor Invoice
+    // Date not entered on the PI) now stays blank.
+    if ((value === null || value === undefined || value === '') && column.type === 'date') return '';
     if (value === null || value === undefined || value === '') return '-';
     if (column.type === 'currency') return this.formatCurrency(this.numberValue(value));
     if (column.type === 'number') return this.numberValue(value).toLocaleString('en-IN');
     if (column.type === 'percent') return `${this.numberValue(value).toLocaleString('en-IN', { maximumFractionDigits: 2 })}%`;
+    // Previous: date columns fell through to String(value) and printed the raw
+    // API value "2026-11-01". Show DD-MMM-YYYY (01-Nov-2026) like the report header.
+    if (column.type === 'date') return this.formatDisplayDate(value);
     return String(value);
+  }
+
+  private formatDisplayDate(value: InventoryReportRow[string]): string {
+    const text = String(value).trim();
+    // Read the yyyy-MM-dd part directly so a "2026-11-01T00:00:00Z" value is not
+    // shifted a day by the browser timezone.
+    const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(text);
+    const date = iso ? new Date(+iso[1], +iso[2] - 1, +iso[3]) : new Date(text);
+    return isNaN(date.getTime()) ? text : formatDate(date, 'dd-MMM-yyyy', 'en-US');
   }
 
   filterTrack(_: number, filter: InventoryReportFilterDefinition): InventoryReportFilterKey {

@@ -301,9 +301,13 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['segment', 'Segment', 'text', false, false],
       ['supplier', 'Vendor Name'],
       ['invoiceNo', 'Invoice No'],
-      ['invoiceDate', 'Invoice Date', 'date'],
+      // Previous: ['invoiceDate', 'Invoice Date', 'date'],
+      // invoiceDate is the vendor's bill date (vendor_invoice_dt); piDate is our
+      // Purchase Invoice date - both shown under each vendor.
+      ['invoiceDate', 'Vendor Invoice Date', 'date'],
       ['piNo', 'PI No', 'text', false, false],
-      ['piDate', 'PI Date', 'date', false, false],
+      // Previous: ['piDate', 'PI Date', 'date', false, false],
+      ['piDate', 'Purchase Invoice Date', 'date'],
       ['totalAmount', 'Total Amount', 'currency', true],
       ['paidAmount', 'Paid', 'currency', true, false],
       ['dueAmount', 'Due Amount', 'currency', true],
