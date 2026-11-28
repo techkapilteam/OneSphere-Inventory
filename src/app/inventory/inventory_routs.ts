@@ -302,6 +302,18 @@ export const inventoryRoutes: Routes = [
         loadComponent: () => import('./Inventory_Transactions/sales-return/sales-return')
           .then(m => m.InventorySalesReturnComponent)
       },
+      {
+        path: 'e-invoice',
+        canActivate: [screenPermissionGuard('INV_T_EINVOICE')],
+        loadComponent: () => import('./Inventory_Transactions/e-invoice/e-invoice')
+          .then(m => m.InventoryEInvoiceComponent)
+      },
+      {
+        path: 'e-way-bill',
+        canActivate: [screenPermissionGuard('INV_T_EWAYBILL')],
+        loadComponent: () => import('./Inventory_Transactions/e-way-bill/e-way-bill')
+          .then(m => m.InventoryEWayBillComponent)
+      },
       // Inventory
       {
         path: 'stock-transfer',
@@ -345,6 +357,14 @@ export const inventoryRoutes: Routes = [
         canActivate: [screenPermissionGuard('INV_T_PROD_ENTRY')],
         loadComponent: () => import('./Inventory_Transactions/production-entry/production-entry')
           .then(m => m.InventoryProductionEntryComponent)
+      },
+      {
+        path: 'uin-registration',
+        // Same permission as Production Entry for now: whoever records production
+        // can also register the UINs. A separate key can be added later.
+        canActivate: [screenPermissionGuard('INV_T_PROD_ENTRY')],
+        loadComponent: () => import('./Inventory_Transactions/uin-registration/uin-registration')
+          .then(m => m.InventoryUinRegistrationComponent)
       },
       {
         path: 'production-return',
@@ -395,6 +415,21 @@ export const inventoryRoutes: Routes = [
     ]
   },
   {
+    // Lease & Meter Billing (always available)
+    path: 'lease',
+    children: [
+      { path: 'contracts', canActivate: [screenPermissionGuard('INV_LEASE_CONTRACT')],
+        loadComponent: () => import('./Inventory_Lease/lease-contracts/lease-contracts').then(m => m.InventoryLeaseContractsComponent) },
+      { path: 'readings', canActivate: [screenPermissionGuard('INV_LEASE_READINGS')],
+        loadComponent: () => import('./Inventory_Lease/meter-readings/meter-readings').then(m => m.InventoryMeterReadingsComponent) },
+      { path: 'billing', canActivate: [screenPermissionGuard('INV_LEASE_BILLING')],
+        loadComponent: () => import('./Inventory_Lease/lease-billing/lease-billing').then(m => m.InventoryLeaseBillingComponent) },
+      { path: 'reports', canActivate: [screenPermissionGuard('INV_LEASE_REPORTS')],
+        loadComponent: () => import('./Inventory_Lease/lease-reports/lease-reports').then(m => m.InventoryLeaseReportsComponent) },
+      { path: '', redirectTo: 'contracts', pathMatch: 'full' }
+    ]
+  },
+  {
     path: 'reports',
     children: [
       {
@@ -424,6 +459,46 @@ export const inventoryRoutes: Routes = [
         canActivate: [screenPermissionGuard('INV_R_MIS')],
         loadComponent: () => import('./Inventory_Reports/mis-report/mis-report')
           .then(m => m.MisReportComponent)
+      },
+      {
+        // Profit & Loss (311_profit_loss_report.sql): two-sided Trading + P&L /
+        // Balance Sheet from accounts total transactions - bespoke layout, so its
+        // own static route; must stay ABOVE the ':reportKey' catch-all.
+        path: 'profit-loss',
+        loadComponent: () => import('./Inventory_Reports/profit-loss/profit-loss-report')
+          .then(m => m.ProfitLossReportComponent)
+      },
+      {
+        // Ageing Analysis (312_ageing_analysis_report.sql): FIFO ageing of the
+        // party ledgers under an account group - bespoke layout, so its own
+        // static route; must stay ABOVE the ':reportKey' catch-all.
+        path: 'ageing-analysis',
+        loadComponent: () => import('./Inventory_Reports/ageing-analysis/ageing-analysis-report')
+          .then(m => m.AgeingAnalysisReportComponent)
+      },
+      {
+        // Product-wise Ageing (314_productwise_ageing_report.sql): closing stock
+        // (= Stock Summary) aged FIFO by inward date - own layout, so its own
+        // static route; must stay ABOVE the ':reportKey' catch-all.
+        path: 'productwise-ageing',
+        loadComponent: () => import('./Inventory_Reports/productwise-ageing/productwise-ageing-report')
+          .then(m => m.ProductwiseAgeingReportComponent)
+      },
+      {
+        // Purchase Invoice (client "Purchase Report" format, 2026-11-28): same data
+        // as the Purchase Invoice Register (320), item-wise columns, own layout -
+        // so its own static route; must stay ABOVE the ':reportKey' catch-all.
+        path: 'purchase-invoice',
+        loadComponent: () => import('./Inventory_Reports/purchase-invoice/purchase-invoice-report')
+          .then(m => m.PurchaseInvoiceReportComponent)
+      },
+      {
+        // Sale Invoice (client "Sales Report" format, 2026-11-28): same screen and data as
+        // the Sale Invoice Register (321), item-wise columns - own static route; must stay
+        // ABOVE the ':reportKey' catch-all.
+        path: 'sale-invoice',
+        loadComponent: () => import('./Inventory_Reports/sale-invoice/sale-invoice-report')
+          .then(m => m.SaleInvoiceReportComponent)
       },
       {
         path: ':reportKey',

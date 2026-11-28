@@ -1,0 +1,132 @@
+<div class="module-page inventory-page inventory-report-page inventory-generic-report-page ag-page">
+  <div class="inventory-shell">
+    <div class="inventory-report-header-card">
+      <div class="inventory-header inventory-report-header">
+        <div class="inventory-report-header-top-filters">
+          <div class="inventory-report-filter inventory-report-filter--date inventory-report-filter--date-single">
+            <label title="As on Date"><i class="pi pi-calendar"></i> As on Date</label>
+            <div class="inventory-date-wrap">
+              <p-datepicker [ngModel]="asOnDate()" (ngModelChange)="setAsOnDate($event)" [ngModelOptions]="{ standalone: true }" [maxDate]="todayDate" dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY" [readonlyInput]="true" [showIcon]="false" appendTo="body" styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100"></p-datepicker>
+              <i class="pi pi-calendar inventory-date-icon"></i>
+            </div>
+          </div>
+          <div class="inventory-report-filter ag-head-filter">
+            <label title="Product"><i class="pi pi-box"></i> Product</label>
+            <ng-select class="erp-ng-select inventory-ng-select ag-product-select" appendTo="body" [items]="productOptions()" bindLabel="name" bindValue="id" placeholder="Select Product" [multiple]="true" [closeOnSelect]="false" [deselectOnClick]="true" [clearSearchOnAdd]="false" [loading]="productsLoading()" [clearable]="true" [ngModel]="selectedProductIds()" (ngModelChange)="setProducts($event)">
+              <!-- One line in the box: the product name, or "N Products selected". -->
+              <ng-template ng-multi-label-tmp let-items="items">
+                <div class="ng-value ag-multi-label" [title]="multiLabelTitle(items)">
+                  <span class="ng-value-label">{{ multiLabel(items) }}</span>
+                </div>
+              </ng-template>
+              <!-- Tick box in the list so the picked products are easy to see. -->
+              <ng-template ng-option-tmp let-item="item" let-item$="item$">
+                <!-- Not a <label>: a label re-clicks its checkbox, so one click reached
+                     ng-select twice (select + unselect). The checkbox only shows the state;
+                     ng-select's own option click does the selecting. -->
+                <div class="ag-option">
+                  <input type="checkbox" [checked]="item$.selected" tabindex="-1" aria-hidden="true" />
+                  <span>{{ item.name }}</span>
+                </div>
+              </ng-template>
+            </ng-select>
+          </div>
+          <!-- Empty label above the button so it lines up with the filter boxes, not their labels. -->
+          <div class="inventory-report-filter ag-actions">
+            <label class="ag-actions-spacer" aria-hidden="true">&nbsp;</label>
+            <div class="ag-actions-buttons">
+              <button type="button" class="erp-btn btn-primary btn-sm inventory-report-generate-btn" title="Generate" [disabled]="loading()" (click)="generate()"><i class="pi pi-search"></i> Generate</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <section class="inventory-section inventory-report-section">
+      <div class="inventory-report-grid-bar">
+        <div class="inventory-report-grid-messages">
+          @if (errorMessage()) {
+            <div class="inventory-report-message error"><i class="pi pi-exclamation-triangle"></i> {{ errorMessage() }}</div>
+          }
+        </div>
+        <div class="inventory-report-grid-actions">
+          @if (hasData()) {
+            <div class="ag-search">
+              <i class="pi pi-search"></i>
+              <input type="text" class="erp-input" placeholder="Search product / code / category" [value]="search()" (input)="search.set($any($event.target).value)" />
+            </div>
+          }
+          <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Export Excel" [disabled]="!hasData()" (click)="exportExcel()"><i class="pi pi-file-excel"></i></button>
+          <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Export PDF" [disabled]="!hasData()" (click)="exportPdf()"><i class="pi pi-file-pdf"></i></button>
+          <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Print" [disabled]="!hasData()" (click)="printReport()"><i class="pi pi-print"></i></button>
+        </div>
+      </div>
+
+      @if (report()) {
+        <div class="ag-heading">
+          <div class="ag-heading-company">{{ companyName() }}</div>
+          <div class="ag-heading-title">{{ reportTitle }}</div>
+          <div class="ag-heading-meta">
+            <span>{{ periodText() }}</span>
+            <span>Products: {{ lines().length }}</span>
+            @if (branchName()) { <span>{{ branchName() }}</span> }
+          </div>
+          @if (report()!.excludedCount > 0) {
+            <div class="ag-muted">{{ report()!.excludedCount }} product(s) with nil / negative closing stock are not aged (value {{ amt(report()!.excludedValue) }}).</div>
+          }
+        </div>
+      }
+
+      <div class="tbl-wrap ag-wrap">
+        @if (loading()) {
+          <div class="text-center p-4"><i class="pi pi-spin pi-spinner"></i> Loading report data...</div>
+        } @else if (report() && !hasData()) {
+          <div class="text-center p-4">No stock in hand as on this date.</div>
+        } @else if (!report()) {
+          <div class="text-center p-4">Select the As on Date (and a Product if needed), then click Generate.</div>
+        } @else {
+          <table class="erp-table compact ag-table">
+            <thead>
+              <tr>
+                <th class="ag-center ag-sno">S.No</th>
+                <th class="ag-label">Code</th>
+                <th class="ag-label">Product</th>
+                <th class="ag-label">UOM</th>
+                <th class="ag-num ag-qty">Closing Qty</th>
+                @for (c of columns(); track c.index) { <th class="ag-num">{{ c.label }}</th> }
+                <th class="ag-num">Stock Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (l of filteredLines(); track l.productId) {
+                <tr>
+                  <td class="ag-center">{{ l.serial }}</td>
+                  <td class="ag-label">{{ l.productCode }}</td>
+                  <td class="ag-label ag-product">{{ l.product }}</td>
+                  <td class="ag-label">{{ l.uom }}</td>
+                  <td class="ag-num">{{ qty(l.closingQty) }}</td>
+                  @for (c of columns(); track c.index) {
+                    <td class="ag-num">
+                      {{ amt(l.value[c.index]) }}
+                      @if (colQty(l, c.index)) { <div class="ag-muted">{{ colQty(l, c.index) }}</div> }
+                    </td>
+                  }
+                  <td class="ag-num ag-bold">{{ amt(l.stockValue) }}</td>
+                </tr>
+              } @empty {
+                <tr><td [attr.colspan]="leadColumns + columns().length + 1" class="text-center p-3">No product matches the search.</td></tr>
+              }
+            </tbody>
+            <tfoot>
+              <tr class="ag-grand-total">
+                <td [attr.colspan]="leadColumns" class="ag-right">Grand Total</td>
+                @for (v of totals().values; track $index) { <td class="ag-num">{{ amt(v) }}</td> }
+                <td class="ag-num">{{ amt(totals().stockValue) }}</td>
+              </tr>
+            </tfoot>
+          </table>
+        }
+      </div>
+    </section>
+  </div>
+</div>

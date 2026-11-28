@@ -1,5 +1,6 @@
 import { CommonModule } from '@angular/common';
-import { Component, computed, signal } from '@angular/core';
+// Previous: import { Component, computed, signal } from '@angular/core';
+import { Component, computed, effect, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { NgSelectModule } from '@ng-select/ng-select';
@@ -36,6 +37,35 @@ export class InventoryProductServiceMasterComponent extends InventoryScreenShell
 
   private pmTabsPinned = false;
   private readonly onProductMasterTabsScroll = () => this.syncProductMasterTabsPin();
+
+  constructor() {
+    super();
+    // Product natures arrive asynchronously (GET /inventory/config/product-types),
+    // so apply the default once they're loaded. untracked() keeps this effect
+    // from re-running on every form edit -- it only reacts to the natures list.
+    effect(() => {
+      if (!this.productNatureObjects.length) return;
+      untracked(() => this.applyDefaultProductNature());
+    });
+  }
+
+  // A fresh form (after Save or Clear) gets the default nature again.
+  override clearConfigForm(): void {
+    super.clearConfigForm();
+    this.applyDefaultProductNature();
+  }
+
+  // New products default to "Physical Stock". Never overrides a nature that is
+  // already set (editing a saved product, or the BOM "Add Product" return flow).
+  private applyDefaultProductNature(): void {
+    if (this.editingId() !== null) return;
+    const values = this.formValues();
+    if (values['productNatureId'] || values['productNatureName']) return;
+    const nature = this.productNatureObjects.find(n =>
+      String(n.type_name || '').trim().toLowerCase() === 'physical stock'
+    );
+    if (nature) this.onProductNatureChange(nature.id);
+  }
 
   override ngAfterViewInit(): void {
     super.ngAfterViewInit();
@@ -198,7 +228,7 @@ export class InventoryProductServiceMasterComponent extends InventoryScreenShell
   );
 
   private static readonly PRICING_TYPE_VISIBLE_NATURES = new Set(['Service', 'Service Bundle', 'Digital / Subscription']);
-  private static readonly BUNDLE_ELIGIBLE_NATURES = new Set(['Fixed Asset', 'Service', 'Consumable']);
+  // private static readonly BUNDLE_ELIGIBLE_NATURES = new Set(['Fixed Asset', 'Service', 'Consumable']);
 
   readonly pricingTypeVisible = computed(() => {
     const natureName = this.selectedProductNature()?.type_name;
@@ -209,17 +239,29 @@ export class InventoryProductServiceMasterComponent extends InventoryScreenShell
     this.pricingTypeVisible() && this.formValues()['pricingType'] === 'Rental'
   );
 
-  readonly bundleCompositionVisible = computed(() =>
-    this.selectedProductNature()?.type_name === 'Service Bundle'
-  );
+   // Service Bundle (or any nature flagged as a bundle parent) has a kit / composition
+  readonly bundleCompositionVisible = computed(() => {
+    const nature: any = this.selectedProductNature();
+    return !!nature && (nature.is_bundle_parent === true || nature.type_name === 'Service Bundle');
+  });
 
   readonly bundleSectionExpanded = signal(true);
 
-  readonly bundleEligibleProductOptions = computed(() =>
-    this.loadedProductObjects().filter(p =>
-      !!p.product_nature_name && InventoryProductServiceMasterComponent.BUNDLE_ELIGIBLE_NATURES.has(p.product_nature_name) && p.id !== this.editingId()
-    )
-  );
+   // Kit items: products whose nature is flagged "allowed in bundle" (migration 300:
+  // every nature except Service Bundle itself), active, and not this product.
+  readonly bundleEligibleProductOptions = computed(() => {
+    const products = this.loadedProductObjects();
+    const natures: any[] = this.productNatureObjects || [];
+    const allowedIds = new Set(natures.filter(n => n.allowed_in_bundle === true && n.is_bundle_parent !== true).map(n => Number(n.id)));
+    return products.filter(p =>
+      p.id !== this.editingId()
+      && (p.status || 'active') === 'active'
+      && (allowedIds.size
+            ? allowedIds.has(Number(p.product_nature_id))
+            // natures not loaded yet: anything that is not a Service Bundle
+            : !!p.product_nature_name && p.product_nature_name !== 'Service Bundle')
+    );
+  });
 
   findBundleEligibleProductById(id: number | null): ProductItem | null {
     if (!id) return null;

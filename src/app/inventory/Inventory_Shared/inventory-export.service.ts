@@ -1,0 +1,1885 @@
+import { Injectable } from '@angular/core';
+import { formatDate } from '@angular/common';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import * as ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
+
+// Print / PDF / Excel output for Inventory, laid out the same way as the
+// Accounts module (CommonService._downloadReportsPdf / exportAsExcelFile):
+// company letterhead (logo, name, registration address, CIN / GST, branch),
+// #0b4093 grid header, "Printed on / User" + "Page N of M" footer, Print via
+// a hidden iframe, Excel as a real .xlsx with the letterhead rows on top.
+export interface InventoryExportDocument {
+  title: string;
+  columns: string[];
+  rows: string[][];
+  /** Label/value pairs printed above the table (document header block). */
+  fields?: Array<[string, string]>;
+  /** Label/value pairs printed under the table on the right; the last one is bold. */
+  summary?: Array<[string, string]>;
+  notes?: string;
+  notesLabel?: string;
+  /** PDF only: draw the notes (label + text) inside a bordered box (Customer Receipt narration). */
+  notesBoxed?: boolean;
+  /** Amount in words — "Total Invoice Amount In Words" left of the totals
+   *  (invoices, default), or an "Amount in Words :" line under them (vouchers). */
+  amountInWords?: string;
+  /** 'box': one ruled box joined to the grid — "Total Invoice Amount In
+   *  Words" on the left, `summary` on the right (Sales Invoice). */
+  amountInWordsPosition?: 'left' | 'below' | 'box';
+  /** GST tax-invoice grid (Sales Invoice): [title, span] pairs covering every
+   *  column, printed as a header row above `columns`; a span-1 group prints
+   *  its column's header across both rows. The grid is then ruled in black
+   *  with a plain header instead of the #0b4093 one. */
+  columnGroups?: Array<[string, number]>;
+  /** Bold Total row printed as the grid's last row; the blank cells after
+   *  its first cell merge into it. */
+  totalRow?: string[];
+  /** PDF only: shrink text and spacing step by step until the whole document
+   *  fits on one page (Sales Invoice). */
+  fitOnePage?: boolean;
+  /** PDF only, with fitOnePage: largest text/spacing scale tried (default 1).
+   *  When set, scales step down in fine 2% steps from here, so the document
+   *  prints at the largest size that fits one page (Sales Invoice uses 1). */
+  pdfMaxScale?: number;
+  /** PDF only, with fitOnePage: the items grid never shrinks (Sales Invoice);
+   *  only the header, totals, terms and bank box shrink to fit one page. */
+  pdfFixedGridScale?: boolean;
+  /** PDF only: header fields (by label) whose VALUE prints bold (Sales Invoice: Customer, GSTIN No). */
+  boldFieldLabels?: string[];
+  /** PDF only: header fields (by label) drawn inside a box, label + value (Sales Invoice: Bill To / Ship To Address). */
+  boxedFieldLabels?: string[];
+  /** PDF only: full-width rule between the header fields and the grid (Sales Invoice). */
+  pdfRuleAboveGrid?: boolean;
+  /** Copy type printed at the top right, on the title line (Sales Invoice),
+   *  e.g. "Original for Recipient" / "Duplicate for Recipient". */
+  copyType?: string;
+  /** "Terms & Conditions :" lines printed under the totals (Sales Invoice). */
+  terms?: string[];
+  /** Bank label/value pairs for the Bank Details | Certified / For <Company> |
+   *  Authorised Signatory box at the foot of the document (Sales Invoice). */
+  bankDetails?: Array<[string, string]>;
+  /** Text printed on the left of the branch line (e.g. "Between: x And y"). */
+  periodText?: string;
+  /** Signature captions printed at the foot of a voucher, e.g. (Approved By). */
+  signatures?: string[];
+  /** Name printed above the last signature caption (the posting user). */
+  signedBy?: string;
+  /** PDF only: print the signature row in the lower part of the last page, ~7 cm above the page bottom (Customer Receipt). */
+  signaturesAtBottom?: boolean;
+  /** PDF only: draw an empty box above the FIRST signature caption, e.g. for the receiver's signature/stamp (Vendor Payment). */
+  firstSignatureBoxed?: boolean;
+  fileName?: string;
+  orientation?: 'portrait' | 'landscape';
+  /** PDF only: fixed width (mm) per column index, for values that can't wrap
+   *  (e.g. voucher numbers with no spaces). Unlisted columns size automatically. */
+  pdfColumnWidths?: Record<number, number>;
+  /** PDF only: left-hand field labels (Invoice No, Customer, ...) get a column
+   *  just wide enough for the longest one, so the left values sit close to
+   *  their labels (still in one straight line). The right-hand labels keep
+   *  their position. */
+  pdfCompactLeftLabels?: boolean;
+  /** PDF only: table header font size (default 10) — smaller lets wide lists fit portrait. */
+  pdfHeadFontSize?: number;
+  /** PDF only, tax grid (columnGroups): headings filled #0b4093 with white
+   *  text, like the Purchase Invoice grid, instead of the plain white header. */
+  pdfBlueHead?: boolean;
+  /** PDF only: body cells of these column indexes centred (Sales Invoice Qty). */
+  pdfCenterColumns?: number[];
+  /** PDF only: narrower 10mm side margins and one border box around each
+   *  page's content, like the old Crystal sale invoice report (Sales Invoice). */
+  pdfPageFrame?: boolean;
+  /** PDF only: header field label (e.g. "Bill To Address") with a full-width
+   *  rule drawn just above its row (border to border on a framed page). */
+  pdfRuleAboveField?: string;
+  /** PDF only: with pdfRuleAboveField, a vertical line between that row's left
+   *  and right fields (Bill To | Ship To Address), from its rule down to the
+   *  rule above the grid (Sales Invoice). */
+  pdfFieldRowDivider?: boolean;
+  /** PDF only: grouped tax-grid headings containing '%' (e.g. "Rate %") stay on
+   *  one line, the font shrinking just enough to fit (Sales Invoice). */
+  pdfOneLinePercentHead?: boolean;
+  /** PDF only, tax grid (columnGroups): these headings stay on one line, the
+   *  font shrinking just enough to fit (Purchase Invoice: Other Charges /
+   *  Other Deductions / Total Amount). */
+  pdfOneLineHeads?: string[];
+
+  /** Invoice layout (Purchase Invoice): "Total Invoice Amount In Words" (and notes)
+   *  on the left and the totals on the right, in ONE bordered block joined
+   *  directly under the items table (like the old printed invoice). */
+  gstInvoiceLayout?: boolean;
+  /** With gstInvoiceLayout: the old-invoice signature row under the totals:
+   *  empty box | Common Seal | Certified … / For <Company> / Authorised Signatory. */
+  signatureBlock?: boolean;
+    /** Rows (indexes in `rows`) that are group headers / subtotals: printed bold and shaded. */
+  groupRowIndexes?: number[];
+  /** PDF only: print every body row of the main table in bold. */
+  boldRows?: boolean;
+  /** PDF only: body cells of these column indexes in bold 9pt (Vendor Payment Particulars). */
+  boldColumns?: number[];
+  /** PDF only: signature captions, e.g. (Approved By), in bold (Vendor Payment). */
+  boldSignatures?: boolean;
+  /** PDF only: per body row, one '\n'-separated line of that row's cell in
+   *  `column` printed bold while the rest of the cell stays normal — e.g. the
+   *  "(serial nos)" line under the product name (Purchase / Sales Invoice). */
+  boldCellSegments?: { column: number; byRow: Array<string | undefined> };
+  /** Extra ruled tables printed under the main grid, in order (Purchase
+   *  Report: GST-rate summary, then the Grand Total box). */
+  trailingTables?: InventoryExportTable[];
+}
+
+/** A plain ruled table under the main grid (see trailingTables). */
+export interface InventoryExportTable {
+  columns: string[];
+  rows: string[][];
+  /** Header row above `columns`, like the main grid's columnGroups. */
+  columnGroups?: Array<[string, number]>;
+  /** PDF only: table width in mm, left aligned (default: full width). */
+  pdfWidth?: number;
+  /** Body cells of these column indexes printed bold. */
+  boldColumns?: number[];
+}
+
+const HEADER_COLOR = '#0b4093';
+// Previous: const L_MARGIN = 15; const R_MARGIN = 15;
+// Now `let`: buildPdf narrows them to FRAMED_MARGIN for pdfPageFrame documents
+// (Sales Invoice) and puts them back to DEFAULT_MARGIN afterwards.
+const DEFAULT_MARGIN = 15;
+const FRAMED_MARGIN = 10;
+/** Gap (mm) from the page edge to the pdfPageFrame border. */
+const FRAME_INSET = 6;
+let L_MARGIN = DEFAULT_MARGIN;
+let R_MARGIN = DEFAULT_MARGIN;
+const CODE_HEADER = /\b(no\.?|number|code|phone|mobile|pin|gstin|pan|hsn|sac|id)\b/i;
+const TERMS_LINE_HEIGHT = 3.6;
+/** Rendered height (mm) of the Bank Details / Authorised Signatory box. */
+// Previous: 46 (4 bank rows); +Account Name row, which can wrap.
+// Previous: 58 — the box really prints ~62mm (two-line "Certified …" and
+// "For <Company>"), so it passed the fit check and then broke onto a new page.
+// Previous: 64 — row padding 1.5 -> 1.2 so the Sales Invoice fits one page.
+//const BANK_BOX_HEIGHT = 60;
+/** Text/spacing scales tried in turn for a fitOnePage document. */
+const ONE_PAGE_SCALES = [1, 0.92, 0.85, 0.78, 0.7, 0.62];
+/** Smallest text scale a pdfFixedGridScale document (Sales Invoice) may use
+ *  to stay on one page (9pt -> ~7.7pt); below this it goes to 2 pages instead. */
+const FIXED_GRID_MIN_SCALE = 0.86;
+const BANK_BOX_HEIGHT = 58;
+// Previous: 32 — too little room to sign; taller box gives space for the
+// Authorised Signatory signature and the Common Seal.
+// Previous: 45 — Purchase Invoice signature box now as tall as the Sales
+// Invoice Bank Details / Authorised Signatory box (user request 2026-11-19).
+const SIGNATURE_ROW_HEIGHT = BANK_BOX_HEIGHT;
+const NUMERIC_CELL =/^-?(rs\.?\s*|₹\s*)?-?[\d,]+(\.\d+)?\s*%?$/i;
+
+// No "Rs." / ₹ in any Inventory PDF, Print or Excel (user request 2026-11-14);
+// screens keep it. Header suffixes like "Amount (Rs.)" / "(₹)" / "(in Rs.)"
+// go, and an "Rs." / "₹" directly in front of an amount goes. "Rupees … Only"
+// (amount in words) is left as is.
+const RUPEE_SUFFIX = /\s*\(\s*(?:in\s+)?(?:Rs\.?|₹|INR)\s*\)/gi;
+const RUPEE_SYMBOL = /₹\s*/g;
+const RUPEE_PREFIX = /\bRs\.?\s*(?=[-+(]?\s*\d)/gi;
+function stripRupee(value: string): string {
+  if (!value) return value;
+  return value.replace(RUPEE_SUFFIX, '').replace(RUPEE_SYMBOL, '').replace(RUPEE_PREFIX, '');
+}
+function stripRupeeDocument(doc: InventoryExportDocument): InventoryExportDocument {
+  const s = (v: any) => (typeof v === 'string' ? stripRupee(v) : v);
+  const pairs = (list?: Array<[string, string]>) => list?.map(([label, value]) => [s(label), s(value)] as [string, string]);
+  return {
+    ...doc,
+    title: s(doc.title),
+    columns: (doc.columns || []).map(s),
+    rows: (doc.rows || []).map(row => (row || []).map(s)),
+    fields: pairs(doc.fields),
+    summary: pairs(doc.summary),
+    notes: s(doc.notes),
+    totalRow: doc.totalRow?.map(s),
+    columnGroups: doc.columnGroups?.map(([title, span]) => [s(title), span] as [string, number]),
+    periodText: s(doc.periodText),
+    bankDetails: pairs(doc.bankDetails),
+    boldCellSegments: doc.boldCellSegments
+      ? { ...doc.boldCellSegments, byRow: doc.boldCellSegments.byRow.map(s) }
+      : undefined
+  };
+}
+
+@Injectable({ providedIn: 'root' })
+export class InventoryExportService {
+
+  /** Text/spacing scale of the PDF being built (1 = normal); see fitOnePage. */
+  private pdfScale = 1;
+
+  // 'Open': show the PDF in a new browser tab (the browser's own PDF viewer).
+  // If the browser blocks the new tab, the PDF is downloaded instead.
+  // Previous: pdf(document: InventoryExportDocument, mode: 'Pdf' | 'Print'): void {
+  pdf(document: InventoryExportDocument, mode: 'Pdf' | 'Print' | 'Open'): void {
+    document = stripRupeeDocument(document);
+    // Previous: const doc = this.buildPdf(document);
+    const doc = this.buildPdfFitted(document);
+    if (mode === 'Open') {
+      const tab = window.open(String(doc.output('bloburl')), '_blank');
+      if (!tab) doc.save(`${this.fileSafeName(document.fileName || document.title)}.pdf`);
+    } else if (mode === 'Pdf') {
+    // Previous: if (mode === 'Pdf') {
+      doc.save(`${this.fileSafeName(document.fileName || document.title)}.pdf`);
+    } else {
+      this.printDoc(doc);
+    }
+  }
+
+  excel(document: InventoryExportDocument): void {
+    document = stripRupeeDocument(document);
+    // Single documents (invoice, challan, voucher …) get the same layout as
+    // their PDF; plain grids keep the Accounts list-export layout below.
+    // Previous: if (this.filledFields(document).length || document.summary?.length) {
+    // Grouped headings / trailing tables (Purchase Report) need the document
+    // layout too - the plain grid below has no group header row.
+    if (this.filledFields(document).length || document.summary?.length
+      || document.columnGroups?.length || document.trailingTables?.length) {
+      this.documentExcel(document);
+      return;
+    }
+
+    const company = this.companyDetails();
+    const headerLines: string[] = [];
+    if (company?.companyName) headerLines.push(company.companyName);
+    if (company?.registrationAddress) headerLines.push(company.registrationAddress);
+    const cinGst = this.cinGstLine(company);
+    if (cinGst) headerLines.push(cinGst);
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('data');
+    const columns = document.columns;
+    const rows = document.rows.map(row => columns.map((_, index) => String(row[index] ?? '')));
+    const numCols = Math.max(columns.length, 1);
+
+    worksheet.columns = columns.map((header, index) => {
+      const longest = rows.reduce((max, row) => Math.max(max, row[index].length), header.length);
+      return { header, key: `c${index}`, width: Math.min(60, Math.max(20, longest + 2)) };
+    });
+    // Previous: worksheet.addRows(rows); — every amount went in as text, so
+    // Excel could not SUM it. Numeric columns are now real numbers with a
+    // number format (user request 2026-11-28, all Inventory Excel exports).
+    const numericCols = new Set(this.numericColumns(columns, rows));
+    rows.forEach(values => {
+      const row = worksheet.addRow(values.map((value, index) => numericCols.has(index) ? this.excelCell(value).value : value));
+      numericCols.forEach(index => {
+        const fmt = this.excelCell(values[index]).numFmt;
+        if (fmt) row.getCell(index + 1).numFmt = fmt;
+      });
+    });
+
+    const summary = document.summary || [];
+    summary.forEach(([label, value]) => {
+      const cells: Array<string | number> = columns.map(() => '');
+      if (numCols >= 2) {
+        cells[numCols - 2] = label;
+        cells[numCols - 1] = this.excelCell(value).value;
+      } else {
+        cells[0] = `${label} : ${value}`;
+      }
+      const row = worksheet.addRow(cells);
+      const fmt = numCols >= 2 ? this.excelCell(value).numFmt : undefined;
+      if (fmt) row.getCell(numCols).numFmt = fmt;
+    });
+
+    if (headerLines.length > 0) {
+      worksheet.spliceRows(1, 0, ...headerLines.map(line => [line]));
+      headerLines.forEach((_, idx) => {
+        const rowNum = idx + 1;
+        const row = worksheet.getRow(rowNum);
+        row.font = { bold: idx === 0 };
+        row.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (numCols > 1) worksheet.mergeCells(rowNum, 1, rowNum, numCols);
+      });
+    }
+
+    const thinBorder: Partial<ExcelJS.Borders> = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      bottom: { style: 'thin' },
+      right: { style: 'thin' }
+    };
+    worksheet.eachRow(row => {
+      row.eachCell({ includeEmpty: true }, cell => { cell.border = thinBorder; });
+    });
+
+    const columnHeaderRowNum = headerLines.length + 1;
+    worksheet.getRow(columnHeaderRowNum).font = { bold: true };
+
+    // Column alignment also rewrites the header/letterhead cells, so the
+    // header row is re-centred after it.
+    this.numericColumns(columns, rows).forEach(index => {
+      worksheet.getColumn(index + 1).alignment = { horizontal: 'right' };
+    });
+    for (let rowNum = 1; rowNum <= columnHeaderRowNum; rowNum++) {
+      worksheet.getRow(rowNum).alignment = { horizontal: 'center', vertical: 'middle' };
+    }
+    if (summary.length) {
+      worksheet.getRow(worksheet.rowCount).font = { bold: true };
+    }
+
+    this.saveWorkbook(workbook, document);
+  }
+
+  // Excel twin of buildPdf() for one document: logo + letterhead, title,
+  // period / branch line, the header fields as label/value pairs in two
+  // columns, the item table under a #0b4093 header, then totals (and
+  // signatures on vouchers) — in the same order as the PDF.
+  private documentExcel(document: InventoryExportDocument): void {
+    const company = this.companyDetails();
+    const workbook = new ExcelJS.Workbook();
+    const ws = workbook.addWorksheet('data');
+    const columns = document.columns;
+    const rows = document.rows.map(row => columns.map((_, index) => String(row[index] ?? '').replace(/₹/g, '').trim()));
+    const numCols = Math.max(columns.length, 4);
+    const half = Math.floor(numCols / 2);
+    const numeric = new Set(this.numericColumns(columns, rows));
+    const thin: Partial<ExcelJS.Borders> = {
+      top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' }
+    };
+
+    ws.columns = Array.from({ length: numCols }, (_, index) => {
+      const header = columns[index] ?? '';
+      const longest = rows.reduce((max, row) => Math.max(max, (row[index] ?? '').length), header.length);
+      return { width: Math.min(45, Math.max(index === 0 ? 8 : 12, longest + 3)) };
+    });
+
+    const mergeRow = (rowNum: number, from: number, to: number) => {
+      if (to > from) ws.mergeCells(rowNum, from, rowNum, to);
+    };
+    const bannerRow = (text: string, font: Partial<ExcelJS.Font>, height = 18) => {
+      const row = ws.addRow([text]);
+      row.height = height;
+      mergeRow(row.number, 1, numCols);
+      row.getCell(1).font = font;
+      row.getCell(1).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      return row;
+    };
+
+    // Letterhead
+    bannerRow(company?.companyName || '', { bold: true, size: 12 }, 24);
+    if (company?.registrationAddress) bannerRow(String(company.registrationAddress), { size: 9 }, 30);
+    const cinGst = this.cinGstLine(company);
+    if (cinGst) bannerRow(cinGst, { size: 9 });
+    const logo = String(company?.companyLogo || '');
+    if (logo) {
+      try {
+        const format = this.imageFormat(logo);
+        const imageId = workbook.addImage({
+          base64: logo.includes(',') ? logo.split(',')[1] : logo,
+          extension: format === 'PNG' ? 'png' : 'jpeg'
+        });
+        ws.addImage(imageId, { tl: { col: 0, row: 0 }, ext: this.logoSize(logo, 135, 60) });
+      } catch {
+        // An unreadable logo must not block the export.
+      }
+    }
+    bannerRow(document.title, { bold: true, size: 13 }, 22);
+
+    const periodRow = ws.addRow([]);
+    periodRow.getCell(1).value = document.periodText || '';
+    periodRow.getCell(half + 1).value = `Branch : ${company?.branchName || ''}`;
+    mergeRow(periodRow.number, 1, half);
+    mergeRow(periodRow.number, half + 1, numCols);
+    periodRow.getCell(half + 1).alignment = { horizontal: 'right' };
+    periodRow.getCell(half + 1).font = { bold: true };
+    for (let col = 1; col <= numCols; col++) {
+      periodRow.getCell(col).border = { bottom: { style: 'medium' } };
+    }
+    ws.addRow([]);
+
+    // Header fields — "Label : | value" pairs, two per row, as in the PDF.
+    const fields = this.filledFields(document);
+    for (let i = 0; i < fields.length; i += 2) {
+      const row = ws.addRow([]);
+      let lines = 1;
+      const place = (pair: [string, string] | undefined, labelCol: number, lastCol: number) => {
+        if (!pair) return;
+        row.getCell(labelCol).value = `${pair[0]} :`;
+        row.getCell(labelCol).font = { bold: true };
+        row.getCell(labelCol + 1).value = pair[1];
+        row.getCell(labelCol + 1).alignment = { wrapText: true, vertical: 'top' };
+        // Same bold values as the PDF (Sales Invoice: Customer, GSTIN No).
+        if (document.boldFieldLabels?.includes(pair[0])) row.getCell(labelCol + 1).font = { bold: true };
+        mergeRow(row.number, labelCol + 1, lastCol);
+        // Excel never auto-grows a merged cell's row, so size it for the
+        // wrapped value (e.g. a full customer address) or it shows one line.
+        let width = 0;
+        for (let col = labelCol + 1; col <= lastCol; col++) width += ws.getColumn(col).width || 10;
+        lines = Math.max(lines, Math.ceil(String(pair[1] || '').length / Math.max(width - 2, 1)));
+      };
+      place(fields[i], 1, half);
+      place(fields[i + 1], half + 1, numCols);
+      if (lines > 1) row.height = lines * 15;
+    }
+    if (fields.length) ws.addRow([]);
+
+    // Item table
+    const groups = document.columnGroups || [];
+    if (groups.length) {
+      // Tax-invoice grid: group row over the column headers, plain and ruled
+      // like the PDF.
+      const top = ws.addRow([]);
+      const sub = ws.addRow([]);
+      let col = 1;
+      groups.forEach(([title, span]) => {
+        if (span > 1) {
+          top.getCell(col).value = title;
+          columns.slice(col - 1, col - 1 + span).forEach((header, i) => { sub.getCell(col + i).value = header; });
+          mergeRow(top.number, col, col + span - 1);
+        } else {
+          top.getCell(col).value = columns[col - 1] ?? title;
+          ws.mergeCells(top.number, col, sub.number, col);
+        }
+        col += span;
+      });
+      [top, sub].forEach(row => {
+        for (let c = 1; c <= columns.length; c++) {
+          const cell = row.getCell(c);
+          // Previous: cell.font = { bold: true }; (plain white heading)
+          // pdfBlueHead documents get the #0b4093 / white heading like the PDF.
+          cell.font = document.pdfBlueHead ? { bold: true, color: { argb: 'FFFFFFFF' } } : { bold: true };
+          if (document.pdfBlueHead) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B4093' } };
+          cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+          cell.border = thin;
+        }
+      });
+    } else {
+    const headRow = ws.addRow(columns);
+    headRow.eachCell({ includeEmpty: false }, cell => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B4093' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      cell.border = thin;
+    });
+    }
+    rows.forEach(values => {
+      // Previous: this.excelNumber(value) + numFmt '#,##0.00' / '0'.
+      const row = ws.addRow(values.map((value, index) => numeric.has(index) ? this.excelCell(value).value : value));
+      values.forEach((value, index) => {
+        const cell = row.getCell(index + 1);
+        cell.border = thin;
+        cell.alignment = { vertical: 'top', wrapText: true, horizontal: numeric.has(index) ? 'right' : (columns[index]?.trim() === '#' || /^s\.?\s*no\.?$/i.test(columns[index] || '') ? 'center' : 'left') };
+        if (typeof cell.value === 'number') cell.numFmt = this.excelCell(value).numFmt || '0';
+      });
+    });
+    if (document.totalRow) {
+      const totals = columns.map((_, index) => String(document.totalRow![index] ?? ''));
+      // Previous: only numeric-column totals became numbers; now any amount in the Total row.
+      const row = ws.addRow(totals.map((value, index) => index > 0 ? this.excelCell(value).value : value));
+      totals.forEach((value, index) => {
+        const cell = row.getCell(index + 1);
+        cell.border = thin;
+        cell.font = { bold: true };
+        cell.alignment = { horizontal: index === 0 ? 'center' : 'right' };
+        if (typeof cell.value === 'number') cell.numFmt = this.excelCell(value).numFmt || '#,##0.00';
+      });
+      mergeRow(row.number, 1, this.totalRowSpan(totals, columns.length));
+    }
+
+    // Trailing tables (Purchase Report GST summary / Grand Total), same order as the PDF.
+    (document.trailingTables || []).forEach(table => {
+      ws.addRow([]);
+      const tCols = table.columns;
+      const tGroups = table.columnGroups || [];
+      const styleHead = (row: ExcelJS.Row) => {
+        for (let c = 1; c <= tCols.length; c++) {
+          const cell = row.getCell(c);
+          cell.font = document.pdfBlueHead ? { bold: true, color: { argb: 'FFFFFFFF' } } : { bold: true };
+          if (document.pdfBlueHead) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B4093' } };
+          cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+          cell.border = thin;
+        }
+      };
+      if (tGroups.length) {
+        const top = ws.addRow([]);
+        const sub = ws.addRow([]);
+        let col = 1;
+        tGroups.forEach(([title, span]) => {
+          if (span > 1) {
+            top.getCell(col).value = title;
+            tCols.slice(col - 1, col - 1 + span).forEach((header, i) => { sub.getCell(col + i).value = header; });
+            mergeRow(top.number, col, col + span - 1);
+          } else {
+            top.getCell(col).value = tCols[col - 1] ?? title;
+            ws.mergeCells(top.number, col, sub.number, col);
+          }
+          col += span;
+        });
+        styleHead(top);
+        styleHead(sub);
+      } else {
+        styleHead(ws.addRow(tCols));
+      }
+      table.rows.forEach(values => {
+        const cells = tCols.map((_, index) => String(values[index] ?? ''));
+        const row = ws.addRow(cells.map(value => this.excelCell(value).value));
+        cells.forEach((value, index) => {
+          const cell = row.getCell(index + 1);
+          cell.border = thin;
+          cell.alignment = { horizontal: typeof cell.value === 'number' ? 'right' : 'left' };
+          if (typeof cell.value === 'number') cell.numFmt = this.excelCell(value).numFmt || '0';
+          if ((table.boldColumns || []).includes(index)) cell.font = { bold: true };
+        });
+      });
+    });
+
+    // Totals on the right, last one bold — same as the PDF summary box.
+    const summary = document.summary || [];
+    const wordsBox = document.amountInWordsPosition === 'box';
+    if (summary.length) {
+      // Previous: ws.addRow([]);
+      if (!wordsBox) ws.addRow([]);
+      const firstSummaryRow = ws.rowCount + 1;
+      summary.forEach(([label, value], index) => {
+        const row = ws.addRow([]);
+        const labelCell = row.getCell(numCols - 1);
+        const valueCell = row.getCell(numCols);
+        labelCell.value = label;
+        // Previous: valueCell.value = value; (text) — totals are numbers now.
+        const summaryCell = this.excelCell(value);
+        valueCell.value = summaryCell.value;
+        if (summaryCell.numFmt) valueCell.numFmt = summaryCell.numFmt;
+        // Previous: const isLast = index === summary.length - 1;
+        // Grand Total stays the bold row when Previous Balance follows it.
+        const grandTotalIndex = summary.findIndex(([l]) => /^grand total$/i.test(String(l).trim()));
+        const isLast = index === (grandTotalIndex >= 0 ? grandTotalIndex : summary.length - 1);
+        labelCell.font = { bold: true, size: isLast ? 11 : 10 };
+        valueCell.font = { bold: isLast, size: isLast ? 11 : 10 };
+        valueCell.alignment = { horizontal: 'right' };
+        labelCell.border = thin;
+        valueCell.border = thin;
+      });
+      if (wordsBox && numCols > 2) {
+        // "Total Invoice Amount In Words" box left of the totals, as in the PDF.
+        const titleCell = ws.getCell(firstSummaryRow, 1);
+        titleCell.value = 'Total Invoice Amount In Words';
+        titleCell.font = { bold: true, size: 11 };
+        titleCell.border = thin;
+        mergeRow(firstSummaryRow, 1, numCols - 2);
+        if (summary.length > 1) {
+          const notes = String(document.notes || '').trim();
+          const wordsCell = ws.getCell(firstSummaryRow + 1, 1);
+          // Previous: wordsCell.value = [String(document.amountInWords || '').toUpperCase(), notes ? `${document.notesLabel || 'Notes'} : ${notes}` : '']
+          wordsCell.value = [String(document.amountInWords || ''), notes ? `${document.notesLabel || 'Notes'} : ${notes}` : '']
+            .filter(Boolean).join('\n\n');
+          wordsCell.alignment = { wrapText: true, vertical: 'top' };
+          wordsCell.border = thin;
+          ws.mergeCells(firstSummaryRow + 1, 1, firstSummaryRow + summary.length - 1, numCols - 2);
+        }
+      }
+    }
+
+    // Terms & Conditions, then the Bank Details | Certified / Authorised
+    // Signatory box — same order as the PDF.
+    const sheetWidth = (from: number, to: number) => {
+      let width = 0;
+      for (let col = from; col <= to; col++) width += ws.getColumn(col).width || 10;
+      return Math.max(width - 2, 1);
+    };
+    const terms = document.terms || [];
+    if (terms.length) {
+      ws.addRow([]);
+      ws.addRow(['Terms & Conditions :']).getCell(1).font = { bold: true };
+      // Previous: dot-prefixed (`.${term}`); now numbered 1., 2., …
+      terms.forEach((term, i) => {
+        const row = ws.addRow([`${i + 1}. ${term}`]);
+        mergeRow(row.number, 1, numCols);
+        row.getCell(1).alignment = { wrapText: true, vertical: 'top' };
+        row.getCell(1).font = { size: 9 };
+        const lines = Math.ceil((term.length + 1) / sheetWidth(1, numCols));
+        if (lines > 1) row.height = lines * 13;
+      });
+    }
+    if (document.bankDetails) {
+      ws.addRow([]);
+      const companyName = String(company?.companyName || '').trim();
+      const boxRows: Array<[string, string]> = [
+        ['Bank Details :', 'Certified that the particulars given above are true and correct'],
+        ...document.bankDetails.map(([label, value], index) =>
+          [`${label} : ${value}`, index === 0 && companyName ? `For  ${companyName}` : ''] as [string, string]),
+        ['', 'Authorised Signatory']
+      ];
+      const line: Partial<ExcelJS.Border> = { style: 'thin' };
+      boxRows.forEach(([left, right], index) => {
+        const row = ws.addRow([]);
+        const isFirst = index === 0;
+        const isLast = index === boxRows.length - 1;
+        row.getCell(1).value = left;
+        row.getCell(1).font = { bold: true, size: isFirst ? 11 : 10 };
+        row.getCell(1).border = { left: line, right: line, ...(isFirst ? { top: line } : {}), ...(isLast ? { bottom: line } : {}) };
+        mergeRow(row.number, 1, half);
+        row.getCell(half + 1).value = right;
+        row.getCell(half + 1).font = { bold: true, size: index === 1 ? 11 : isFirst ? 9 : 10 };
+        // Ruled under "Certified …" and around "Authorised Signatory".
+        row.getCell(half + 1).border = { left: line, right: line, ...(isFirst || isLast ? { top: line, bottom: line } : {}) };
+        row.getCell(half + 1).alignment = { wrapText: true, vertical: isLast ? 'bottom' : 'top', horizontal: isLast ? 'center' : 'left' };
+        mergeRow(row.number, half + 1, numCols);
+        if (isLast) row.height = 40;
+      });
+    }
+
+    // Notes and the "Printed on" footer are PDF-only.
+    const signatures = document.signatures || [];
+    if (signatures.length) {
+      ws.addRow([]);
+      ws.addRow([]);
+      const slots = signatures.map((_, index) => Math.min(numCols, Math.floor(index * numCols / signatures.length) + 1));
+      if (document.signedBy) {
+        const byRow = ws.addRow([]);
+        byRow.getCell(slots[slots.length - 1]).value = document.signedBy;
+      }
+      const capRow = ws.addRow([]);
+      signatures.forEach((caption, index) => { capRow.getCell(slots[index]).value = caption; });
+    }
+
+    ws.pageSetup = { orientation: document.orientation || (columns.length > 7 ? 'landscape' : 'portrait'), fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
+    this.saveWorkbook(workbook, document);
+  }
+
+  private excelNumber(value: string): number | string {
+    const cleaned = value.replace(/rs\.?/i, '').replace(/[,%\s]/g, '');
+    return cleaned !== '' && !isNaN(Number(cleaned)) ? Number(cleaned) : value;
+  }
+
+  /** An amount / quantity / percent string ("1,23,456.50", "-200", "18%") as a
+   *  real Excel number with a matching format, so SUM etc. work; anything else
+   *  (text, "-", blank, codes) stays as given. */
+  private excelCell(raw: string): { value: number | string; numFmt?: string } {
+    const text = String(raw ?? '').trim();
+    if (!text || !NUMERIC_CELL.test(text)) return { value: raw ?? '' };
+    const value = this.excelNumber(text);
+    if (typeof value !== 'number') return { value: raw };
+    const places = (text.match(/\.(\d+)/)?.[1].length) || 0;
+    const base = places ? `#,##0.${'0'.repeat(places)}` : '0';
+    return { value, numFmt: /%$/.test(text) ? `${base}"%"` : base };
+  }
+
+  private saveWorkbook(workbook: ExcelJS.Workbook, document: InventoryExportDocument): void {
+    workbook.xlsx.writeBuffer().then((buffer: any) => {
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8'
+      });
+      saveAs(blob, `${this.fileSafeName(document.fileName || document.title)}.xlsx`);
+    });
+  }
+
+  // A fitOnePage document is rebuilt with smaller text and spacing until it
+  // fits on one page; the last (smallest) try is kept if none does.
+  private buildPdfFitted(document: InventoryExportDocument): jsPDF {
+    if (!document.fitOnePage) return this.buildPdf(document);
+    let doc!: jsPDF;
+    // Sales Invoice (2026-11-17): nothing shrinks any more — header, grid,
+    // totals, terms and bank box always print at full size (like INV-CP-00017);
+    // a long invoice simply runs onto a 2nd / 3rd page.
+    // Previous (2026-11-17): always full size, no shrinking at all — so even a
+    // 1–4 product invoice pushed the bank box onto page 2.
+    // if (document.pdfFixedGridScale) {
+    //   try {
+    //     this.pdfScale = document.pdfMaxScale || 1;
+    //     return this.buildPdf(document);
+    //   } finally {
+    //     this.pdfScale = 1;
+    //   }
+    // }
+    // Now (2026-11-20): the grid stays full size; header/totals/terms/bank
+    // box may shrink a little (2% steps, never below FIXED_GRID_MIN_SCALE)
+    // only when that keeps the whole invoice on one page. If it still needs
+    // more than one page (many products), it prints at full size across pages.
+    if (document.pdfFixedGridScale) {
+      try {
+        const maxScale = document.pdfMaxScale || 1;
+        for (let scale = maxScale; scale >= FIXED_GRID_MIN_SCALE - 1e-9; scale -= 0.02) {
+          this.pdfScale = Math.round(scale * 100) / 100;
+          const attempt = this.buildPdf(document);
+          if (attempt.getNumberOfPages() === 1) return attempt;
+        }
+        this.pdfScale = maxScale;
+        return this.buildPdf(document);
+      } finally {
+        this.pdfScale = 1;
+      }
+    }
+    try {
+      // Previous: for (const scale of ONE_PAGE_SCALES) {
+      // Previous: const scales = ONE_PAGE_SCALES.filter(scale => scale <= maxScale + 1e-9);
+      //           if (!scales.length || scales[0] < maxScale - 1e-9) scales.unshift(maxScale);
+      // A document that sets pdfMaxScale (Sales Invoice) steps down in fine
+      // 2% steps, so it prints at the largest size that still fits one page
+      // instead of jumping 0.92 -> 0.85 and leaving the page bottom empty.
+      const maxScale = document.pdfMaxScale || 1;
+      const minScale = ONE_PAGE_SCALES[ONE_PAGE_SCALES.length - 1];
+      const scales: number[] = [];
+      if (document.pdfMaxScale) {
+        for (let scale = maxScale; scale >= minScale - 1e-9; scale -= 0.02) scales.push(Math.round(scale * 100) / 100);
+      } else {
+        scales.push(...ONE_PAGE_SCALES);
+      }
+      let fitted = false;
+      for (const scale of scales) {
+        this.pdfScale = scale;
+        doc = this.buildPdf(document);
+        if (doc.getNumberOfPages() === 1) { fitted = true; break; }
+      }
+      // Grid kept at full size (Sales Invoice) and still too long for one
+      // page: print everything at full size across pages instead of tiny text.
+      if (!fitted && document.pdfFixedGridScale) {
+        this.pdfScale = maxScale;
+        doc = this.buildPdf(document);
+      }
+    } finally {
+      this.pdfScale = 1;
+    }
+    return doc;
+  }
+
+  private buildPdf(document: InventoryExportDocument): jsPDF {
+    L_MARGIN = R_MARGIN = document.pdfPageFrame ? FRAMED_MARGIN : DEFAULT_MARGIN;
+    this.pageFramed = !!document.pdfPageFrame;
+    try {
+      return this.buildPdfPages(document);
+    } finally {
+      L_MARGIN = R_MARGIN = DEFAULT_MARGIN;
+      this.pageFramed = false;
+    }
+  }
+
+  /** "Bill To Address :" -> "Bill To Address". */
+  private fieldLabel(cell: string | undefined): string {
+    return String(cell || '').replace(/\s*:\s*$/, '').trim();
+  }
+
+  /** True while a pdfPageFrame document (Sales Invoice) is being built. */
+  private pageFramed = false;
+
+  // Full-width horizontal rule. On a framed page it runs border to border
+  // (joined to the frame on both sides, like the old Crystal report);
+  // otherwise margin to margin as before.
+  private drawFullRule(doc: jsPDF, y: number): void {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const left = this.pageFramed ? FRAME_INSET : L_MARGIN;
+    const right = this.pageFramed ? pageWidth - FRAME_INSET : pageWidth - R_MARGIN;
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(this.pageFramed ? 0.3 : 0.2);
+    doc.line(left, y, right, y);
+    doc.setLineWidth(0.2);
+  }
+
+  private buildPdfPages(document: InventoryExportDocument): jsPDF {
+    const s = this.pdfScale;
+    const orientation = document.orientation || (document.columns.length > 7 ? 'landscape' : 'portrait');
+    const doc = new jsPDF({ format: 'a4', orientation });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const centerX = pageWidth / 2;
+    const company = this.companyDetails();
+
+    // The centred letterhead text keeps clear of the logo on both sides, so a
+    // wide logo (ACE TECH, 45mm) no longer prints over the start of the address.
+    const logo = company?.companyLogo || '';
+    const logoBox = logo ? this.logoSize(logo, 45, 20) : null;
+    const textWidth = Math.min(pageWidth - 70, pageWidth - 2 * (10 + (logoBox?.width || 0) + 3));
+
+    // Letterhead — first page only. Company name is 12pt: smaller than the
+    // title, still larger than the 9pt address.
+    doc.setTextColor('black');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    const nameLines = doc.splitTextToSize(company?.companyName || '', textWidth) as string[];
+    let y = 14;
+    nameLines.forEach((line, index) => {
+      if (index) y += 5;
+      doc.text(line, centerX, y, { align: 'center' });
+    });
+
+    y += 6;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    const address = String(company?.registrationAddress || '').trim();
+    if (address) {
+      const lines = doc.splitTextToSize(address, textWidth) as string[];
+      lines.forEach(line => {
+        doc.text(line, centerX, y, { align: 'center' });
+        y += 4.5;
+      });
+      y += 1.5;
+    } else {
+      y += 6;
+    }
+    // CIN, GST NO and PAN each on their own line, so a wrap never splits a
+    // label from its number.
+    // Previous: const cinGst = this.cinGstLine(company);
+    // Previous: if (cinGst) {
+    // Previous:   const lines = doc.splitTextToSize(cinGst, textWidth) as string[];
+    // Previous: const gstPan = [GST NO, PAN].filter(Boolean).join('   ');  (GST NO and PAN on one line)
+    // Previous (each on its own line):
+    // const cinGstLines = [CIN, GST NO, PAN].filter(Boolean);
+    // Now CIN and GST NO side by side — "CIN : xxx | GST NO : yyy" (user
+    // 2026-11-24). If that pair is wider than the text area it falls back to
+    // two lines so a label is never split from its number. PAN stays below.
+    const cinText = company?.cinNumber ? `CIN : ${company.cinNumber}` : '';
+    const gstText = company?.gstNumber ? `GST NO : ${company.gstNumber}` : '';
+    const cinGstPair = [cinText, gstText].filter(Boolean).join(' | ');
+    const cinGstLines = [
+      ...(cinGstPair && doc.getTextWidth(cinGstPair) <= textWidth ? [cinGstPair] : [cinText, gstText]),
+      company?.panNumber ? `PAN : ${company.panNumber}` : ''
+    ].filter(Boolean);
+    if (cinGstLines.length) {
+      const lines = cinGstLines.flatMap(text => doc.splitTextToSize(text, textWidth) as string[]);
+      lines.forEach((line, index) => {
+        if (index) y += 4.5;
+        doc.text(line, centerX, y, { align: 'center' });
+      });
+    }
+
+    // Logo sits vertically centred on the name/address/GST block (name cap
+    // top ~11mm to the GST baseline), never running into the title below.
+    if (logo && logoBox) {
+      try {
+        const size = logoBox;
+        // Previous (all documents): const centred = (11 + y) / 2 - size.height / 2;
+        // Previous (all documents): const logoY = Math.max(5, Math.min(centred, y + 2.5 - size.height));
+        // Previous (2026-11-20, Sales Invoice only): const logoY = this.pageFramed ? 8 : <centred>;
+        // Now every Inventory PDF: logo moved up, its top level with the top of
+        // the company name (user 2026-11-20: "once we change, all should reflect").
+        const logoY = 8;
+        doc.addImage(logo, this.imageFormat(logo), 10, logoY, size.width, size.height);
+      } catch {
+        // An unreadable logo must not block the export.
+      }
+    }
+    y += 7;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text(document.title, centerX, y, { align: 'center' });
+    if (document.copyType) {
+      doc.setFont('helvetica', 'bolditalic');
+      doc.setFontSize(9);
+      doc.text(document.copyType, pageWidth - R_MARGIN, y, { align: 'right' });
+    }
+    y += 7;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    if (document.periodText) doc.text(document.periodText, L_MARGIN, y);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Branch : ${company?.branchName || ''}`, pageWidth - R_MARGIN, y, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    y += 5;
+    // Previous: doc.line(L_MARGIN, y, pageWidth - R_MARGIN, y); — now joined
+    // to the page border on framed documents (Sales Invoice).
+    this.drawFullRule(doc, y);
+    y += 3;
+
+    const fields = this.filledFields(document);
+    if (fields.length) {
+      const fieldRows: string[][] = [];
+      for (let i = 0; i < fields.length; i += 2) {
+        const [l1, v1] = fields[i];
+        const [l2, v2] = fields[i + 1] || ['', ''];
+        fieldRows.push([l1 ? `${l1} :` : '', v1 || '', l2 ? `${l2} :` : '', v2 || '']);
+      }
+      // Both value columns get a fixed, equal width; left to auto-size, a long
+      // right-hand value (e.g. Mode of Payment) squeezed the left one until
+      // no-space values like PAY-SS-26-00011 overflowed into the next label.
+      const valueWidth = (pageWidth - L_MARGIN - R_MARGIN - 76) / 2;
+      const ruleAboveField = String(document.pdfRuleAboveField || '').trim();
+      // Previous: left label column always 38mm, leaving a wide gap before
+      // short labels' values. With pdfCompactLeftLabels it shrinks to the
+      // longest left label + a small gap, and the left value column takes the
+      // freed width, so the right-hand labels stay exactly where they were.
+      let leftLabelWidth = 38;
+      if (document.pdfCompactLeftLabels) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9 * s);
+        const longest = Math.max(0, ...fieldRows.map(row => row[0] ? doc.getTextWidth(row[0]) : 0));
+        leftLabelWidth = Math.min(38, longest + 2 * 0.8 * s + 2);
+        doc.setFont('helvetica', 'normal');
+      }
+      const leftValueWidth = valueWidth + (38 - leftLabelWidth);
+      let fieldDivider: { x: number; top: number } | null = null;
+      autoTable(doc, {
+        body: fieldRows,
+        theme: 'plain',
+        startY: y,
+        margin: { left: L_MARGIN, right: R_MARGIN, top: 15, bottom: 15 },
+        // Previous: styles: { fontSize: 9, cellPadding: 0.8, overflow: 'linebreak' },
+        styles: { fontSize: 9 * s, cellPadding: 0.8 * s, overflow: 'linebreak' },
+        columnStyles: {
+          // Previous: 0: { fontStyle: 'bold', cellWidth: 38 }, 1: { cellWidth: valueWidth },
+          0: { fontStyle: 'bold', cellWidth: leftLabelWidth },
+          1: { cellWidth: leftValueWidth },
+          2: { fontStyle: 'bold', cellWidth: 38 },
+          3: { cellWidth: valueWidth }
+        },
+        // Values of the listed labels (e.g. Customer, GSTIN No) print bold.
+        didParseCell: data => {
+          // Extra top padding on the pdfRuleAboveField row, so its rule sits
+          // in clear space between the row above and this one.
+          if (ruleAboveField && data.section === 'body') {
+            const raw = data.row.raw as string[];
+            if (this.fieldLabel(raw[0]) === ruleAboveField || this.fieldLabel(raw[2]) === ruleAboveField) {
+              // Previous: left always 0.8 — with pdfFieldRowDivider the right-hand
+              // label (Ship To Address) starts a little clear of the divider.
+              const left = document.pdfFieldRowDivider && data.column.index === 2 ? 2.4 * s : 0.8 * s;
+              data.cell.styles.cellPadding = { top: 2.6 * s, bottom: 0.8 * s, left, right: 0.8 * s };
+            }
+          }
+          const bold = document.boldFieldLabels;
+          if (!bold?.length || (data.column.index !== 1 && data.column.index !== 3)) return;
+          const label = String((data.row.raw as string[])[data.column.index - 1] || '').replace(/\s*:\s*$/, '').trim();
+          if (bold.includes(label)) data.cell.styles.fontStyle = 'bold';
+        },
+        // Room above the pdfRuleAboveField row (Bill To Address) for its rule.
+        willDrawCell: data => {
+          if (!ruleAboveField || data.section !== 'body') return;
+          const raw = data.row.raw as string[];
+          if (this.fieldLabel(raw[0]) !== ruleAboveField && this.fieldLabel(raw[2]) !== ruleAboveField) return;
+          if (data.column.index === 0) this.drawFullRule(doc, data.cell.y + 0.8 * s);
+          // Remember where the Bill To | Ship To divider goes (left edge of the
+          // right-hand label column, from this row's rule).
+          if (document.pdfFieldRowDivider && data.column.index === 2) {
+            fieldDivider = { x: data.cell.x, top: data.cell.y + 0.8 * s };
+          }
+        },
+        // Listed fields (Sales Invoice: Bill To / Ship To Address) get a square
+        // box around their label + value, each pair its own box.
+        didDrawCell: data => {
+          const boxed = document.boxedFieldLabels;
+          if (!boxed?.length || data.section !== 'body' || (data.column.index !== 1 && data.column.index !== 3)) return;
+          const label = String((data.row.raw as string[])[data.column.index - 1] || '').replace(/\s*:\s*$/, '').trim();
+          if (!boxed.includes(label)) return;
+          const { x, y: cellY, width, height } = data.cell;
+          // Previous: const left = x - 38 + 0.5;   // label column is 38mm wide
+          const left = x - (data.column.index === 1 ? leftLabelWidth : 38) + 0.5;
+          const right = x + width - 0.5;
+          doc.setDrawColor(0, 0, 0);
+          doc.setLineWidth(0.2);
+          doc.rect(left, cellY, right - left, height);
+        }
+      });
+      y = (doc as any).lastAutoTable.finalY + 3;
+      // Vertical line between Bill To and Ship To Address, joining the rule
+      // above that row to the rule above the grid (or the table's foot).
+      const divider = fieldDivider as { x: number; top: number } | null;
+      if (divider) {
+        const bottom = document.pdfRuleAboveGrid ? y - 1 : y - 3;
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(this.pageFramed ? 0.3 : 0.2);
+        doc.line(divider.x, divider.top, divider.x, bottom);
+        doc.setLineWidth(0.2);
+      }
+      // Same rule as under "Branch : …", then the grid (Sales Invoice).
+      if (document.pdfRuleAboveGrid) {
+        y -= 1;
+        // Previous: doc.line(L_MARGIN, y, pageWidth - R_MARGIN, y);
+        this.drawFullRule(doc, y);
+        y += 3;
+      }
+    }
+
+    const numeric = this.numericColumns(document.columns, document.rows);
+    const columnStyles: Record<number, any> = {};
+    numeric.forEach(index => { columnStyles[index] = { halign: 'right' }; });
+    document.columns.forEach((header, index) => {
+      if (header.trim() === '#' || /^s\.?\s*no\.?$/i.test(header.trim())) {
+        columnStyles[index] = { halign: 'center', cellWidth: 12 };
+      }
+    });
+    Object.entries(document.pdfColumnWidths || {}).forEach(([index, width]) => {
+      columnStyles[+index] = { ...columnStyles[+index], cellWidth: width };
+    });
+
+    const taxGrid = !!document.columnGroups?.length;
+    // Items grid scale: always full size when pdfFixedGridScale (Sales Invoice),
+    // so a 19-line invoice's grid reads the same as a 4-line one.
+    const gs = document.pdfFixedGridScale ? 1 : s;
+    const bodyRows: any[][] = document.rows.map(row => document.columns.map((_, index) => String(row[index] ?? '').replace(/₹/g, '').trim()));
+    if (document.totalRow) {
+      const span = this.totalRowSpan(document.totalRow, document.columns.length);
+      bodyRows.push([{ content: document.totalRow[0], colSpan: span, styles: { halign: 'center' } }, ...document.totalRow.slice(span)]);
+    }
+    if (taxGrid) {
+      columnStyles[1] = { ...columnStyles[1], minCellWidth: 28 };
+      // Rate % cells sit centred under their heading, as on the old invoice.
+      document.columns.forEach((header, index) => {
+        if (/%/.test(header)) columnStyles[index] = { ...columnStyles[index], halign: 'center' };
+        // A little more width so "Rate %" fits on one line (see didParseCell).
+        if (/%/.test(header) && document.pdfOneLinePercentHead) {
+          columnStyles[index] = { ...columnStyles[index], minCellWidth: 9.5 };
+        }
+      });
+    }
+    (document.pdfCenterColumns || []).forEach(index => {
+      columnStyles[index] = { ...columnStyles[index], halign: 'center' };
+    });
+
+    autoTable(doc, {
+      // Previous: head: [document.columns],
+      head: taxGrid ? this.pdfGroupedHead(document.columns, document.columnGroups!) : [document.columns],
+      // Previous: body: document.rows.map(row => document.columns.map((_, index) => String(row[index] ?? '').replace(/₹/g, '').trim())),
+      body: bodyRows,
+      theme: 'grid',
+      startY: y,
+      margin: { left: L_MARGIN, right: R_MARGIN, top: 15, bottom: 15 },
+      // Previous: headStyles: { fillColor: HEADER_COLOR, textColor: 255, halign: 'center', valign: 'middle', fontSize: document.pdfHeadFontSize || 10 },
+      // Previous (tax grid): always fillColor 255 / textColor 0; pdfBlueHead
+      // (Sales Invoice) now uses the Purchase Invoice blue with white text.
+      headStyles: taxGrid
+        ? { fillColor: document.pdfBlueHead ? HEADER_COLOR : 255, textColor: document.pdfBlueHead ? 255 : 0, fontStyle: 'bold', halign: 'center', valign: 'middle', fontSize: (document.pdfHeadFontSize || 8) * gs, cellPadding: 0.8 * gs, lineColor: 0, lineWidth: 0.2 }
+        : { fillColor: HEADER_COLOR, textColor: 255, halign: 'center', valign: 'middle', fontSize: document.pdfHeadFontSize || 10 },
+      // Previous: styles: { fontSize: 8, cellPadding: 0.8, overflow: 'linebreak', valign: 'middle' } as any,
+      styles: taxGrid
+        ? { fontSize: 7.5 * gs, cellPadding: 0.8 * gs, overflow: 'linebreak', valign: 'top', lineColor: 0, lineWidth: 0.2, textColor: 0 } as any
+        : { fontSize: 8, cellPadding: 0.8, overflow: 'linebreak', valign: 'middle' } as any,
+      columnStyles,
+      didParseCell: (data: any) => {
+        // Previous: "Rate %" broke as "Rat / e %" in its narrow column. Now it
+        // prints on ONE straight line, shrinking its font only if needed.
+        // Previous: only '%' headings (pdfOneLinePercentHead); pdfOneLineHeads adds named ones.
+        const headText = String(data.cell.raw?.content ?? data.cell.raw ?? '');
+        if (taxGrid && data.section === 'head' && data.cell.colSpan === 1
+          && ((document.pdfOneLinePercentHead && /%/.test(headText)) || (document.pdfOneLineHeads || []).includes(headText))) {
+          const cell = data.cell;
+          cell.styles.overflow = (text: string | string[], space: number) => {
+            const value = (Array.isArray(text) ? text : [String(text ?? '')]).join(' ').trim();
+            const width = doc.getTextWidth(value);
+            if (width > space && width > 0) {
+              cell.styles.fontSize = cell.styles.fontSize * space / width;
+              doc.setFontSize(cell.styles.fontSize);
+            }
+            return [value];
+          };
+        }
+        // Bold and the same 9pt as the header labels (e.g. "Cheque Date :").
+        // Previous: if (document.boldRows && data.section === 'body') data.cell.styles.fontStyle = 'bold';
+        if (document.boldRows && data.section === 'body') {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fontSize = 9 * s;
+        }
+        // Same bold 9pt as the header labels, for the listed columns only.
+        if (data.section === 'body' && (document.boldColumns || []).includes(data.column.index)) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fontSize = 9 * s;
+        }
+        if (document.totalRow && data.section === 'body' && data.row.index === bodyRows.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          // Previous: data.cell.styles.fontSize = 8.5 * gs;
+          // Tax-invoice grids (SI/SR/PI/PR) print the Total row bigger.
+          data.cell.styles.fontSize = (taxGrid ? 9.5 : 8.5) * gs;
+          // Previous: amounts wrapped like "5,16,750.0" / "0" in narrow columns.
+          // Now each Total-row amount stays on ONE line; its font shrinks only
+          // as much as needed to fit the column width (2026-11-20).
+          if (data.cell.colSpan === 1) {
+            const cell = data.cell;
+            cell.styles.overflow = (text: string | string[], space: number) => {
+              const value = (Array.isArray(text) ? text : [String(text ?? '')]).join(' ').trim();
+              const width = doc.getTextWidth(value);
+              if (width > space && width > 0) {
+                cell.styles.fontSize = cell.styles.fontSize * space / width;
+                doc.setFontSize(cell.styles.fontSize);
+              }
+              return [value];
+            };
+          }
+        }
+        // Group headers / subtotals (report "Group by"): bold, shaded.
+        if (data.section === 'body' && (document.groupRowIndexes || []).includes(data.row.index)) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [230, 238, 250];
+        }
+      },
+      // Bold segment inside a normal cell (serial nos under the product name):
+      // autotable draws one font per cell, so the segment's wrapped lines are
+      // blanked here (keeping every other line in place) and drawn bold below.
+      willDrawCell: (data: any) => {
+        const segment = this.boldSegmentFor(document, data);
+        if (!segment) return;
+        const lines: string[] = Array.isArray(data.cell.text) ? data.cell.text : [String(data.cell.text ?? '')];
+        const range = this.segmentLineRange(lines, segment);
+        if (!range) return;
+        data.cell.__boldLines = { lines: [...lines], from: range[0], to: range[1] };
+        data.cell.text = lines.map((line, i) => (i >= range[0] && i <= range[1] ? '' : line));
+      },
+      didDrawCell: (data: any) => {
+        const bold = data.cell.__boldLines;
+        if (!bold) return;
+        const cell = data.cell;
+        const k = doc.internal.scaleFactor;
+        const fontPt = Number(cell.styles.fontSize) || 8;
+        const fontSize = fontPt / k;
+        const lineHeight = fontSize * (doc.getLineHeightFactor ? doc.getLineHeightFactor() : 1.15);
+        const textPos = cell.getTextPos();
+        // Same first-line position autotable's own text drawing uses.
+        let top = textPos.y + fontSize * (2 - 1.15);
+        if (cell.styles.valign === 'middle') top -= (bold.lines.length / 2) * lineHeight;
+        else if (cell.styles.valign === 'bottom') top -= bold.lines.length * lineHeight;
+        const available = cell.width - cell.padding('left') - cell.padding('right');
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(0);
+        for (let i = bold.from; i <= bold.to; i++) {
+          const line = String(bold.lines[i] ?? '');
+          if (!line) continue;
+          // Bold is wider than the normal text the line was wrapped for; shrink
+          // that line just enough to stay inside the cell.
+          doc.setFontSize(fontPt);
+          const width = doc.getTextWidth(line);
+          if (width > available && width > 0) doc.setFontSize(fontPt * available / width);
+          doc.text(line, textPos.x, top + i * lineHeight);
+        }
+        doc.setFontSize(fontPt);
+        doc.setFont('helvetica', 'normal');
+        delete cell.__boldLines;
+      },
+      rowPageBreak: 'avoid',
+      showHead: 'everyPage'
+    });
+    // Previous: y = (doc as any).lastAutoTable.finalY + 6;
+    const wordsBox = document.amountInWordsPosition === 'box';
+    y = (doc as any).lastAutoTable.finalY + (wordsBox ? 0 : 6);
+
+    // Trailing tables (Purchase Report: GST-rate summary, Grand Total box).
+    for (const table of document.trailingTables || []) {
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const fullWidth = pageWidth - L_MARGIN - R_MARGIN;
+      const width = Math.min(table.pdfWidth || fullWidth, fullWidth);
+      const grouped = !!table.columnGroups?.length;
+      autoTable(doc, {
+        head: grouped ? this.pdfGroupedHead(table.columns, table.columnGroups!) : [table.columns],
+        body: table.rows.map(row => table.columns.map((_, index) => String(row[index] ?? ''))),
+        theme: 'grid',
+        startY: y,
+        margin: { left: L_MARGIN, right: pageWidth - L_MARGIN - width, top: 15, bottom: 15 },
+        // Same heading colours as the main grid (pdfBlueHead = #0b4093, white text).
+        headStyles: { fillColor: document.pdfBlueHead ? HEADER_COLOR : 255, textColor: document.pdfBlueHead ? 255 : 0, fontStyle: 'bold', halign: 'center', valign: 'middle', fontSize: 7, cellPadding: 0.8, lineColor: 0, lineWidth: 0.2 },
+        styles: { fontSize: 7, cellPadding: 0.8, overflow: 'linebreak', valign: 'middle', halign: 'right', lineColor: 0, lineWidth: 0.2, textColor: 0 } as any,
+        didParseCell: (data: any) => {
+          if (data.section === 'body' && (table.boldColumns || []).includes(data.column.index)) {
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.halign = 'center';
+          }
+        },
+        rowPageBreak: 'avoid',
+        showHead: 'everyPage'
+      });
+      y = (doc as any).lastAutoTable.finalY + 6;
+    }
+
+        // Invoice layout (Purchase Invoice): words + totals joined under the table,
+    // then the signature row. The blocks below are then skipped for this document.
+    const joined = !!document.gstInvoiceLayout;
+    if (joined) {
+      const joinedEnd = this.drawPdfJoinedTotals(doc, document, (doc as any).lastAutoTable.finalY);
+      if (document.signatureBlock) this.drawPdfSignatureRow(doc, joinedEnd);
+    }
+    const summary = joined ? [] : (document.summary || []);
+    const notes = joined ? '' : String(document.notes || '').trim();
+    const amountInWords = joined ? '' : String(document.amountInWords || '').trim();
+    const wordsBelow = document.amountInWordsPosition === 'below';
+    // Previous: const wordsLeft = wordsBelow ? '' : amountInWords;
+    const wordsLeft = wordsBelow || wordsBox ? '' : amountInWords;
+    let blockEnd = y;
+    if (wordsBox && summary.length) {
+      blockEnd = this.drawPdfWordsBox(doc, amountInWords, notes ? `${document.notesLabel || 'Notes'} : ${notes}` : '', summary, y);
+    // Previous: if (summary.length || notes) {
+    } else if (summary.length || notes || wordsLeft) {
+      // Previous: const blockHeight = Math.max(summary.length * 5 + 6, notes ? 14 : 0);
+      const blockHeight = Math.max(summary.length * 5 + 6, (notes ? 14 : 0) + (wordsLeft ? 14 : 0));
+      if (y + blockHeight > pageHeight - 15) {
+        doc.addPage();
+        y = 15;
+      }
+      blockEnd = y;
+      const summaryWidth = 80;
+      // Left of the totals: notes.
+      let leftY = y;
+      if (wordsLeft) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text('Total Invoice Amount In Words :', L_MARGIN, leftY + 3);
+        doc.setFont('helvetica', 'normal');
+        const wordLines = doc.splitTextToSize(wordsLeft,pageWidth - L_MARGIN - R_MARGIN - summaryWidth - 10) as string[];
+        doc.text(wordLines, L_MARGIN, leftY + 8);
+        leftY = leftY + 8 + wordLines.length * 4 + 2;
+        blockEnd = Math.max(blockEnd, leftY);
+      }
+      if (notes && document.notesBoxed) {
+        // Customer Receipt: "Narration :" and its text inside a bordered box,
+        // as tall as the totals box beside it (at least), with inner padding.
+        const pad = 2;
+        const boxWidth = pageWidth - L_MARGIN - R_MARGIN - summaryWidth - 10;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text(`${document.notesLabel || 'Notes'} :`, L_MARGIN + pad, leftY + 3 + pad);
+        doc.setFont('helvetica', 'normal');
+        const noteLines = doc.splitTextToSize(notes, boxWidth - pad * 2) as string[];
+        doc.text(noteLines, L_MARGIN + pad, leftY + 8 + pad);
+        const boxHeight = Math.max(10 + pad * 2 + (noteLines.length - 1) * 4, summary.length * 5 + 2);
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(0.2);
+        doc.rect(L_MARGIN, leftY, boxWidth, boxHeight);
+        blockEnd = Math.max(blockEnd, leftY + boxHeight);
+      } else if (notes) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        // Previous: doc.text(`${document.notesLabel || 'Notes'} :`, L_MARGIN, y + 3);
+        doc.text(`${document.notesLabel || 'Notes'} :`, L_MARGIN, leftY + 3);
+        doc.setFont('helvetica', 'normal');
+        const noteLines = doc.splitTextToSize(notes, pageWidth - L_MARGIN - R_MARGIN - summaryWidth - 10) as string[];
+        // Previous: doc.text(noteLines, L_MARGIN, y + 8);
+        // Previous: blockEnd = Math.max(blockEnd, y + 8 + noteLines.length * 4);
+        doc.text(noteLines, L_MARGIN, leftY + 8);
+        blockEnd = Math.max(blockEnd, leftY + 8 + noteLines.length * 4);
+      }
+      if (summary.length) {
+        autoTable(doc, {
+          body: summary.map(([label, value]) => [label, value]),
+          theme: 'grid',
+          startY: y,
+          margin: { left: pageWidth - R_MARGIN - summaryWidth, right: R_MARGIN, top: 15, bottom: 15 },
+          tableWidth: summaryWidth,
+          styles: { fontSize: 9, cellPadding: 1 },
+          columnStyles: { 0: { fontStyle: 'bold' }, 1: { halign: 'right' } },
+          didParseCell: data => {
+            if (data.row.index === summary.length - 1) {
+              data.cell.styles.fontStyle = 'bold';
+              data.cell.styles.fontSize = 10;
+            }
+          }
+        });
+        blockEnd = Math.max(blockEnd, (doc as any).lastAutoTable.finalY);
+      }
+    }
+
+    if (wordsBelow && amountInWords) {
+      const label = 'Amount in Words : ';
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      const labelWidth = doc.getTextWidth(label);
+      doc.setFont('helvetica', 'normal');
+      const wordLines = doc.splitTextToSize(amountInWords, pageWidth - L_MARGIN - R_MARGIN - labelWidth) as string[];
+      let wordsY = blockEnd + 6;
+      if (wordsY + wordLines.length * 4 > pageHeight - 15) {
+        doc.addPage();
+        wordsY = 18;
+      }
+      doc.setFont('helvetica', 'bold');
+      doc.text(label, L_MARGIN, wordsY);
+      doc.setFont('helvetica', 'normal');
+      doc.text(wordLines, L_MARGIN + labelWidth, wordsY);
+      blockEnd = wordsY + (wordLines.length - 1) * 4 + 2;
+      y = blockEnd;
+    }
+
+    const terms = document.terms || [];
+    if (terms.length || document.bankDetails) {
+      // Previous: y = blockEnd + 5;
+      y = blockEnd + (document.fitOnePage ? 3 : 5) * s;
+      // Previous: terms + bank box moved to a new page together, which left a
+      // blank gap under the grid (INV-CP-00088). Now the terms follow the
+      // totals directly (continuing line by line onto the next page if
+      // needed); only the bank box moves on when it does not fit itself.
+      // const termsHeight = terms.length ? this.pdfTermsHeight(doc, terms) + 2 : 0;
+      // if (y + termsHeight + (document.bankDetails ? BANK_BOX_HEIGHT * s : 0) > pageHeight - 15) {
+      //   doc.addPage();
+      //   y = 15;
+      // }
+      // Framed page (Sales Invoice): a border-to-border rule right above
+      // "Terms & Conditions :", like the ones under Branch and above the grid.
+      if (terms.length && this.pageFramed && y + (7 + TERMS_LINE_HEIGHT) * s <= pageHeight - 15) {
+        this.drawFullRule(doc, y);
+        y += 2 * s;
+      }
+      if (terms.length) y = this.drawPdfTerms(doc, terms, y) + 2;
+      if (document.bankDetails) this.drawPdfBankBox(doc, document.bankDetails, y);
+    }
+
+    const signatures = joined ? [] : (document.signatures || []);
+    if (signatures.length) {
+      const lastY = summary.length ? (doc as any).lastAutoTable.finalY : y;
+      // Previous: let signY = Math.max(lastY, y) + 25;
+      // signaturesAtBottom: captions in the lower part of the page, ~7 cm above
+      // the page bottom (footer line is at pageHeight - 10); on a new page only
+      // if the content already reaches that area.
+      const bottomSignY = pageHeight - 70;
+      // Keep it on one page: when the content runs past the bottom position the
+      // row moves up to just below the content (room for the receiver box) and
+      // only goes to a new page if it would reach the footer line.
+      // Previous: ? (Math.max(lastY, y) + 20 > bottomSignY ? -1 : bottomSignY)
+      const pulledUpY = Math.max(bottomSignY, Math.max(lastY, y) + 28);
+      let signY = document.signaturesAtBottom
+        ? (pulledUpY > pageHeight - 16 ? -1 : pulledUpY)
+        : Math.max(lastY, y) + 25;
+      if (signY === -1) {
+        doc.addPage();
+        signY = bottomSignY;
+      } else if (!document.signaturesAtBottom && signY > pageHeight - 20) {
+        doc.addPage();
+        signY = 40;
+      }
+      const slot = (pageWidth - L_MARGIN - R_MARGIN) / signatures.length;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      signatures.forEach((caption, index) => {
+        const x = L_MARGIN + slot * index + slot / 2;
+        if (index === signatures.length - 1 && document.signedBy) {
+          doc.setFont('helvetica', 'normal');
+          doc.text(document.signedBy, x, signY - 6, { align: 'center' });
+        }
+        // Previous: doc.text(caption, x, signY, { align: 'center' });  (always normal weight)
+        doc.setFont('helvetica', document.boldSignatures ? 'bold' : 'normal');
+        doc.text(caption, x, signY, { align: 'center' });
+        doc.setFont('helvetica', 'normal');
+        if (index === 0 && document.firstSignatureBoxed) {
+          const boxWidth = Math.min(slot - 4, 50);
+          doc.setDrawColor(0, 0, 0);
+          doc.setLineWidth(0.3);
+          doc.rect(x - boxWidth / 2, signY - 25, boxWidth, 20);
+        }
+      });
+    }
+
+    // Footer on every page — "Printed on: <date>, User: <name>" + "Page N of M".
+    const printedOn = formatDate(new Date(), 'dd-MMM-yyyy h:mm:ss a', 'en-US');
+    const user = this.userName();
+    const totalPages = doc.getNumberOfPages();
+    for (let page = 1; page <= totalPages; page++) {
+      doc.setPage(page);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor('black');
+      doc.setDrawColor(0, 0, 0);
+      // Previous: doc.line(L_MARGIN, pageHeight - 10, pageWidth - R_MARGIN, pageHeight - 10);
+      // pdfPageFrame: a border round the page content instead; its bottom edge
+      // takes the place of the footer rule.
+      if (document.pdfPageFrame) {
+        doc.setLineWidth(0.3);
+        doc.rect(FRAME_INSET, FRAME_INSET - 2, pageWidth - 2 * FRAME_INSET, pageHeight - 10 - (FRAME_INSET - 2));
+        doc.setLineWidth(0.2);
+      } else {
+        doc.line(L_MARGIN, pageHeight - 10, pageWidth - R_MARGIN, pageHeight - 10);
+      }
+      doc.text(`Printed on: ${printedOn}, User: ${user}`, L_MARGIN, pageHeight - 5);
+      doc.text(`Page ${page} of ${totalPages}`, pageWidth - R_MARGIN, pageHeight - 5, { align: 'right' });
+    }
+    return doc;
+  }
+
+  /** The bold segment (boldCellSegments) for this body cell, if any. */
+  private boldSegmentFor(document: InventoryExportDocument, data: any): string {
+    const spec = document.boldCellSegments;
+    if (!spec || data.section !== 'body' || data.column.index !== spec.column) return '';
+    if (data.row.index >= document.rows.length) return '';
+    return String(spec.byRow[data.row.index] ?? '').trim();
+  }
+
+  /** First..last index of the wrapped cell lines that make up `segment`
+   *  (whitespace ignored, since wrapping drops the spaces it breaks on). */
+  private segmentLineRange(lines: string[], segment: string): [number, number] | null {
+    const target = segment.replace(/\s+/g, '');
+    if (!target) return null;
+    for (let from = 0; from < lines.length; from++) {
+      let joined = '';
+      for (let to = from; to < lines.length; to++) {
+        joined += String(lines[to] ?? '').replace(/\s+/g, '');
+        if (joined === target) return [from, to];
+        if (!target.startsWith(joined)) break;
+      }
+    }
+    return null;
+  }
+
+  // Two header rows for a grouped grid: a group spanning several columns
+  // prints its title over their own headers (CGST over Rate % | Amount);
+  // a single-column group prints that column's header across both rows.
+  private pdfGroupedHead(columns: string[], groups: Array<[string, number]>): any[][] {
+    const top: any[] = [];
+    const sub: any[] = [];
+    let index = 0;
+    groups.forEach(([title, span]) => {
+      if (span > 1) {
+        top.push({ content: title, colSpan: span });
+        sub.push(...columns.slice(index, index + span));
+      } else {
+        top.push({ content: columns[index] ?? title, rowSpan: 2 });
+      }
+      index += span;
+    });
+    return [top, sub];
+  }
+
+  /** Columns the Total row's first cell covers: itself plus the blanks after it. */
+  private totalRowSpan(totalRow: string[], columnCount: number): number {
+    const next = totalRow.slice(1).findIndex(value => String(value ?? '') !== '');
+    return next < 0 ? Math.max(columnCount, 1) : next + 1;
+  }
+
+  // Ruled box under a tax-invoice grid, as on the old sale invoice report:
+  // "Total Invoice Amount In Words" with the words (and notes) under it on
+  // the left, the tax totals as label | value rows on the right, last bold.
+  // Returns the y below the box.
+  private drawPdfWordsBox(doc: jsPDF, words: string, notes: string, fullSummary: Array<[string, string]>, y: number): number {
+    // Previous Balance / Current Balance are the customer's account position,
+    // not part of this invoice's totals: they are taken out of the totals box
+    // and printed in their own "Account Summary" box under it (right side).
+    const isBalanceRow = (label: string) => /^(previous|current) balance$/i.test(String(label).trim());
+    const summary = fullSummary.filter(([label]) => !isBalanceRow(label));
+    const balanceRows = fullSummary.filter(([label]) => isBalanceRow(label));
+    if (!summary.length) return y;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const width = pageWidth - L_MARGIN - R_MARGIN;
+    const labelWidth = 52;
+    const valueWidth = 32;
+    const s = this.pdfScale;
+    // Previous: const leftText = [words.toUpperCase(), notes].filter(Boolean).join('\n\n');
+    // Printed as the caller passes it (Title Case for Sales Invoice / Return).
+    const leftText = [words, notes].filter(Boolean).join('\n\n');
+    const body: any[][] = summary.map(([label, value], index) => {
+      const cells: any[] = [`${label} :`, value];
+      if (index === 0) cells.unshift({ content: 'Total Invoice Amount In Words', styles: { fontStyle: 'bold', fontSize: 10 * s } });
+      if (index === 1) cells.unshift({ content: leftText, rowSpan: summary.length - 1, styles: { fontSize: 8 * s } });
+      return cells;
+    });
+    // Bold row: Grand Total when there is one (rows such as Previous Balance
+    // can follow it), else the last row.
+    // Previous: const last = summary.length - 1;
+    const grandTotal = summary.findIndex(([label]) => /^grand total$/i.test(String(label).trim()));
+    const last = grandTotal >= 0 ? grandTotal : summary.length - 1;
+    autoTable(doc, {
+      body,
+      theme: 'grid',
+      startY: y,
+      margin: { left: L_MARGIN, right: R_MARGIN, top: 15, bottom: 15 },
+      tableWidth: width,
+      pageBreak: 'avoid',
+      // Previous cellPadding: 1.2 (tightened so the invoice fits one page).
+      styles: { fontSize: 9 * s, cellPadding: 0.9 * s, overflow: 'linebreak', valign: 'top', lineColor: 0, lineWidth: 0.2, textColor: 0 },
+      columnStyles: {
+        0: { cellWidth: width - labelWidth - valueWidth },
+        1: { cellWidth: labelWidth, fontStyle: 'bold' },
+        2: { cellWidth: valueWidth, halign: 'right' }
+      },
+      didParseCell: data => {
+        if (data.row.index === last && data.column.index > 0) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fontSize = 10 * s;
+        }
+      }
+    });
+    // Previous: return (doc as any).lastAutoTable.finalY;
+    const totalsEnd = (doc as any).lastAutoTable.finalY;
+    if (!balanceRows.length) return totalsEnd;
+    // Separate box, small gap below the totals, same width/columns as the
+    // label | value part of the totals box so the two line up.
+    const boxWidth = labelWidth + valueWidth;
+    autoTable(doc, {
+      // Previous: head: [[{ content: 'Account Summary', colSpan: 2 }]], (heading removed 11-20)
+      body: balanceRows.map(([label, value]) => [`${label} :`, value]),
+      theme: 'grid',
+      startY: totalsEnd + 3 * s,
+      margin: { left: pageWidth - R_MARGIN - boxWidth, right: R_MARGIN, top: 15, bottom: 15 },
+      tableWidth: boxWidth,
+      pageBreak: 'avoid',
+      styles: { fontSize: 9 * s, cellPadding: 0.9 * s, overflow: 'linebreak', valign: 'top', lineColor: 0, lineWidth: 0.2, textColor: 0 },
+      columnStyles: {
+        0: { cellWidth: labelWidth, fontStyle: 'bold' },
+        1: { cellWidth: valueWidth, halign: 'right' }
+      },
+      didParseCell: data => {
+        // Current Balance bold, like Grand Total.
+        if (data.section === 'body' && /^current balance/i.test(String(balanceRows[data.row.index]?.[0] ?? '').trim())) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fontSize = 10 * s;
+        }
+      }
+    });
+    return (doc as any).lastAutoTable.finalY;
+  }
+
+  // "Terms & Conditions :" heading + one dot-prefixed line per term, wrapped
+  // to the page width; returns the y below the last line.
+  private drawPdfTerms(doc: jsPDF, terms: string[], y: number): number {
+    const s = this.pdfScale;
+    const lines = this.pdfTermsLines(doc, terms);
+    const bottom = doc.internal.pageSize.getHeight() - 15;
+    // Heading needs room for itself and at least one line, else start fresh.
+    if (y + (7 + TERMS_LINE_HEIGHT) * s > bottom) {
+      doc.addPage();
+      y = 15;
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9 * s);
+    doc.text('Terms & Conditions :', L_MARGIN, y + 3 * s);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8 * s);
+    // Previous: every line drawn on the same page (caller moved the whole
+    // block to a new page first). Now lines continue onto the next page.
+    let lineY = y + 7 * s;
+    lines.forEach(line => {
+      if (lineY > bottom) {
+        doc.addPage();
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8 * s);
+        lineY = 15 + 3 * s;
+      }
+      doc.text(line, L_MARGIN, lineY);
+      lineY += TERMS_LINE_HEIGHT * s;
+    });
+    // Previous: return y + this.pdfTermsHeight(doc, terms);
+    return lineY;
+  }
+
+  private pdfTermsHeight(doc: jsPDF, terms: string[]): number {
+    return (7 + this.pdfTermsLines(doc, terms).length * TERMS_LINE_HEIGHT) * this.pdfScale;
+  }
+
+  private pdfTermsLines(doc: jsPDF, terms: string[]): string[] {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8 * this.pdfScale);
+    // Previous: dot-prefixed (`.${term}`); now numbered 1., 2., …
+    return terms.flatMap((term, i) => doc.splitTextToSize(`${i + 1}. ${term}`, pageWidth - L_MARGIN - R_MARGIN) as string[]);
+  }
+
+  // Boxed footer as on the earlier sale invoice report: Bank Details on the
+  // left, a blank middle column, and "Certified …" / "For <Company>" /
+  // Authorised Signatory on the right.
+  private drawPdfBankBox(doc: jsPDF, bankDetails: Array<[string, string]>, y: number): void {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const width = pageWidth - L_MARGIN - R_MARGIN;
+    const s = this.pdfScale;
+    // Previous: if (y + BANK_BOX_HEIGHT > pageHeight - 15) {
+    // Previous: a fixed 58mm reserve — the box moved to the next page even
+    // when its real height (~48mm) still fit. Now only a minimal check here
+    // (heading row must fit); autoTable's pageBreak: 'avoid' below measures
+    // the real table height and moves it to a new page only if it truly
+    // does not fit (boxTop then follows it).
+    // if (y + BANK_BOX_HEIGHT * s > pageHeight - 15) {
+    if (y + 10 * s > pageHeight - 15) {
+      doc.addPage();
+      y = 15;
+    }
+    const company = String(this.companyDetails()?.companyName || '').trim();
+    // Previous: a blank 2% middle column, which printed as a double line
+    // between Bank Details and Certified; now one single divider.
+    // Previous: "For <Company>" sat in the Account Name row; at 11pt it wraps to
+    // two lines and made that row tall, leaving a gap under Account Name.
+    // Now it spans all the bank rows on the right, so each bank row keeps
+    // its own one-line height.
+    // ...bankDetails.map(([label, value], index) => [`${label} : ${value}`, index === 0 && company ? `For  ${company}` : '']),
+    const body: any[] = [
+      ['Bank Details :', 'Certified that the particulars given above are true and correct'],
+      ...bankDetails.map(([label, value], index) => index === 0
+        ? [`${label} : ${value}`, { content: company ? `For  ${company}` : '', rowSpan: bankDetails.length, styles: { valign: 'top' } }]
+        : [`${label} : ${value}`]),
+      ['', 'Authorised Signatory']
+    ];
+    const lastRow = body.length - 1;
+    // Where the table really starts: if it still moves to a new page, the
+    // outline must be drawn there, not at the y it was given.
+    let boxTop = y;
+    // Previous: [0.36, 0.2, 0.44] — "Account Name : <company>" wrapped onto two
+    // lines; the blank middle column gives up its width so it stays on one.
+    // Previous: [width * 0.54, width * 0.02, width * 0.44] (blank middle column).
+    // Previous: [width * 0.56, width * 0.44] — divider moved left so the
+    // Certified / For <Company> side is wider.
+    const widths = [width * 0.5, width * 0.5];
+    autoTable(doc, {
+      body,
+      theme: 'plain',
+      startY: y,
+      margin: { left: L_MARGIN, right: R_MARGIN, top: 15, bottom: 15 },
+      tableWidth: width,
+      pageBreak: 'avoid',
+      // Previous: styles: { fontSize: 9, fontStyle: 'bold', cellPadding: { top: 1.5, bottom: 1.5, left: 2, right: 2 }, overflow: 'linebreak' },
+      styles: { fontSize: 9 * s, fontStyle: 'bold', cellPadding: { top: 1.2 * s, bottom: 1.2 * s, left: 2, right: 2 }, overflow: 'linebreak' },
+      columnStyles: { 0: { cellWidth: widths[0] }, 1: { cellWidth: widths[1] } },
+      didParseCell: data => {
+        if (data.row.index === 0 && data.column.index === 0) data.cell.styles.fontSize = 10 * s;
+        if (data.row.index === 0 && data.column.index === 1) data.cell.styles.fontSize = 8 * s;
+        if (data.row.index === 1 && data.column.index === 1) data.cell.styles.fontSize = 11 * s;
+        if (data.row.index === lastRow) {
+          data.cell.styles.minCellHeight = 14 * s;
+          data.cell.styles.valign = 'bottom';
+          if (data.column.index === 1) {
+            data.cell.styles.halign = 'center';
+            data.cell.styles.fontSize = 10 * s;
+          }
+        }
+      },
+      didDrawCell: data => {
+        const { x, y: cellY, width: cellWidth, height } = data.cell;
+        if (data.row.index === 0 && data.column.index === 0) boxTop = cellY;
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(0.2);
+        // Rule under "Certified …" and above "Authorised Signatory".
+        if (data.row.index === 0 && data.column.index === 1) doc.line(x, cellY + height, x + cellWidth, cellY + height);
+        // Previous: rule at height - 7.
+        if (data.row.index === lastRow && data.column.index === 1) doc.line(x, cellY + height - 7 * s, x + cellWidth, cellY + height - 7 * s);
+      }
+    });
+    const end = (doc as any).lastAutoTable.finalY;
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.2);
+    // Previous: drawn from y, which was the old page's position after a break.
+    doc.rect(L_MARGIN, boxTop, width, end - boxTop);
+    doc.line(L_MARGIN + widths[0], boxTop, L_MARGIN + widths[0], end);
+    // Previous: second divider at widths[0] + widths[1] (the double line).
+  }
+
+    // Point 7: one bordered block joined directly under the items table:
+  // left = "Total Invoice Amount In Words" (+ notes), right = the totals.
+  private drawPdfJoinedTotals(doc: jsPDF, document: InventoryExportDocument, startY: number): number {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const width = pageWidth - L_MARGIN - R_MARGIN;
+    const leftWidth = width * 0.55;
+    const labelWidth = width * 0.27;
+    const valueWidth = width - leftWidth - labelWidth;
+    const summary = document.summary || [];
+    const words = String(document.amountInWords || '').trim();
+    const notes = String(document.notes || '').trim();
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    const wordLines = words ? doc.splitTextToSize(words, leftWidth - 4) as string[] : [];
+    const noteLines = notes ? doc.splitTextToSize(notes, leftWidth - 4) as string[] : [];
+    const leftHeight = 4 + (words ? 5 + wordLines.length * 4 : 0) + (notes ? 6 + noteLines.length * 4 : 0) + 2;
+
+    const rows: Array<[string, string]> = summary.length ? summary : [['', '']];
+    const body: any[] = rows.map(([label, value], index) => index === 0
+      ? [{ content: '', rowSpan: rows.length, styles: { minCellHeight: leftHeight } }, label, value]
+      : [label, value]);
+
+    autoTable(doc, {
+      body,
+      theme: 'grid',
+      startY,
+      pageBreak: 'avoid',
+      margin: { left: L_MARGIN, right: R_MARGIN, top: 15, bottom: 15 },
+      tableWidth: width,
+      styles: { fontSize: 9, cellPadding: 1.2, textColor: 0, valign: 'middle' },
+      columnStyles: {
+        0: { cellWidth: leftWidth },
+        1: { cellWidth: labelWidth, fontStyle: 'bold' },
+        2: { cellWidth: valueWidth, halign: 'right' }
+      },
+      didParseCell: data => {
+        // Last line (Grand Total) bold and slightly bigger, as before.
+        if (summary.length && data.row.index === summary.length - 1 && data.column.index > 0) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fontSize = 10;
+        }
+      },
+      didDrawCell: data => {
+        if (data.row.index !== 0 || data.column.index !== 0) return;
+        const x = data.cell.x + 2;
+        let ty = data.cell.y + 4.5;
+        doc.setTextColor(0);
+        doc.setFontSize(9);
+        if (words) {
+          doc.setFont('helvetica', 'bold');
+          doc.text('Total Invoice Amount In Words :', x, ty);
+          doc.setFont('helvetica', 'normal');
+          doc.text(wordLines, x, ty + 5);
+          ty += 5 + wordLines.length * 4 + 2;
+        }
+        if (notes) {
+          doc.setFont('helvetica', 'bold');
+          doc.text(`${document.notesLabel || 'Notes'} :`, x, ty + 1);
+          doc.setFont('helvetica', 'normal');
+          doc.text(noteLines, x, ty + 6);
+        }
+      }
+    });
+    return (doc as any).lastAutoTable.finalY;
+  }
+
+  // Point 6: the old-invoice signature row:
+  // [ empty ] [ Common Seal ] [ Certified … / For <Company> / Authorised Signatory ]
+  private drawPdfSignatureRow(doc: jsPDF, startY: number): void {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const width = pageWidth - L_MARGIN - R_MARGIN;
+    let y = startY;
+    if (y + SIGNATURE_ROW_HEIGHT > pageHeight - 15) {
+      doc.addPage();
+      y = 15;
+    }
+    const w1 = width * 0.25;
+    const w2 = width * 0.25;
+    const w3 = width - w1 - w2;
+    const x2 = L_MARGIN + w1;
+    const x3 = x2 + w2;
+    const bottom = y + SIGNATURE_ROW_HEIGHT;
+    const company = String(this.companyDetails()?.companyName || '').trim();
+
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.2);
+    doc.setTextColor(0);
+    doc.rect(L_MARGIN, y, width, SIGNATURE_ROW_HEIGHT);
+    doc.line(x2, y, x2, bottom);
+    doc.line(x3, y, x3, bottom);
+
+    // Middle box: Common Seal
+    doc.line(x2, bottom - 7, x3, bottom - 7);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('Common Seal', x2 + w2 / 2, bottom - 2.5, { align: 'center' });
+
+    // Right box: Certified … / For <Company> / Authorised Signatory
+    doc.setFontSize(8);
+    doc.text('Certified that the particulars given above are true and correct', x3 + 2, y + 4.5, { maxWidth: w3 - 4 });
+    doc.line(x3, y + 6.5, x3 + w3, y + 6.5);
+    if (company) {
+      // Previous: 9.5pt at y + 11.5, rule at y + 13.5 — now 11pt like the Sales Invoice.
+      doc.setFontSize(11);
+      doc.text(`For ${company}`, x3 + 2, y + 12, { maxWidth: w3 - 4 });
+      doc.line(x3, y + 14.5, x3 + w3, y + 14.5);
+    }
+    doc.line(x3, bottom - 7, x3 + w3, bottom - 7);
+    doc.setFontSize(10);
+    doc.text('Authorised Signatory', x3 + w3 / 2, bottom - 2.5, { align: 'center' });
+  }
+
+
+  private printDoc(doc: jsPDF): void {
+    // Earlier print frames are dropped only after a delay: an SI + DC posted
+    // together print back to back, and removing the first frame immediately
+    // would cancel its print dialog.
+    document.querySelectorAll('iframe.inventory-print-frame').forEach(frame => {
+      if (Date.now() - Number((frame as HTMLElement).dataset['created'] || 0) > 60000) frame.remove();
+    });
+    const iframe = document.createElement('iframe');
+    iframe.className = 'inventory-print-frame';
+    iframe.dataset['created'] = String(Date.now());
+    iframe.setAttribute('style', 'display: none;');
+    iframe.onload = () => iframe.contentWindow?.print();
+    iframe.src = String(doc.output('bloburl'));
+    document.body.appendChild(iframe);
+  }
+
+  /** Amount in Indian words, rounded to the nearest rupee, e.g. 147956.66 ->
+   *  "Rupees One Lakh Forty Seven Thousand Nine Hundred Fifty Seven Only". */
+  amountInWords(amount: number | undefined): string {
+    const rupees = Math.round(Math.abs(Number(amount || 0)));
+    return `Rupees ${rupees ? this.indianWords(rupees) : 'Zero'} Only`;
+  }
+
+  private indianWords(num: number): string {
+    const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+      'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+    const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+    const belowThousand = (n: number): string => {
+      const parts: string[] = [];
+      if (n >= 100) { parts.push(`${ones[Math.floor(n / 100)]} Hundred`); n %= 100; }
+      if (n >= 20) { parts.push(tens[Math.floor(n / 10)]); n %= 10; }
+      if (n > 0) parts.push(ones[n]);
+      return parts.join(' ');
+    };
+    const parts: string[] = [];
+    const crore = Math.floor(num / 10000000);
+    // Crores above 999 read as "One Thousand Crore" etc.
+    if (crore) parts.push(`${this.indianWords(crore)} Crore`);
+    num %= 10000000;
+    const lakh = Math.floor(num / 100000);
+    if (lakh) parts.push(`${belowThousand(lakh)} Lakh`);
+    num %= 100000;
+    const thousand = Math.floor(num / 1000);
+    if (thousand) parts.push(`${belowThousand(thousand)} Thousand`);
+    num %= 1000;
+    if (num) parts.push(belowThousand(num));
+    return parts.join(' ');
+  }
+
+  private filledFields(document: InventoryExportDocument): Array<[string, string]> {
+    return (document.fields || [])
+      .filter(([label, value]) => !!label && String(value ?? '').trim() !== '')
+      .map(([label, value]) => [label, String(value)]);
+  }
+
+  private numericColumns(columns: string[], rows: string[][]): number[] {
+    return columns
+      .map((header, index) => ({ header, index }))
+      .filter(({ header, index }) => {
+        if (header.trim() === '#' || CODE_HEADER.test(header)) return false;
+        const values = rows.map(row => String(row[index] ?? '').trim()).filter(v => v && v !== '-');
+        return values.length > 0 && values.every(v => NUMERIC_CELL.test(v));
+      })
+      .map(({ index }) => index);
+  }
+
+  companyDetails(): any {
+    try {
+      const raw = sessionStorage.getItem('CompanyDetails');
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return (Array.isArray(parsed) ? parsed[0] : parsed) || {};
+    } catch {
+      return {};
+    }
+  }
+
+  private cinGstLine(company: any): string {
+    const parts: string[] = [];
+    if (company?.cinNumber) parts.push(`CIN : ${company.cinNumber}`);
+    if (company?.gstNumber) parts.push(`GST NO : ${company.gstNumber}`);
+    // Previous: PAN pushed here too and everything joined with '   '.
+    // Now "CIN : xxx | GST NO : yyy" like the PDF letterhead (2026-11-24).
+    const line = parts.join(' | ');
+    return company?.panNumber ? [line, `PAN : ${company.panNumber}`].filter(Boolean).join('   ') : line;
+  }
+
+  userName(): string {
+    const read = (key: string) => {
+      try { return JSON.parse(sessionStorage.getItem(key) || '{}') || {}; } catch { return {}; }
+    };
+    const authUser = read('authUser');
+    const currentUser = read('currentUser');
+    // Previous: return String(authUser.fullName || currentUser.pEmployeeName || sessionStorage.getItem('username') || '');
+    // Auto-created logins store a placeholder as full_name -- the branch name
+    // (branch logins) or "{CompanyName} Admin" (company registration without
+    // the admin's first/last name; the company may not be the one switched
+    // to now). For those the login's username is printed instead.
+    const norm = (s: unknown) => String(s || '').trim().toLowerCase();
+    const company = read('authCompany');
+    let branches: Array<{ branchName?: string }> = [];
+    try { branches = JSON.parse(sessionStorage.getItem('authBranches') || '[]') || []; } catch { branches = []; }
+    const fullName = norm(authUser.fullName);
+    const isOrgName = !!fullName &&
+      (fullName === norm(company.companyName) || fullName.endsWith(' admin') ||
+        branches.some(b => norm(b?.branchName) === fullName));
+    const username = authUser.username || sessionStorage.getItem('username');
+    return String((isOrgName ? username : authUser.fullName) || currentUser.pEmployeeName || username || '');
+  }
+
+  private imageFormat(dataUrl: string): string {
+    const match = /^data:image\/(png|jpe?g|webp)/i.exec(dataUrl);
+    if (!match) return 'JPEG';
+    const type = match[1].toUpperCase();
+    return type === 'JPG' ? 'JPEG' : type;
+  }
+
+  // Fits the logo inside maxWidth x maxHeight keeping its proportions, so a
+  // square logo still prints 20x20 and a wide one (emblem + company name,
+  // e.g. ACE TECH) prints wide instead of being squashed into a square.
+  private logoSize(logo: string, maxWidth: number, maxHeight: number): { width: number; height: number } {
+    try {
+      const { width, height } = new jsPDF().getImageProperties(logo);
+      if (width > 0 && height > 0) {
+        const scale = Math.min(maxWidth / width, maxHeight / height);
+        return { width: width * scale, height: height * scale };
+      }
+    } catch {
+      // Unknown size: fall back to the old square box.
+    }
+    return { width: maxHeight, height: maxHeight };
+  }
+
+  private fileSafeName(value: string): string {
+    return String(value || 'Inventory').replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 100) || 'Inventory';
+  }
+}

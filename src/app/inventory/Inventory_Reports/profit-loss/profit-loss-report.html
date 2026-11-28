@@ -1,0 +1,109 @@
+<div class="module-page inventory-page inventory-report-page inventory-generic-report-page pl-page">
+  <div class="inventory-shell">
+    <div class="inventory-report-header-card">
+      <div class="inventory-header inventory-report-header">
+        <div class="inventory-report-header-top-filters">
+          <div class="inventory-report-filter inventory-report-filter--date inventory-report-filter--date-single">
+            <label title="From Date"><i class="pi pi-calendar-plus"></i> From Date</label>
+            <div class="inventory-date-wrap">
+              <p-datepicker [ngModel]="fromDate()" (ngModelChange)="setFromDate($event)" [ngModelOptions]="{ standalone: true }" [maxDate]="toDate()" dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY" [readonlyInput]="true" [showIcon]="false" appendTo="body" styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100"></p-datepicker>
+              <i class="pi pi-calendar inventory-date-icon"></i>
+            </div>
+          </div>
+          <div class="inventory-report-filter inventory-report-filter--date inventory-report-filter--date-single">
+            <label title="To Date"><i class="pi pi-calendar-minus"></i> To Date</label>
+            <div class="inventory-date-wrap">
+              <p-datepicker [ngModel]="toDate()" (ngModelChange)="setToDate($event)" [ngModelOptions]="{ standalone: true }" [minDate]="fromDate()" [maxDate]="todayDate" dateFormat="dd-M-yy" placeholder="DD-MMM-YYYY" [readonlyInput]="true" [showIcon]="false" appendTo="body" styleClass="w-100" inputStyleClass="erp-input inventory-date-input w-100"></p-datepicker>
+              <i class="pi pi-calendar inventory-date-icon"></i>
+            </div>
+          </div>
+          <div class="inventory-report-filter pl-type-filter">
+            <label title="Report Type"><i class="pi pi-list"></i> Report Type</label>
+            <ng-select class="erp-ng-select inventory-ng-select" appendTo="body" [items]="reportTypeOptions" bindLabel="label" bindValue="value" [clearable]="false" [searchable]="false" [ngModel]="reportType()" (ngModelChange)="setReportType($event)"></ng-select>
+          </div>
+          <!-- Empty label above the buttons so they line up with the filter boxes, not their labels. -->
+          <div class="inventory-report-filter pl-actions">
+            <label class="pl-actions-spacer" aria-hidden="true">&nbsp;</label>
+            <div class="pl-actions-buttons">
+              <button type="button" class="erp-btn btn-primary btn-sm inventory-report-generate-btn" title="Generate" (click)="generate()"><i class="pi pi-search"></i> Generate</button>
+              <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Reset filters" (click)="resetFilters()"><i class="pi pi-refresh"></i></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <section class="inventory-section inventory-report-section">
+      <div class="inventory-report-grid-bar">
+        <div class="inventory-report-grid-messages">
+          @if (errorMessage()) {
+            <div class="inventory-report-message error"><i class="pi pi-exclamation-triangle"></i> {{ errorMessage() }}</div>
+          } @else if (report()?.message) {
+            <div class="inventory-report-message info"><i class="pi pi-info-circle"></i> {{ report()?.message }}</div>
+          }
+        </div>
+        <div class="inventory-report-grid-actions">
+          <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Export Excel" [disabled]="!hasData()" (click)="exportExcel()"><i class="pi pi-file-excel"></i></button>
+          <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Export PDF" [disabled]="!hasData()" (click)="exportPdf()"><i class="pi pi-file-pdf"></i></button>
+          <button type="button" class="erp-btn btn-white btn-icon btn-sm" title="Print" [disabled]="!hasData()" (click)="printReport()"><i class="pi pi-print"></i></button>
+        </div>
+      </div>
+
+      @if (report()) {
+        <div class="pl-heading">
+          <div class="pl-heading-company">{{ companyName() }}</div>
+          <div class="pl-heading-title">{{ reportTitle() }}</div>
+          <div class="pl-heading-meta">
+            <span>{{ periodText() }}</span>
+            @if (branchName()) { <span>{{ branchName() }}</span> }
+          </div>
+        </div>
+      }
+
+      @if (unmapped().length) {
+        <div class="inventory-report-message error pl-unmapped">
+          <i class="pi pi-exclamation-triangle"></i>
+          These ledgers are not under Assets / Liabilities / Income / Expenses in the chart of accounts, so they are left out of this report:
+          @for (item of unmapped(); track item.head; let last = $last) {
+            <strong>{{ item.head }}</strong> ({{ formatUnmapped(item.amount) }}){{ last ? '' : ',' }}
+          }
+        </div>
+      }
+
+      <div class="tbl-wrap pl-wrap">
+        @if (loading()) {
+          <div class="text-center p-4"><i class="pi pi-spin pi-spinner"></i> Loading report data...</div>
+        } @else if (report() && !hasData()) {
+          <div class="text-center p-4">No transactions found for the selected dates.</div>
+        } @else {
+          <table class="erp-table compact pl-table">
+            @for (block of blocks(); track $index) {
+              <thead>
+                <tr>
+                  <th class="pl-head-label">{{ block.leftTitle }}</th>
+                  @for (col of columns(); track col.key) { <th class="pl-num">{{ col.label }}</th> }
+                  <th class="pl-head-label pl-side-split">{{ block.rightTitle }}</th>
+                  @for (col of columns(); track col.key) { <th class="pl-num">{{ col.label }}</th> }
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of block.rows; track $index) {
+                  <tr>
+                    <td class="pl-label" [class]="'pl-' + row.left.kind">{{ row.left.label }}</td>
+                    @for (col of columns(); track col.key) {
+                      <td class="pl-num" [class]="'pl-' + row.left.kind">{{ formatAmount(row.left, col.key) }}</td>
+                    }
+                    <td class="pl-label pl-side-split" [class]="'pl-' + row.right.kind">{{ row.right.label }}</td>
+                    @for (col of columns(); track col.key) {
+                      <td class="pl-num" [class]="'pl-' + row.right.kind">{{ formatAmount(row.right, col.key) }}</td>
+                    }
+                  </tr>
+                }
+              </tbody>
+            }
+          </table>
+        }
+      </div>
+    </section>
+  </div>
+</div>

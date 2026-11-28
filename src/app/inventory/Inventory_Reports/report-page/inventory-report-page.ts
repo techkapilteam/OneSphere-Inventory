@@ -1,4 +1,4 @@
-import { CommonModule } from '@angular/common';
+import { CommonModule, formatDate } from '@angular/common';
 import { Component, OnInit, OnDestroy, computed, inject, signal, DestroyRef, ViewChild, ElementRef } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterModule } from '@angular/router';
@@ -26,6 +26,7 @@ import {
 } from '../shared/inventory-report.registry';
 import { InventoryReportsService } from '../shared/inventory-reports.service';
 import { InventoryConfigService } from '../../Inventory_Shared/inventory-config.service';
+import { InventoryExportDocument, InventoryExportService } from '../../Inventory_Shared/inventory-export.service';
 import { StatCardComponent } from '../../Inventory_Shared/stat-card/stat-card.component';
 
 interface BranchWarehouseOption {
@@ -57,6 +58,7 @@ export class InventoryReportPageComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly reportsService = inject(InventoryReportsService);
   private readonly configService = inject(InventoryConfigService);
+  private readonly exportService = inject(InventoryExportService);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly pageSizes = [10, 25, 50, 100];
@@ -198,10 +200,15 @@ export class InventoryReportPageComponent implements OnInit {
     ...this.report().columns.map(column => ({ label: `Group by ${column.label}`, value: column.key }))
   ]);
 
+  // Filters with no real master/API source (their options were only hardcoded
+  // demo names) are not shown -- no static data in any Inventory report.
+  private static readonly NO_REAL_SOURCE_FILTERS = new Set<InventoryReportFilterKey>(['project', 'department', 'createdBy', 'approvedBy']);
+
   readonly filterDefinitions = computed(() => {
     const allowed = new Set<InventoryReportFilterKey>(this.report().filters);
     const dynamic = this.masterOptions();
-    return INVENTORY_COMMON_REPORT_FILTERS.filter(filter => allowed.has(filter.key))
+    return INVENTORY_COMMON_REPORT_FILTERS
+      .filter(filter => allowed.has(filter.key) && !InventoryReportPageComponent.NO_REAL_SOURCE_FILTERS.has(filter.key))
       .map(filter => dynamic[filter.key] ? { ...filter, options: dynamic[filter.key] } : filter);
   });
 
@@ -285,6 +292,65 @@ export class InventoryReportPageComponent implements OnInit {
     return allowed.has('fromDate') || allowed.has('toDate');
   });
 
+  // Stock Summary shows From Date / To Date as two separate pickers instead of
+  // the single range picker; both still write the same fromDate/toDate filters.
+  // Collection Report uses the same separate From Date / To Date pickers (user request).
+  // Sale / Purchase Invoice Register also use separate From Date / To Date pickers (user request 2026-11-21).
+  // Previous: readonly separateFromToDates = computed(() => this.report().key === 'stockSummary');
+  // Previous: readonly separateFromToDates = computed(() => ['stockSummary', 'collectionReport'].includes(this.report().key));
+  // Previous: readonly separateFromToDates = computed(() =>
+  //   ['stockSummary', 'collectionReport', 'salesInvoiceRegister', 'purchaseInvoiceRegister'].includes(this.report().key)
+  // );
+  // All inventory reports now use separate From Date / To Date pickers instead of the range picker (user request 2026-11-21).
+  readonly separateFromToDates = computed(() => true);
+  // Dues List: "As On" checkbox (user request 2026-11-24). Ticked = one "As On"
+  // date only (From Date hidden and not sent - all invoices up to that date);
+  // unticked = From Date + To Date.
+  // Previous: readonly asOnToggleAvailable = computed(() => this.report().key === 'duesList');
+  // Product-wise Dues List (313) gets the same As On checkbox.
+  // Previous: readonly asOnToggleAvailable = computed(() => ['duesList', 'productwiseDues'].includes(this.report().key));
+  // Vendor Wise Dues List gets the same As On checkbox (user 2026-11-26, SP 317).
+  readonly asOnToggleAvailable = computed(() => ['duesList', 'productwiseDues', 'vendorDues'].includes(this.report().key));
+  readonly asOnMode = signal(true);
+  // Default state of the As On checkbox per report: Dues List starts ticked;
+  // Product-wise Dues List starts unticked = From Date + To Date (user 2026-11-24).
+  private asOnDefault(): boolean {
+    return this.report().key !== 'productwiseDues';
+  }
+  // Each picker only shows when the report declares that filter (e.g. Dues List has To Date only).
+  // Previous: readonly hasFromDateFilter = computed(() => this.report().filters.includes('fromDate'));
+  readonly hasFromDateFilter = computed(() =>
+    this.report().filters.includes('fromDate') && !(this.asOnToggleAvailable() && this.asOnMode())
+  );
+  readonly hasToDateFilter = computed(() => this.report().filters.includes('toDate'));
+  // Vendor Dues only: its To Date is an "as on" date - label it "As On" (user request).
+  // Previous: readonly toDateLabel = computed(() => this.report().key === 'vendorDues' ? 'As On' : 'To Date');
+  // Previous: readonly toDateLabel = computed(() =>
+  //   this.report().key === 'vendorDues' || (this.asOnToggleAvailable() && this.asOnMode()) ? 'As On' : 'To Date'
+  // );
+  // Vendor Dues now follows the As On checkbox like the Dues List.
+  readonly toDateLabel = computed(() =>
+    this.asOnToggleAvailable() && this.asOnMode() ? 'As On' : 'To Date'
+  );
+
+  setAsOnMode(checked: boolean): void {
+    this.asOnMode.set(checked);
+    // Ticking "As On" always binds today's date (user 2026-11-24), so a date
+    // picked earlier in From/To mode is not carried over.
+    if (checked) {
+      const now = new Date();
+      this.updateFilter('toDate', new Date(now.getFullYear(), now.getMonth(), now.getDate()));
+    }
+  }
+
+  // Stock Summary's location filter is "Branch" only — no warehouses listed.
+  readonly branchOnlyLocation = computed(() => this.report().key === 'stockSummary');
+
+  // Upper limit for the To Date picker (no future dates).
+  // Previous: readonly todayDate = new Date();
+  // End of today, so any time today passes PrimeNG's maxDate check (user 2026-11-27).
+  readonly todayDate = (() => { const d = new Date(); d.setHours(23, 59, 59, 999); return d; })();
+
   readonly activeLocationOption = computed<BranchWarehouseOption | null>(() => {
     const scope = this.reportLocationScope();
     if (scope.warehouseId) {
@@ -306,14 +372,18 @@ export class InventoryReportPageComponent implements OnInit {
 
   readonly branchWarehouseLocked = computed(() => !this.reportLocationScope().isCompanyAdmin && !!this.activeLocationOption());
   readonly branchWarehousePlaceholder = computed(() =>
-    this.branchWarehouseLocked() ? 'Current branch / warehouse' : 'All branches / warehouses'
+    // Previous: this.branchWarehouseLocked() ? 'Current branch / warehouse' : 'All branches / warehouses'
+    this.branchOnlyLocation()
+      ? (this.branchWarehouseLocked() ? 'Current branch' : 'All branches')
+      : (this.branchWarehouseLocked() ? 'Current branch / warehouse' : 'All branches / warehouses')
   );
 
   readonly branchWarehouseCaption = computed(() => {
     const active = this.activeLocationOption();
     if (this.branchWarehouseLocked() && active) return `${active.group}: ${active.label}`;
     const selected = this.branchWarehouseSelected().length;
-    return selected ? `${selected} selected` : 'All branches and warehouses';
+    // Previous: return selected ? `${selected} selected` : 'All branches and warehouses';
+    return selected ? `${selected} selected` : (this.branchOnlyLocation() ? 'All branches' : 'All branches and warehouses');
   });
 
   // Branch and Warehouse are both "where" filters, so they're offered as one
@@ -323,9 +393,12 @@ export class InventoryReportPageComponent implements OnInit {
     const dynamic = this.masterOptions();
     const branches = (dynamic.branchId ?? []).map(label => ({ label, key: 'branchId' as const, group: 'Branch' }));
     const warehouses = (dynamic.warehouseId ?? []).map(label => ({ label, key: 'warehouseId' as const, group: 'Warehouse' }));
-    const options = [...branches, ...warehouses];
+    // Previous: const options = [...branches, ...warehouses];
+    const options = this.branchOnlyLocation() ? branches : [...branches, ...warehouses];
     const active = this.activeLocationOption();
-    if (active && !options.some(option => option.key === active.key && option.label === active.label)) {
+    // Previous: if (active && !options.some(option => option.key === active.key && option.label === active.label)) {
+    if (active && !(this.branchOnlyLocation() && active.key === 'warehouseId')
+        && !options.some(option => option.key === active.key && option.label === active.label)) {
       return [active, ...options];
     }
     return options;
@@ -417,7 +490,7 @@ export class InventoryReportPageComponent implements OnInit {
     const summary = this.summary();
     return (this.report().summaryCards ?? []).map(card => ({
       ...card,
-      value: this.formatSummaryValue(summary[card.valueKey], card.fallback)
+      value: this.formatSummaryValue(summary[card.valueKey])
     }));
   });
 
@@ -501,6 +574,8 @@ export class InventoryReportPageComponent implements OnInit {
 
   resetFilters(generate = true): void {
     this.filters.set(this.defaultFilters());
+    // Previous: this.asOnMode.set(true);
+    this.asOnMode.set(this.asOnDefault());
     this.searchText.set('');
     this.page.set(1);
     if (generate) this.generateReport(false);
@@ -615,102 +690,193 @@ export class InventoryReportPageComponent implements OnInit {
     }));
   }
 
-  async exportExcel(): Promise<void> {
-    // xlsx and file-saver are both CommonJS packages -- depending on the
-    // build's CJS/ESM interop, a dynamic import() can land the real exports
-    // either at the top level or nested under .default. Unwrapping
-    // defensively (rather than destructuring one shape outright) avoids a
-    // silent "X is not a function" if the bundler picks the other one.
-    const [xlsxModule, fileSaverModule] = await Promise.all([
-      import('xlsx'),
-      import('file-saver')
-    ]);
-    const XLSX: typeof import('xlsx') = (xlsxModule as any).default ?? xlsxModule;
-    const saveAs: typeof import('file-saver').saveAs =
-      (fileSaverModule as any).saveAs ?? (fileSaverModule as any).default?.saveAs ?? (fileSaverModule as any).default;
-
-    const exportRows = this.exportRows();
-    const worksheet = XLSX.utils.json_to_sheet(exportRows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Report');
-    const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-    saveAs(new Blob([excelBuffer], { type: 'application/octet-stream' }), `${this.report().slug}.xlsx`);
+  // Print / PDF / Excel use the same Accounts-style output as every other
+  // Inventory screen (company letterhead, #0b4093 grid, printed-on footer).
+  exportExcel(): void {
+    this.exportService.excel(this.exportDocument());
   }
 
-  async exportPdf(): Promise<void> {
-    const [jsPdfModule] = await Promise.all([
-      import('jspdf'),
-      // jspdf-autotable's package.json "exports" map points its default
-      // condition at the UMD "plugin" build (dist/jspdf.plugin.autotable.js,
-      // not the ESM functional-API build under its /es subpath) -- that
-      // build's whole job is a side effect: it patches an autoTable()
-      // instance method onto jsPDF's own prototype. It doesn't hand back a
-      // standalone `autoTable(doc, opts)` function to call, which is what
-      // the previous version of this code assumed (silently "not a
-      // function" at runtime for exactly that reason).
-      import('jspdf-autotable')
-    ]);
-    const jsPDF: typeof import('jspdf').default = (jsPdfModule as any).default ?? (jsPdfModule as any).jsPDF ?? jsPdfModule;
-    const doc = new jsPDF({ orientation: 'landscape' }) as InstanceType<typeof jsPDF> & {
-      autoTable: (options: Record<string, unknown>) => void;
-    };
-    doc.setFontSize(13);
-    doc.text(this.report().title, 14, 14);
-    doc.setFontSize(9);
-    doc.text(`${this.groupTitle()} / ${this.rowStart()}-${this.rowEnd()} of ${this.totalRecords()}`, 14, 20);
-    doc.autoTable({
-      head: [this.visibleColumns().map(column => column.label)],
-      body: this.sortedRows().map(row => this.visibleColumns().map(column => this.formatCell(row[column.key], column))),
-      startY: 26,
-      styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [12, 74, 110] }
-    });
-    doc.save(`${this.report().slug}.pdf`);
+  exportPdf(): void {
+    this.exportService.pdf(this.exportDocument(), 'Pdf');
   }
 
   printReport(): void {
-    const popup = window.open('', '_blank', 'width=1200,height=760');
-    if (!popup) {
-      this.errorMessage.set('Popup blocked. Please allow popups to print this report.');
-      return;
+    this.exportService.pdf(this.exportDocument(), 'Print');
+  }
+
+  // private exportDocument(): InventoryExportDocument {
+  //   const columns = this.visibleColumns();
+  //   const from = this.filterDateValue('fromDate');
+  //   const to = this.filterDateValue('toDate');
+  //   const pdfDate = (value: Date) => formatDate(value, 'dd-MMM-yyyy', 'en-US');
+  //   const periodText = from && to
+  //     ? `Between: ${pdfDate(from)} And ${pdfDate(to)}`
+  //     : from ? `From: ${pdfDate(from)}` : to ? `As on: ${pdfDate(to)}` : '';
+  //   return {
+  //     title: this.report().title,
+  //     columns: columns.map(column => column.label),
+  //     rows: this.sortedRows().map(row => columns.map(column => this.formatCell(row[column.key], column))),
+  //     periodText,
+  //     fileName: this.report().title
+  //   };
+  // }
+
+    private exportDocument(): InventoryExportDocument {
+    const columns = this.visibleColumns();
+    // Previous: const from = this.filterDateValue('fromDate'); const to = this.filterDateValue('toDate');
+    // Only dates the report has a picker for - Dues List / Vendor Dues have no
+    // From Date, so the hidden default (1st of month) must not print as "Between".
+    const from = this.hasFromDateFilter() ? this.filterDateValue('fromDate') : null;
+    const to = this.hasToDateFilter() ? this.filterDateValue('toDate') : null;
+    const pdfDate = (value: Date) => formatDate(value, 'dd-MMM-yyyy', 'en-US');
+    // Vendor Payments prints "From Date : .. To Date : .." like the old report.
+    const periodText = from && to
+      ? (this.report().key === 'vendorPaymentReport'
+          ? `From Date : ${pdfDate(from)}    To Date : ${pdfDate(to)}`
+          : `Between: ${pdfDate(from)} And ${pdfDate(to)}`)
+      : from ? `From: ${pdfDate(from)}` : to ? `As on: ${pdfDate(to)}` : '';
+
+    // Previous: rows: this.sortedRows().map(row => columns.map(column => this.formatCell(row[column.key], column))),
+    // The export follows the screen's "Group by": a header line per group, its rows,
+    // then a subtotal line (columns marked total), like the on-screen grouping.
+    const rows: string[][] = [];
+    const groupRowIndexes: number[] = [];
+    const groupKey = this.groupBy();
+    const toCells = (row: InventoryReportRow) => columns.map(column => this.formatCell(row[column.key], column));
+
+    // Vendor Dues: old "Vendor Wise Dues List" layout - vendor name alone as the
+    // group heading, blank vendor cell on invoice rows, "Total:" per vendor.
+    // Previous: const vendorDuesLayout = this.report().key === 'vendorDues' && groupKey === 'supplier';
+    // Vendor Payments uses the same vendor-heading layout (old "VENDOR PAYMENTS REPORT").
+    const vendorDuesLayout = ['vendorDues', 'vendorPaymentReport'].includes(this.report().key) && groupKey === 'supplier';
+    if (vendorDuesLayout) {
+      const firstTotalIndex = columns.findIndex(column => column.total);
+      const totalLabelIndex = firstTotalIndex > 0 ? firstTotalIndex - 1 : 0;
+      this.groupedRows().forEach(group => {
+        groupRowIndexes.push(rows.length);
+        rows.push(columns.map((_, index) => index === 0 ? group.label : ''));
+        group.rows.forEach(row => rows.push(columns.map(column => column.key === 'supplier' ? '' : this.formatCell(row[column.key], column))));
+        groupRowIndexes.push(rows.length);
+        rows.push(columns.map((column, index) => {
+          if (index === totalLabelIndex) return 'Total:';
+          if (!column.total) return '';
+          return this.formatCell(group.rows.reduce((acc, row) => acc + this.numberValue(row[column.key]), 0), column);
+        }));
+      });
+    } else if (!groupKey) {
+      this.sortedRows().forEach(row => rows.push(toCells(row)));
+    } else {
+      const groupColumn = this.report().columns.find(column => column.key === groupKey);
+      this.groupedRows().forEach(group => {
+        groupRowIndexes.push(rows.length);
+        rows.push(columns.map((_, index) => index === 0
+          ? `${groupColumn?.label ? groupColumn.label + ': ' : ''}${group.label} (${group.rows.length} rows)`
+          : ''));
+        group.rows.forEach(row => rows.push(toCells(row)));
+        if (columns.some(column => column.total)) {
+          groupRowIndexes.push(rows.length);
+          rows.push(columns.map((column, index) => {
+            if (index === 0) return `Subtotal: ${group.label}`;
+            const sumOf = (key: string) => group.rows.reduce((acc, row) => acc + this.numberValue(row[key]), 0);
+            // Stock Ledger subtotal: Balance Qty = Inward Qty - Outward Qty (user request).
+            if (this.report().key === 'stockLedger' && column.key === 'balanceQty') {
+              return this.formatCell(sumOf('inwardQty') - sumOf('outwardQty'), column);
+            }
+            // Stock Ledger subtotal: Total = Debit - Credit (user request).
+            if (this.report().key === 'stockLedger' && column.key === 'totalValue') {
+              return this.formatCell(sumOf('debitValue') - sumOf('creditValue'), column);
+            }
+            if (!column.total) return '';
+            const sum = sumOf(column.key);
+            return this.formatCell(sum, column);
+          }));
+        }
+      });
     }
 
-    const headers = this.visibleColumns().map(column => `<th>${this.escapeHtml(column.label)}</th>`).join('');
-    const body = this.sortedRows()
-      .map(row => `<tr>${this.visibleColumns().map(column => `<td>${this.escapeHtml(this.formatCell(row[column.key], column))}</td>`).join('')}</tr>`)
-      .join('');
+    // Dues List: Grand Total line after the last group (Total / Received / Due),
+    // same figures as the on-screen footer (user request).
+    // Collection Report gets the same Grand Total line so PDF / Excel totals match the screen.
+    // Previous: if (this.report().key === 'duesList' && rows.length && columns.some(column => column.total)) {
+    // Previous: [..., 'collectionReport', ...] -- Collection Report now ends with its own
+    // Cheque / Cash / JV / Total Collection lines below instead.
+    if (['duesList', 'productwiseDues', 'vendorDues', 'vendorPaymentReport'].includes(this.report().key) && rows.length && columns.some(column => column.total)) {
+      const totals = this.totals();
+      groupRowIndexes.push(rows.length);
+      rows.push(columns.map((column, index) => index === 0 ? 'Grand Total' : (column.total ? totals[column.key] ?? '' : '')));
+    }
 
-    popup.document.write(`
-      <html>
-        <head>
-          <title>${this.escapeHtml(this.report().title)}</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; color: #111827; }
-            h2 { margin: 0 0 4px; font-size: 20px; }
-            p { margin: 0 0 14px; color: #64748b; font-size: 12px; }
-            table { width: 100%; border-collapse: collapse; font-size: 11px; }
-            th, td { border: 1px solid #dbe8f9; padding: 7px; text-align: left; vertical-align: top; }
-            th { background: #f8fafc; color: #334155; }
-          </style>
-        </head>
-        <body>
-          <h2>${this.escapeHtml(this.report().title)}</h2>
-          <p>${this.escapeHtml(this.groupTitle())} / ${this.escapeHtml(String(this.rowStart()))}-${this.escapeHtml(String(this.rowEnd()))} of ${this.escapeHtml(String(this.totalRecords()))}</p>
-          <table><thead><tr>${headers}</tr></thead><tbody>${body}</tbody></table>
-        </body>
-      </html>
-    `);
-    popup.document.close();
-    popup.focus();
-    popup.print();
+    // Collection Report (client format, 2026-11-28): GRAND TOTAL CHEQUE / CASH / JV and
+    // TOTAL COLLECTION under the Received Amount column, from the rows on screen.
+    if (this.report().key === 'collectionReport' && rows.length) {
+      const amountIndex = columns.findIndex(column => column.key === 'receivedAmount');
+      if (amountIndex >= 0) {
+        const labelIndex = amountIndex > 0 ? amountIndex - 1 : 0;
+        const amountColumn = columns[amountIndex];
+        const sumOfMode = (modeType?: string) => this.sortedRows()
+          .filter(row => !modeType || String(row['modeType'] ?? '') === modeType)
+          .reduce((acc, row) => acc + this.numberValue(row['receivedAmount']), 0);
+        const lines: Array<[string, string | undefined]> = [
+          ['GRAND TOTAL CHEQUE:', 'CHEQUE'],
+          ['GRAND TOTAL CASH:', 'CASH'],
+          ['GRAND TOTAL JV:', 'JV'],
+          ['TOTAL COLLECTION', undefined]
+        ];
+        lines.forEach(([label, modeType]) => {
+          groupRowIndexes.push(rows.length);
+          rows.push(columns.map((_, index) => index === labelIndex
+            ? label
+            : index === amountIndex ? this.formatCell(sumOfMode(modeType), amountColumn) : ''));
+        });
+      }
+    }
+
+    // Stock Summary: Grand Total line at the end of PDF / Print / Excel, only for
+    // Stock Value and GST Amount (user request 2026-11-14).
+    if (this.report().key === 'stockSummary' && rows.length) {
+      const grandTotalKeys = ['stockValue', 'gstAmount'];
+      const sumOf = (key: string) => this.sortedRows().reduce((acc, row) => acc + this.numberValue(row[key]), 0);
+      groupRowIndexes.push(rows.length);
+      rows.push(columns.map((column, index) => {
+        if (index === 0) return 'Grand Total';
+        return grandTotalKeys.includes(column.key) ? this.formatCell(sumOf(column.key), column) : '';
+      }));
+    }
+
+
+    const exportTitle = this.report().key === 'vendorDues' ? 'Vendor Dues List' : this.report().title;
+
+    return {
+      title: exportTitle,
+      columns: columns.map(column => column.label),
+      rows,
+      groupRowIndexes,
+      periodText,
+      fileName: exportTitle
+    };
   }
 
   formatCell(value: InventoryReportRow[string], column: InventoryReportColumn): string {
+    // Previous: every empty cell showed '-'. A missing date (e.g. Vendor Invoice
+    // Date not entered on the PI) now stays blank.
+    if ((value === null || value === undefined || value === '') && column.type === 'date') return '';
     if (value === null || value === undefined || value === '') return '-';
     if (column.type === 'currency') return this.formatCurrency(this.numberValue(value));
     if (column.type === 'number') return this.numberValue(value).toLocaleString('en-IN');
     if (column.type === 'percent') return `${this.numberValue(value).toLocaleString('en-IN', { maximumFractionDigits: 2 })}%`;
+    // Previous: date columns fell through to String(value) and printed the raw
+    // API value "2026-11-01". Show DD-MMM-YYYY (01-Nov-2026) like the report header.
+    if (column.type === 'date') return this.formatDisplayDate(value);
     return String(value);
+  }
+
+  private formatDisplayDate(value: InventoryReportRow[string]): string {
+    const text = String(value).trim();
+    // Read the yyyy-MM-dd part directly so a "2026-11-01T00:00:00Z" value is not
+    // shifted a day by the browser timezone.
+    const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(text);
+    const date = iso ? new Date(+iso[1], +iso[2] - 1, +iso[3]) : new Date(text);
+    return isNaN(date.getTime()) ? text : formatDate(date, 'dd-MMM-yyyy', 'en-US');
   }
 
   filterTrack(_: number, filter: InventoryReportFilterDefinition): InventoryReportFilterKey {
@@ -752,7 +918,9 @@ export class InventoryReportPageComponent implements OnInit {
     return InventoryReportPageComponent.FILTER_ICONS[key] ?? 'pi pi-filter';
   }
 
-  private setReport(definition: InventoryReportDefinition): void {
+  // Previous: private setReport(...) - protected so the Purchase Invoice screen
+  // (PurchaseInvoiceReportComponent, extends this page) can load its own definition.
+  protected setReport(definition: InventoryReportDefinition): void {
     this.report.set(definition);
     this.groupBy.set(definition.defaultGroupBy ?? '');
     this.sortColumn.set('');
@@ -761,8 +929,11 @@ export class InventoryReportPageComponent implements OnInit {
     this.showColumnChooser.set(false);
     this.visibleColumnKeys.set(definition.columns.filter(column => column.defaultVisible !== false).map(column => column.key));
     this.filters.set(this.defaultFilters());
+    // Previous: this.asOnMode.set(true);
+    this.asOnMode.set(this.asOnDefault());
     this.page.set(1);
-    this.loadPreview('Preview rows are shown until the API responds.');
+    // No static preview rows -- the grid stays empty until the report is generated.
+    this.clearRows();
   }
 
   private defaultFilters(): InventoryReportFilters {
@@ -776,12 +947,16 @@ export class InventoryReportPageComponent implements OnInit {
       segmentId: singleSegment ? [singleSegment] : [],
       financialYear: [String(context.financialYear || this.currentFinancialYear())],
       fromDate: start,
-      toDate: today,
+      // Previous: toDate: today,
+      // Midnight today: a `new Date()` with the current time is a few ms past
+      // the picker's maxDate, so PrimeNG blanked the To Date box (user 2026-11-27).
+      toDate: this.startOfDay(today),
       status: []
     };
   }
 
-  private apiFilters(): InventoryReportFilters {
+  // Previous: private apiFilters() - protected for PurchaseInvoiceReportComponent.
+  protected apiFilters(): InventoryReportFilters {
     const filters: InventoryReportFilters = { ...this.filters() };
     const idKeys: InventoryReportFilterKey[] = ['segmentId', 'branchId', 'warehouseId', 'productId', 'customerId', 'supplierId'];
     const whereSelectionCount = this.filterValues(filters.branchId).length + this.filterValues(filters.warehouseId).length;
@@ -793,6 +968,9 @@ export class InventoryReportPageComponent implements OnInit {
       }
       filters[key] = this.singleApiIdValue(key, filters[key]);
     });
+
+    // Dues List "As On" mode: no From Date to the API -> all invoices up to As On (310).
+    if (this.report().filters.includes('fromDate') && !this.hasFromDateFilter()) filters.fromDate = '';
 
     this.applyLockedLocationScope(filters);
     return filters;
@@ -835,21 +1013,12 @@ export class InventoryReportPageComponent implements OnInit {
     });
   }
 
-  private loadPreview(message: string): void {
-    this.rows.set(this.report().sampleRows);
+  private clearRows(): void {
+    this.rows.set([]);
     this.summary.set({});
-    this.totalRecords.set(this.report().sampleRows.length);
+    this.totalRecords.set(0);
     this.loadedFromApi.set(false);
-    this.infoMessage.set(message);
-  }
-
-  private exportRows(): Array<Record<string, string>> {
-    return this.sortedRows().map(row =>
-      this.visibleColumns().reduce<Record<string, string>>((record, column) => {
-        record[column.label] = this.formatCell(row[column.key], column);
-        return record;
-      }, {})
-    );
+    this.infoMessage.set('');
   }
 
   private sortValue(value: InventoryReportRow[string], column: InventoryReportColumn | undefined): string | number {
@@ -868,11 +1037,18 @@ export class InventoryReportPageComponent implements OnInit {
   }
 
   private formatCurrency(value: number): string {
-    return `Rs. ${value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+    const amount = value.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+    // Stock Ledger and Dues List show plain amounts, no "Rs." prefix (user request).
+    // Vendor Dues too (plain amounts, like the old Vendor Wise Dues List).
+    // Collection Report too (client format: plain amounts).
+    // Purchase Invoice / Sale Invoice too (client Purchase / Sales Report format: plain amounts).
+    if (['stockLedger', 'duesList', 'productwiseDues', 'vendorDues', 'vendorPaymentReport', 'collectionReport', 'purchaseInvoice', 'saleInvoice'].includes(this.report().key)) return amount;
+    return `Rs. ${amount}`;
   }
 
-  private formatSummaryValue(value: string | number | undefined, fallback: string): string {
-    if (value === null || value === undefined || value === '') return fallback;
+  // No hardcoded fallback figures -- a card without live data shows '-'.
+  private formatSummaryValue(value: string | number | undefined): string {
+    if (value === null || value === undefined || value === '') return '-';
     return typeof value === 'number' ? value.toLocaleString('en-IN') : String(value);
   }
 
@@ -886,19 +1062,18 @@ export class InventoryReportPageComponent implements OnInit {
     return value.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
   }
 
-  private escapeHtml(value: string): string {
-    return value
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
   private matchesActiveFilters(row: InventoryReportRow): boolean {
     const filters = this.filters();
     return Object.entries(filters).every(([key, value]) => {
-      if (key === 'fromDate' || key === 'toDate') return this.matchesDateFilter(row, key as InventoryReportFilterKey, value);
+      // Previous: if (key === 'fromDate' || key === 'toDate') return this.matchesDateFilter(row, key as InventoryReportFilterKey, value);
+      // A date filter the report has no picker for (e.g. hidden From Date = 1st of
+      // month on Dues List / Vendor Dues) must not hide older rows.
+      if (key === 'fromDate' || key === 'toDate') {
+        // Previous: if (!this.report().filters.includes(key)) return true;
+        // Also skips From Date while Dues List is in "As On" mode.
+        if (key === 'fromDate' ? !this.hasFromDateFilter() : !this.hasToDateFilter()) return true;
+        return this.matchesDateFilter(row, key as InventoryReportFilterKey, value);
+      }
       return this.matchesValueFilter(row, key as InventoryReportFilterKey, value);
     });
   }

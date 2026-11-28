@@ -134,6 +134,9 @@ export interface GrnItem {
   batch_no?: string;
   serial_no?: string;
   serial_numbers?: string[] | null;
+  serial_warranty?: any | null;
+  serial_identifiers?: any[] | null;
+  line_identifiers?: any[] | null;
   expiry_date?: string;
   remarks?: string;
 }
@@ -224,6 +227,9 @@ export interface ProductionPlan {
   remarks?: string;
   status: string;
   created_at?: string;
+  producible_qty?: number;
+  produced_so_far?: number;
+  material_cost_per_unit?: number;
   items: ManufacturingMaterialItem[];
 }
 
@@ -254,6 +260,8 @@ export interface ProductionEntryItem extends ManufacturingMaterialItem {
   rejected_qty?: number;
   wastage_qty?: number;
   production_cost?: number;
+  serial_identifiers?: any[] | null;
+  line_identifiers?: any[] | null;
 }
 
 export interface ProductionEntry {
@@ -279,6 +287,78 @@ export interface ProductionEntry {
   status: string;
   created_at?: string;
   items: ProductionEntryItem[];
+}
+
+// UIN Registration (migration 263): one row per serial of a UIN-required product
+export interface UinRegistrationRow {
+  serial_unit_id: number;
+  serial_no: string;
+  product_id: number;
+  product_name: string;
+  product_code?: string | null;
+  category_name?: string | null;
+  branch_id?: number | null;
+  branch_name?: string | null;
+  warehouse_id?: number | null;
+  warehouse_name?: string | null;
+  source_doc_no?: string | null;      // Production Entry number
+  source_doc_date?: string | null;
+  unit_status: string;                // in_stock | reserved | returned | sold
+  uin_number?: string | null;
+  uin_date?: string | null;           // yyyy-MM-dd
+  uin_certificate_no?: string | null;
+  uin_status: 'pending' | 'registered' | 'sold' | string;
+  can_edit: boolean;
+}
+
+export interface UinRegistrationSaveItem {
+  serial_unit_id: number;
+  uin_number: string | null;
+  uin_date: string | null;            // yyyy-MM-dd
+  uin_certificate_no: string | null;
+}
+
+
+// Phase 3 (migration 267): Registration before Sale, any policy
+export interface RegistrationPolicyOption {
+  policy_id: number;
+  policy_name: string;
+  policy_code?: string | null;
+  is_mandatory: boolean;
+  categories?: string | null;
+}
+
+export interface IdentifierRegistrationRow {
+  serial_unit_id: number;
+  serial_no: string;
+  identifier_label?: string | null;   // the unit's own ID policy, e.g. "Drone Serial"
+  product_id: number;
+  product_name: string;
+  product_code?: string | null;
+  category_name?: string | null;
+  branch_id?: number | null;
+  branch_name?: string | null;
+  warehouse_id?: number | null;
+  warehouse_name?: string | null;
+  source_doc_type?: string | null;
+  source_doc_no?: string | null;
+  source_doc_date?: string | null;
+  unit_status: string;
+  policy_id: number;
+  policy_name: string;
+  is_mandatory: boolean;
+  value?: string | null;
+  registration_date?: string | null;  // yyyy-MM-dd
+  reference_no?: string | null;
+  registration_status: 'pending' | 'registered' | 'sold' | string;
+  can_edit: boolean;
+}
+
+export interface IdentifierRegistrationSaveItem {
+  serial_unit_id: number;
+  value: string | null;
+  registration_date: string | null;   // yyyy-MM-dd
+  reference_no: string | null;
 }
 
 export interface ProductionReturn {
@@ -475,6 +555,9 @@ export interface PiItem {
   batch_no?: string;
   serial_no?: string;
   serial_numbers?: string[] | null;
+  serial_warranty?: any | null;          // per-serial warranty (migration 237)
+  serial_identifiers?: any[] | null;     // Phase 2: policy values per unit
+  line_identifiers?: any[] | null;   
   expiry_date?: string;
   amount: number;
   remarks?: string;
@@ -502,6 +585,7 @@ export interface PurchaseInvoice {
   remarks?: string;
   subtotal: number;
   tax_amount: number;
+  transport_charges?: number;
   total_amount: number;
   status: string;
   created_at?: string;
@@ -582,6 +666,9 @@ export interface PurchaseRefDoc {
   status: string;
   remarks?: string;
   items: any[];
+  // migration 300: pending kit materials of Service Bundle lines (Sales Order references)
+  kit_items?: any[];
+  delivery_challans?: any[];
 }
 
 export interface PurchaseReturnItem {
@@ -775,6 +862,9 @@ export interface SerialUnit {
   // (migration 237) — read-only display when selling it, never re-entered.
   manufacturing_date?: string | null;
   warranty_upto?: string | null;
+  // Phase 3 (267): a mandatory Registration before Sale value still missing
+  // (e.g. "UIN"); null = can be sold.
+  missing_registration?: string | null;
 }
 
 export interface SalesReturnItem {
@@ -861,6 +951,95 @@ export interface ServiceBundleConsumption {
   status: string;
   created_at?: string;
   items: ServiceBundleConsumptionItem[];
+}
+
+/** One row of the E-Invoice screen (a Sales Invoice plus its IRN details). */
+export interface EInvoiceRow {
+  invoice_id: number;
+  invoice_no: string;
+  invoice_date: string;
+  customer_name: string;
+  customer_gstin: string;
+  total_amount: number;
+  /** B2B (customer has a GSTIN, e-invoice applies) or B2C. */
+  supply_type: string;
+  customer_address: string;
+  taxable_amount: number;
+  tax_amount: number;
+  invoice_ack_number: string;
+  irn: string;
+  ack_no: string;
+  ack_date: string;
+  signed_qr_code: string;
+  /** generated | failed | cancelled ('' while pending). */
+  einvoice_status: string;
+  error_message: string;
+  items: EInvoiceItem[];
+}
+
+export interface EInvoiceItem {
+  product_name: string;
+  product_code: string;
+  uom_name: string;
+  qty: number;
+  cost_per_item: number;
+  gst_rate: number;
+  taxable_amount: number;
+  tax_amount: number;
+  total_amount: number;
+}
+
+/** GET sales/e-invoices/{id}/print (camelCase, as the API sends it). */
+export interface EInvoicePrintItem {
+  productName: string | null;
+  hsnCode: string | null;
+  qty: number;
+  costPerItem: number;
+  amount: number;
+  cgstRate: number;
+  cgstAmount: number;
+  sgstRate: number;
+  sgstAmount: number;
+  igstRate: number;
+  igstAmount: number;
+  total: number;
+}
+
+export interface EInvoicePrint {
+  invoiceId: number;
+  invoiceNo: string;
+  invoiceDate: string | null;
+  sellerName: string | null;
+  sellerAddress: string | null;
+  sellerPhone: string | null;
+  sellerEmail: string | null;
+  sellerCin: string | null;
+  sellerGstin: string | null;
+  sellerState: string | null;
+  sellerStateCode: string | null;
+  sellerLogo: string | null;
+  irn: string | null;
+  ackNo: string | null;
+  ackDate: string | null;
+  signedQrCode: string | null;
+  customerName: string | null;
+  customerAddress: string | null;
+  customerGstin: string | null;
+  customerState: string | null;
+  customerStateCode: string | null;
+  contactPersonName: string | null;
+  contactMobile: string | null;
+  items: EInvoicePrintItem[];
+  taxableAmount: number;
+  cgstAmount: number;
+  sgstAmount: number;
+  igstAmount: number;
+  taxAmount: number;
+  totalAfterTax: number;
+  discount: number;
+  roundOff: number;
+  grandTotal: number;
+  amountInWords: string;
 }
 
 // ── Service ───────────────────────────────────────────────────────────────────
@@ -1071,6 +1250,10 @@ export class InventoryTransactionsService {
       planned_qty: Number(r?.plannedQty ?? r?.planned_qty ?? 0),
       bom_version: r?.bomVersion || r?.bom_version,
       work_center: r?.workCenter || r?.work_center,
+            // From 262: what the issued material can still make, and its real cost per unit
+      producible_qty: Number(r?.producible_qty ?? r?.producibleQty ?? 0) || 0,
+      produced_so_far: Number(r?.produced_so_far ?? r?.producedSoFar ?? 0) || 0,
+      material_cost_per_unit: Number(r?.material_cost_per_unit ?? r?.materialCostPerUnit ?? 0) || 0,
       branch_id: r?.branchId ?? r?.branch_id,
       branch_name: r?.branchName || r?.branch_name,
       warehouse_id: r?.warehouseId ?? r?.warehouse_id,
@@ -1134,7 +1317,10 @@ export class InventoryTransactionsService {
         produced_qty: Number(i?.producedQty ?? i?.produced_qty ?? 0),
         rejected_qty: Number(i?.rejectedQty ?? i?.rejected_qty ?? 0),
         wastage_qty: Number(i?.wastageQty ?? i?.wastage_qty ?? 0),
-        production_cost: Number(i?.productionCost ?? i?.production_cost ?? 0)
+        production_cost: Number(i?.productionCost ?? i?.production_cost ?? 0),
+        // Phase 2: policy values of the produced units
+        serial_identifiers: i?.serialIdentifiers ?? i?.serial_identifiers ?? null,
+        line_identifiers: i?.lineIdentifiers ?? i?.line_identifiers ?? null
       }))
     };
   }
@@ -1319,6 +1505,9 @@ export class InventoryTransactionsService {
         amount: Number(i.amount || 0),
         batch_no: i.batchNo || i.batch_no, serial_no: i.serialNo || i.serial_no,
         serial_numbers: i.serialNumbers ?? i.serial_numbers ?? null,
+        serial_warranty: i.serialWarranty ?? i.serial_warranty ?? null,
+        serial_identifiers: i.serialIdentifiers ?? i.serial_identifiers ?? null,
+        line_identifiers: i.lineIdentifiers ?? i.line_identifiers ?? null,
         expiry_date: i.expiryDate || i.expiry_date, remarks: i.remarks
       }))
     };
@@ -1344,6 +1533,7 @@ export class InventoryTransactionsService {
       payment_terms: r?.paymentTerms || r?.payment_terms,
       remarks: r?.remarks,
       subtotal: Number(r?.subtotal || 0), tax_amount: Number(r?.taxAmount || r?.tax_amount || 0),
+      transport_charges: Number(r?.transportCharges ?? r?.transport_charges ?? 0) || 0,
       total_amount: Number(r?.totalAmount || r?.total_amount || 0),
       status: r?.status || 'draft', created_at: r?.createdAt || r?.created_at,
       items: (r?.items || []).map((i: any) => ({
@@ -1369,6 +1559,9 @@ export class InventoryTransactionsService {
         batch_no: i.batchNo || i.batch_no,
         serial_no: i.serialNo || i.serial_no,
         serial_numbers: i.serialNumbers ?? i.serial_numbers ?? null,
+        serial_warranty: i.serialWarranty ?? i.serial_warranty ?? null,
+        serial_identifiers: i.serialIdentifiers ?? i.serial_identifiers ?? null,
+        line_identifiers: i.lineIdentifiers ?? i.line_identifiers ?? null,
         expiry_date: i.expiryDate || i.expiry_date,
         amount: Number(i.amount || 0), remarks: i.remarks
       }))
@@ -1536,6 +1729,113 @@ export class InventoryTransactionsService {
         : this.http.post<ApiResponse<any>>(this.url('production-entries'), body, { headers: h }),
       r => this.normProductionEntry(r)
     );
+  }
+
+    // ── UIN Registration ─────────────────────────────────────────────────────
+  getUinRegistrations(filters: { status?: string; branchId?: number | null; warehouseId?: number | null; productId?: number | null; segmentId?: number | null } = {}): Observable<ApiResponse<UinRegistrationRow[]>> {
+    let params = new HttpParams();
+    if (filters.status) params = params.set('status', filters.status);
+    if (filters.branchId) params = params.set('branchId', String(filters.branchId));
+    if (filters.warehouseId) params = params.set('warehouseId', String(filters.warehouseId));
+    if (filters.productId) params = params.set('productId', String(filters.productId));
+    if (filters.segmentId) params = params.set('segmentId', String(filters.segmentId));
+    return this.mapArray(
+      this.http.get<ApiResponse<any[]>>(this.url('uin-registrations'), { headers: this.headers(), params }),
+      r => this.normUinRegistration(r)
+    );
+  }
+
+  saveUinRegistrations(items: UinRegistrationSaveItem[]): Observable<ApiResponse<any>> {
+    return this.mapItem(
+      this.http.post<ApiResponse<any>>(this.url('uin-registrations'), this.toApiValue({ items }), { headers: this.headers() }),
+      r => r
+    );
+  }
+
+    // ── Identifier Registration (Registration before Sale, any policy) ─────────
+  getRegistrationPolicies(): Observable<ApiResponse<RegistrationPolicyOption[]>> {
+    return this.mapArray(
+      this.http.get<ApiResponse<any[]>>(this.url('identifier-registrations/policies'), { headers: this.headers() }),
+      r => ({
+        policy_id: Number(r?.policyId ?? r?.policy_id) || 0,
+        policy_name: r?.policyName ?? r?.policy_name ?? '',
+        policy_code: r?.policyCode ?? r?.policy_code ?? null,
+        is_mandatory: !!(r?.isMandatory ?? r?.is_mandatory),
+        categories: r?.categories ?? null
+      })
+    );
+  }
+
+  getIdentifierRegistrations(policyId: number, filters: { status?: string; branchId?: number | null; warehouseId?: number | null; productId?: number | null; segmentId?: number | null } = {}): Observable<ApiResponse<IdentifierRegistrationRow[]>> {
+    let params = new HttpParams().set('policyId', String(policyId));
+    if (filters.status) params = params.set('status', filters.status);
+    if (filters.branchId) params = params.set('branchId', String(filters.branchId));
+    if (filters.warehouseId) params = params.set('warehouseId', String(filters.warehouseId));
+    if (filters.productId) params = params.set('productId', String(filters.productId));
+    if (filters.segmentId) params = params.set('segmentId', String(filters.segmentId));
+    return this.mapArray(
+      this.http.get<ApiResponse<any[]>>(this.url('identifier-registrations'), { headers: this.headers(), params }),
+      r => this.normIdentifierRegistration(r)
+    );
+  }
+
+  saveIdentifierRegistrations(policyId: number, items: IdentifierRegistrationSaveItem[]): Observable<ApiResponse<any>> {
+    return this.mapItem(
+      this.http.post<ApiResponse<any>>(this.url('identifier-registrations'), this.toApiValue({ policy_id: policyId, items }), { headers: this.headers() }),
+      r => r
+    );
+  }
+
+  private normIdentifierRegistration(r: any): IdentifierRegistrationRow {
+    return {
+      serial_unit_id: Number(r?.serialUnitId ?? r?.serial_unit_id) || 0,
+      serial_no: r?.serialNo ?? r?.serial_no ?? '',
+      identifier_label: r?.identifierLabel ?? r?.identifier_label ?? null,
+      product_id: Number(r?.productId ?? r?.product_id) || 0,
+      product_name: r?.productName ?? r?.product_name ?? '',
+      product_code: r?.productCode ?? r?.product_code ?? null,
+      category_name: r?.categoryName ?? r?.category_name ?? null,
+      branch_id: r?.branchId ?? r?.branch_id ?? null,
+      branch_name: r?.branchName ?? r?.branch_name ?? null,
+      warehouse_id: r?.warehouseId ?? r?.warehouse_id ?? null,
+      warehouse_name: r?.warehouseName ?? r?.warehouse_name ?? null,
+      source_doc_type: r?.sourceDocType ?? r?.source_doc_type ?? null,
+      source_doc_no: r?.sourceDocNo ?? r?.source_doc_no ?? null,
+      source_doc_date: r?.sourceDocDate ?? r?.source_doc_date ?? null,
+      unit_status: r?.unitStatus ?? r?.unit_status ?? 'in_stock',
+      policy_id: Number(r?.policyId ?? r?.policy_id) || 0,
+      policy_name: r?.policyName ?? r?.policy_name ?? '',
+      is_mandatory: !!(r?.isMandatory ?? r?.is_mandatory),
+      value: r?.value ?? null,
+      registration_date: r?.registrationDate ?? r?.registration_date ?? null,
+      reference_no: r?.referenceNo ?? r?.reference_no ?? null,
+      registration_status: r?.registrationStatus ?? r?.registration_status ?? 'pending',
+      can_edit: !!(r?.canEdit ?? r?.can_edit)
+    };
+  }
+
+  private normUinRegistration(r: any): UinRegistrationRow {
+    const pick = (snake: string, camel: string) => r?.[snake] ?? r?.[camel] ?? null;
+    return {
+      serial_unit_id: Number(pick('serial_unit_id', 'serialUnitId')),
+      serial_no: pick('serial_no', 'serialNo') || '',
+      product_id: Number(pick('product_id', 'productId')),
+      product_name: pick('product_name', 'productName') || '',
+      product_code: pick('product_code', 'productCode'),
+      category_name: pick('category_name', 'categoryName'),
+      branch_id: pick('branch_id', 'branchId'),
+      branch_name: pick('branch_name', 'branchName'),
+      warehouse_id: pick('warehouse_id', 'warehouseId'),
+      warehouse_name: pick('warehouse_name', 'warehouseName'),
+      source_doc_no: pick('source_doc_no', 'sourceDocNo'),
+      source_doc_date: pick('source_doc_date', 'sourceDocDate'),
+      unit_status: pick('unit_status', 'unitStatus') || 'in_stock',
+      uin_number: pick('uin_number', 'uinNumber'),
+      uin_date: pick('uin_date', 'uinDate'),
+      uin_certificate_no: pick('uin_certificate_no', 'uinCertificateNo'),
+      uin_status: pick('uin_status', 'uinStatus') || 'pending',
+      can_edit: !!pick('can_edit', 'canEdit')
+    };
   }
 
   getProductionReturns(status?: string, segmentId?: number | null): Observable<ApiResponse<ProductionReturn[]>> {
@@ -1741,6 +2041,14 @@ export class InventoryTransactionsService {
       gst_inclusive: !!(i.gstInclusive ?? i.gst_inclusive),
       taxable_amount: Number(i.taxableAmount ?? i.taxable_amount ?? 0),
       tax_amount: Number(i.taxAmount ?? i.tax_amount ?? i.gstAmount ?? i.gst_amount ?? 0),
+      // migration 295: delivery progress per Sales Order line (undefined on other documents)
+      delivered_qty: i.deliveredQty ?? i.delivered_qty,
+      invoiced_qty: i.invoicedQty ?? i.invoiced_qty,
+      direct_invoiced_qty: i.directInvoicedQty ?? i.direct_invoiced_qty,
+      pending_qty: i.pendingQty ?? i.pending_qty,
+      //migration 300: Service Bundle line and its kit
+      is_bundle: !!(i.isBundle ?? i.is_bundle),
+      kit: (i.kit || []).map((k: any) => this.normSalesOrderKitItem(k)),
       amount: Number(i.amount || 0), remarks: i.remarks
     };
   }
@@ -1820,10 +2128,25 @@ export class InventoryTransactionsService {
       customer_gstin: r?.customerGstin || r?.customer_gstin,
       channel_partner_id: r?.channelPartnerId ?? r?.channel_partner_id,
       channel_partner_name: r?.channelPartnerName || r?.channel_partner_name,
+      // Lead By (Sales Invoice, migration 253).
+      lead_by_contact_id: r?.leadByContactId ?? r?.lead_by_contact_id,
+      lead_by_name: r?.leadByName || r?.lead_by_name,
+      // Delivery / Ship address (Sales Invoice, migration 257).
+      delivery_address: r?.deliveryAddress || r?.delivery_address,
+      ship_address: r?.shipAddress || r?.ship_address,
       place_of_supply: r?.placeOfSupply || r?.place_of_supply,
       warehouse_id: r?.warehouseId ?? r?.warehouse_id,
       warehouse_name: r?.warehouseName || r?.warehouse_name, payment_terms: r?.paymentTerms || r?.payment_terms,
+      // Branch (migration 161): a Branch pick on the merged Warehouse/Branch
+      // field saves here with warehouse_* NULL. Without these the edit form's
+      // `warehouse_name || branch_name` fallback reopened the field empty and
+      // the next save wrote both location ids back out as NULL.
+      branch_id: r?.branchId ?? r?.branch_id,
+      branch_name: r?.branchName || r?.branch_name,
       remarks: r?.remarks, status: r?.status || 'draft', created_at: r?.createdAt || r?.created_at,
+      // Whole-rupee round off (migration 275). Without it a reprint from the
+      // list (Duplicate for Recipient) printed with no round off.
+      round_off: Number(r?.roundOff ?? r?.round_off ?? 0) || 0,
       items: (r?.items || []).map((i: any) => ({
         ...this.normSalesItem(i),
         batch_no: i.batchNo || i.batch_no, serial_no: i.serialNo || i.serial_no,
@@ -1849,6 +2172,115 @@ export class InventoryTransactionsService {
     return id
       ? this.http.put<ApiResponse<any>>(this.salesUrl(`invoices/${id}`), body, { headers: h })
       : this.http.post<ApiResponse<any>>(this.salesUrl('invoices'), body, { headers: h });
+  }
+
+  // Copy type (migration 272): counts one print of a posted Sales Invoice and
+  // returns the print count before it (0 = Original, more = Duplicate; null =
+  // draft / not found, printed without a copy type).
+  markSalesInvoicePrinted(id: number): Observable<ApiResponse<{ previousPrintCount: number | null }>> {
+    return this.http.post<ApiResponse<{ previousPrintCount: number | null }>>(this.salesUrl(`invoices/${id}/printed`), {}, { headers: this.headers() });
+  }
+
+  // ── E-Invoice (GST IRN) ─────────────────────────────────────────────────────
+  // "New" = posted Sales Invoices still waiting for an IRN, "Old" = invoices
+  // that already have one. Backend endpoints: GET  /inventory/sales/e-invoices
+  // ?type=New|Old&fromDate&toDate and POST /inventory/sales/e-invoices/generate
+  // { invoiceIds }. The IRN itself is issued by the IRP through the backend's
+  // GSP integration; the screen only lists, selects and shows the result.
+
+  private normEInvoice(r: any): EInvoiceRow {
+    const items: any[] = r?.items || [];
+    const lineTotal = items.reduce((sum, i) => sum + Number(i?.totalAmount ?? i?.amount ?? 0), 0);
+    const total = r?.totalAmount ?? r?.total_amount;
+    const gstin = r?.customerGstin || r?.customer_gstin || '';
+    return {
+      invoice_id: Number(r?.invoiceId ?? r?.invoice_id ?? r?.id ?? 0),
+      invoice_no: r?.invoiceNo || r?.invoice_no || r?.docNumber || r?.doc_number || '',
+      invoice_date: r?.invoiceDate || r?.invoice_date || r?.docDate || r?.doc_date || '',
+      customer_name: r?.customerName || r?.customer_name || '',
+      customer_gstin: gstin,
+      total_amount: total != null
+        ? Number(total) || 0
+        : lineTotal + (Number(r?.roundOff ?? r?.round_off ?? 0) || 0),
+      supply_type: r?.supplyType || r?.supply_type || (gstin ? 'B2B' : 'B2C'),
+      customer_address: r?.customerAddress || r?.customer_address || '',
+      taxable_amount: Number(r?.taxableAmount ?? r?.taxable_amount ?? 0) || 0,
+      tax_amount: Number(r?.taxAmount ?? r?.tax_amount ?? 0) || 0,
+      invoice_ack_number: r?.invoiceAckNumber || r?.invoice_acknumber || '',
+      irn: r?.irn || r?.irnno || '',
+      ack_no: r?.ackNo || r?.ackno || r?.ack_no || r?.invoiceAckNumber || '',
+      ack_date: r?.ackDate || r?.ackdate || r?.ack_date || '',
+      signed_qr_code: r?.signedQrCode || r?.signedqrcode || '',
+      einvoice_status: r?.einvoiceStatus || r?.einvoice_status || '',
+      error_message: r?.errorMessage || r?.error_message || '',
+      items: items.map((i: any) => ({
+        product_name: i?.productName || i?.product_name || '',
+        product_code: i?.productCode || i?.product_code || '',
+        uom_name: i?.uomName || i?.uom_name || '',
+        qty: Number(i?.qty ?? 0) || 0,
+        cost_per_item: Number(i?.costPerItem ?? i?.cost_per_item ?? i?.rate ?? 0) || 0,
+        gst_rate: Number(i?.gstRate ?? i?.gst_rate ?? 0) || 0,
+        taxable_amount: Number(i?.taxableAmount ?? i?.taxable_amount ?? 0) || 0,
+        tax_amount: Number(i?.taxAmount ?? i?.tax_amount ?? 0) || 0,
+        total_amount: Number(i?.totalAmount ?? i?.total_amount ?? i?.amount ?? 0) || 0
+      }))
+    };
+  }
+
+  /** Lists the login company's (sessionStorage companyId) invoices of the login branch (sessionStorage branchId). */
+  getEInvoices(filters: { type: 'New' | 'Old'; fromDate: string; toDate: string }): Observable<ApiResponse<EInvoiceRow[]>> {
+    let params = new HttpParams()
+      .set('type', filters.type)
+      .set('fromDate', filters.fromDate)
+      .set('toDate', filters.toDate);
+    const companyId = Number(sessionStorage.getItem('companyId') || 0);
+    const branchId = Number(sessionStorage.getItem('branchId') || 0);
+    if (companyId > 0) params = params.set('companyId', companyId);
+    if (branchId > 0) params = params.set('branchId', branchId);
+    return this.mapArray(
+      this.http.get<ApiResponse<any[]>>(this.salesUrl('e-invoices'), { headers: this.headers(), params }),
+      r => this.normEInvoice(r)
+    );
+  }
+
+  /**
+   * Generates the IRN (Alankit) for the selected invoices. The seller is the logged-in
+   * company: companyCode (sessionStorage 'companyCode') and companyName
+   * (sessionStorage 'authCompany'.companyName); the API reads its GSTIN/address from
+   * global.companies.
+   */
+  generateEInvoices(invoiceIds: number[]): Observable<ApiResponse<EInvoiceRow[]>> {
+    const { companyCode, companyName } = this.loginCompany();
+    return this.mapArray(
+      this.http.post<ApiResponse<any[]>>(
+        this.salesUrl('e-invoices/generate'),
+        { invoiceIds, companyCode, companyName },
+        { headers: this.headers() }
+      ),
+      r => this.normEInvoice(r)
+    );
+  }
+
+  /** Printable e-invoice (seller, IRN/Ack/QR, buyer, items with CGST/SGST/IGST) for an invoice that has an IRN. */
+  getEInvoicePrint(invoiceId: number): Observable<ApiResponse<EInvoicePrint>> {
+    const { companyCode, companyName } = this.loginCompany();
+    const params = new HttpParams().set('companyCode', companyCode).set('companyName', companyName);
+    return this.http.get<ApiResponse<EInvoicePrint>>(
+      this.salesUrl(`e-invoices/${invoiceId}/print`), { headers: this.headers(), params });
+  }
+
+  private loginCompany(): { companyCode: string; companyName: string } {
+    let company: any = {};
+    try { company = JSON.parse(sessionStorage.getItem('authCompany') || '{}') || {}; } catch { company = {}; }
+    return {
+      companyCode: sessionStorage.getItem('companyCode') || company.companyCode || company.company_code || '',
+      companyName: company.companyName || company.company_name || ''
+    };
+  }
+
+  // Copy type (migration 274): same as markSalesInvoicePrinted, for Purchase Invoice.
+  markPurchaseInvoicePrinted(id: number): Observable<ApiResponse<{ previousPrintCount: number | null }>> {
+    return this.http.post<ApiResponse<{ previousPrintCount: number | null }>>(this.url(`purchase-invoices/${id}/printed`), {}, { headers: this.headers() });
   }
 
   private normServiceBundleConsumption(r: any): ServiceBundleConsumption {
@@ -1903,6 +2335,12 @@ export class InventoryTransactionsService {
       channel_partner_name: r?.channelPartnerName || r?.channel_partner_name,
       payment_terms: r?.paymentTerms || r?.payment_terms,
       remarks: r?.remarks, status, created_at: r?.createdAt || r?.created_at,
+      // migration 295: delivery / billing progress and close fields      ← NEW
+      delivery_status: r?.deliveryStatus ?? r?.delivery_status ?? null,
+      billing_status: r?.billingStatus ?? r?.billing_status ?? null,
+      closed_at: r?.closedAt ?? r?.closed_at ?? null,
+      close_reason: r?.closeReason ?? r?.close_reason ?? null,
+      total_amount: (r?.items || []).reduce((sum: number, i: any) => sum + Number(i?.amount || 0), 0),
       items: (r?.items || []).map((i: any) => this.normSalesItem(i))
     };
   }
@@ -1914,6 +2352,57 @@ export class InventoryTransactionsService {
     return this.http.get<ApiResponse<any[]>>(this.salesUrl('orders'), { headers: this.headers(), params }).pipe(
       map(res => ({ ...res, data: (res.data ?? []).map(r => this.normSalesOrder(r)) }))
     );
+  }
+
+    /** Close (with reason) or reopen a posted Sales Order (migration 295). */
+  closeSalesOrder(id: number, closeReason: string | null, reopen = false): Observable<ApiResponse<any>> {
+    return this.http.post<ApiResponse<any>>(this.salesUrl(`orders/${id}/close`), { closeReason, reopen }, { headers: this.headers() }).pipe(
+      map(res => ({ ...res, data: res.data ? this.normSalesOrder(res.data) : res.data }))
+    );
+  }
+
+    normSalesOrderKitItem(k: any) {
+    return {
+      id: k?.id,
+      sno: k?.sno,
+      product_id: k?.productId ?? k?.product_id,
+      product_name: k?.productName || k?.product_name || '',
+      product_code: k?.productCode || k?.product_code,
+      uom_name: k?.uomName || k?.uom_name || '',
+      planned_qty: Number(k?.plannedQty ?? k?.planned_qty ?? 0),
+      dispatched_qty: Number(k?.dispatchedQty ?? k?.dispatched_qty ?? 0),
+      pending_qty: Number(k?.pendingQty ?? k?.pending_qty ?? 0),
+      returned_qty: Number(k?.returnedQty ?? k?.returned_qty ?? 0),   // migration 301
+      used_qty: Number(k?.usedQty ?? k?.used_qty ?? 0),               // migration 301
+      remarks: k?.remarks ?? null
+    };
+  }
+
+  /** Change the kit of one Service Bundle line of a saved Sales Order (migration 300). */
+  saveSalesOrderKit(soId: number, lineSno: number, kit: { productId: number; qty: number; remarks?: string | null }[]): Observable<ApiResponse<any>> {
+    return this.http.post<ApiResponse<any>>(this.salesUrl(`orders/${soId}/kit`), { lineSno, kit }, { headers: this.headers() }).pipe(
+      map(res => ({
+        ...res,
+        data: res.data ? {
+          lineSno: res.data.lineSno ?? res.data.line_sno,
+          deliveryStatus: res.data.deliveryStatus ?? res.data.delivery_status,
+          kit: (res.data.kit || []).map((k: any) => this.normSalesOrderKitItem(k))
+        } : res.data
+      }))
+    );
+  }
+
+    /** Material that went out on a Service Bundle SO's DCs and can come back (migration 301). */
+  getSoReturnableMaterials(soId: number): Observable<ApiResponse<any>> {
+    return this.http.get<ApiResponse<any>>(this.salesUrl(`orders/${soId}/returnable-materials`), { headers: this.headers() });
+  }
+
+  saveMaterialReturn(body: any): Observable<ApiResponse<any>> {
+    return this.http.post<ApiResponse<any>>(this.salesUrl('material-returns'), body, { headers: this.headers() });
+  }
+
+  cancelMaterialReturn(id: number): Observable<ApiResponse<any>> {
+    return this.http.post<ApiResponse<any>>(this.salesUrl(`material-returns/${id}/cancel`), {}, { headers: this.headers() });
   }
 
   saveSalesOrder(payload: Record<string, any>, id?: number | null): Observable<ApiResponse<any>> {
@@ -2177,7 +2666,9 @@ export class InventoryTransactionsService {
         // already fixed on this exact unit when it was received (migration
         // 237) — "warranty should carry at sales by its serial no."
         manufacturing_date: r?.manufacturingDate || r?.manufacturing_date || null,
-        warranty_upto: r?.warrantyUpto || r?.warranty_upto || null
+        warranty_upto: r?.warrantyUpto || r?.warranty_upto || null,
+        missing_registration: r?.missingRegistration ?? r?.missing_registration ?? null
+
       }))
     };
   }
@@ -2245,6 +2736,22 @@ export class InventoryTransactionsService {
     const httpParams = new HttpParams().set('productId', String(productId)).set('serialNo', serialNo);
     return this.http.get<ApiResponse<any>>(this.salesUrl('serials/check-duplicate'), { headers: this.headers(), params: httpParams }).pipe(
       map(res => ({ ...res, data: { exists: !!res?.data?.exists, allowDuplicate: !!(res?.data?.allowDuplicate ?? res?.data?.allow_duplicate) } }))
+    );
+  }
+
+    // Phase 2 (migration 266): live check of one policy value (IMEI 1, Chassis No, ...).
+  // enforceUnique = the existing value is protected (it was mandatory when captured).
+  checkIdentifierDuplicate(policyId: number, value: string): Observable<ApiResponse<{ exists: boolean; enforceUnique: boolean; usedOn: { productName?: string; docNo?: string } | null }>> {
+    const httpParams = new HttpParams().set('policyId', String(policyId)).set('value', value);
+    return this.http.get<ApiResponse<any>>(this.salesUrl('serials/check-identifier'), { headers: this.headers(), params: httpParams }).pipe(
+      map(res => ({
+        ...res,
+        data: {
+          exists: !!res?.data?.exists,
+          enforceUnique: !!(res?.data?.enforceUnique ?? res?.data?.enforce_unique),
+          usedOn: res?.data?.usedOn ?? res?.data?.used_on ?? null
+        }
+      }))
     );
   }
 
@@ -2386,8 +2893,15 @@ export class InventoryTransactionsService {
    * closing it leaves no gap. The saved document is the authority: if someone
    * else saves first, the server hands this one the next free number instead.
    */
-  peekNextDocNumber(docType: string): Observable<ApiResponse<string | null>> {
-    const params = new HttpParams().set('docType', docType);
+  peekNextDocNumber(
+    docType: string,
+    location?: { branchId: number | null; warehouseId: number | null }
+  ): Observable<ApiResponse<string | null>> {
+    let params = new HttpParams().set('docType', docType);
+    // Sales Invoice numbers carry the branch code (INV-CP-00001/26-27), so
+    // the preview needs the Branch / Warehouse picked on the screen.
+    if (location?.branchId) params = params.set('branchId', String(location.branchId));
+    if (location?.warehouseId) params = params.set('warehouseId', String(location.warehouseId));
     return this.http.get<ApiResponse<string | null>>(
       this.url('next-doc-number'), { headers: this.headers(), params });
   }
@@ -2419,7 +2933,9 @@ export class InventoryTransactionsService {
           so_number: (r as any).soNumber || (r as any).so_number,
           grn_id: (r as any).grnId ?? (r as any).grn_id,
           status: (r as any).status || '', remarks: (r as any).remarks,
-          items: (r as any).items || []
+          items: (r as any).items || [],
+          kit_items: (r as any).kitItems || (r as any).kit_items || [],
+          delivery_challans: (r as any).deliveryChallans || (r as any).delivery_challans || []
         }));
         const filteredDocs = docType.toUpperCase() === 'PR'
           ? docs.filter(doc => String(doc.status || '').trim().toLowerCase() === 'approved')

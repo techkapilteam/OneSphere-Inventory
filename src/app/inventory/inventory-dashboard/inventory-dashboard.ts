@@ -5,6 +5,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DestroyRef } from '@angular/core';
 import { inventoryDashboardConfig } from '../Inventory_Shared/inventory-screen.model';
 import { InventoryScreenShell } from '../Inventory_Shared/inventory-screen-shell/inventory-screen-shell';
+import { InventoryExportService } from '../Inventory_Shared/inventory-export.service';
 import {
   DashboardDrilldownRow,
   DashboardStockRow,
@@ -123,6 +124,7 @@ export class InventoryDashboard {
   private readonly dashboardService = inject(InventoryDashboardService);
   private readonly transactionsService = inject(InventoryTransactionsService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly exportService = inject(InventoryExportService);
 
   readonly selectedPeriod = signal<DashboardPeriod>('week');
   readonly loading = signal(false);
@@ -138,6 +140,13 @@ export class InventoryDashboard {
   readonly lossSalesFlags = signal<LossSaleFlagRow[]>([]);
   readonly dashboardTime = signal(this.nowLabel());
   readonly activeModal = signal<GridPayload | null>(null);
+  readonly modalSearch = signal('');
+  readonly modalRows = computed(() => {
+    const rows = this.activeModal()?.rows ?? [];
+    const term = this.modalSearch().trim().toLowerCase();
+    if (!term) return rows;
+    return rows.filter(row => row.some(cell => String(cell ?? '').toLowerCase().includes(term)));
+  });
   readonly inventoryDashboardConfig = inventoryDashboardConfig;
 
   readonly sectionLayout = signal<SectionLayoutItem[]>(this.loadSectionLayout());
@@ -473,41 +482,41 @@ export class InventoryDashboard {
     try { localStorage.setItem(SECTION_LAYOUT_KEY, JSON.stringify(layout)); } catch { /* storage unavailable/full — layout just won't persist */ }
   }
 
+  // Excel exports use the Accounts-style .xlsx (company letterhead rows,
+  // bold headers, bordered cells) shared by every Inventory screen.
   exportStockCsv(): void {
     const rows = this.filteredStockRows();
-    const lines = [
-      'Product,Category,Warehouse,Qty On Hand,Qty Reserved,Value',
-      ...rows.map(r => `"${r.product_name}","${r.category}","${r.warehouse}",${r.qty_on_hand},${r.qty_reserved},${r.value}`)
-    ];
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'inventory-stock-by-product.csv';
-    link.click();
-    URL.revokeObjectURL(link.href);
+    this.exportService.excel({
+      title: 'Stock By Product',
+      columns: ['Product', 'Category', 'Warehouse', 'Qty On Hand', 'Qty Reserved', 'Value'],
+      rows: rows.map(r => [r.product_name, r.category, r.warehouse, r.qty_on_hand, r.qty_reserved, r.value].map(v => String(v ?? ''))),
+      fileName: 'Stock By Product'
+    });
   }
 
   openCard(card: KpiTile): void {
+    this.modalSearch.set('');
     this.activeModal.set(this.buildPayload(card));
   }
 
   closeModal(): void {
     this.activeModal.set(null);
+    this.modalSearch.set('');
+  }
+
+  onModalSearch(event: Event): void {
+    this.modalSearch.set((event.target as HTMLInputElement)?.value ?? '');
   }
 
   exportModalCsv(): void {
     const payload = this.activeModal();
     if (!payload) return;
-    const lines = [
-      payload.headers.join(','),
-      ...payload.rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
-    ];
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${payload.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.csv`;
-    link.click();
-    URL.revokeObjectURL(link.href);
+    this.exportService.excel({
+      title: payload.title,
+      columns: payload.headers.map(header => String(header)),
+      rows: this.modalRows().map(row => row.map(cell => String(cell ?? ''))),
+      fileName: payload.title
+    });
   }
 
   fmt(n: number | undefined): string {

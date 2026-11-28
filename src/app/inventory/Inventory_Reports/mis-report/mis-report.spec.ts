@@ -86,7 +86,9 @@ describe('MisReportComponent', () => {
 
   it('auto-loads the report on init for an Admin-permissioned user', () => {
     expect(component.canView()).toBe(true);
-    expect(getMisReportCalls).toEqual([{ dateFrom: undefined, dateTo: undefined }]);
+    // Previous: expect(getMisReportCalls).toEqual([{ dateFrom: undefined, dateTo: undefined }]);
+    // To Date now defaults to today (user 2026-11-27).
+    expect(getMisReportCalls).toEqual([{ dateFrom: undefined, dateTo: component.dateTo() }]);
     expect(component.hasResult()).toBe(true);
   });
 

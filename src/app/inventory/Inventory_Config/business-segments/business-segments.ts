@@ -13,6 +13,7 @@ import { applyInventoryTextCase, toInventoryTitleCase } from '../../Inventory_Sh
 import { businessSegmentsConfig } from '../../Inventory_Shared/inventory-screen.model';
 import { InventoryScreenShell } from '../../Inventory_Shared/inventory-screen-shell/inventory-screen-shell';
 import { QuickAddCategoryComponent } from '../../Inventory_Shared/quick-add-category/quick-add-category.component';
+import { attachInventorySaveToast } from '../../Inventory_Shared/inventory-save-toast/inventory-save-toast.component';
 
 @Component({
   selector: 'app-inventory-business-segments',
@@ -44,6 +45,10 @@ export class InventoryBusinessSegmentsComponent implements OnInit {
   saving = signal(false);
   saveMsg = signal('');
   saveError = signal('');
+
+  constructor() {
+    attachInventorySaveToast(this.saveMsg, this.saveError);
+  }
 
   showCategoryMasterDialog = signal(false);
   pendingCategories = signal<CategoryItem[]>([]);
@@ -331,6 +336,13 @@ export class InventoryBusinessSegmentsComponent implements OnInit {
       serial_applicable: !!category.serial_applicable,
       serial_policy_id: category.serial_applicable ? category.serial_policy_id ?? null : null,
       serial_policy_name: category.serial_policy_name ?? null,
+      // Policies (migration 265): the server builds serial tracking from these rows only
+      // and ignores serial_applicable / serial_policy_id above. They were dropped here,
+      // so a category added from this screen was saved with no policy at all.
+      // Sent only when the staged category carries them, so nothing else changes.
+      ...(Array.isArray(category.policies)
+        ? { policy_applicable: !!category.policy_applicable, policies: category.policies }
+        : {}),
       batch_applicable: !!category.batch_applicable,
       batch_policy_id: category.batch_applicable ? category.batch_policy_id ?? null : null,
       batch_policy_name: category.batch_policy_name ?? null,

@@ -283,7 +283,52 @@ export class InventoryLineProductPickerComponent implements OnDestroy {
   private readonly row = computed<string[]>(() => this.host.entryLineRows()[this.rowIndex] ?? []);
 
   protected readonly productValue = computed(() => this.host.lineCellValue(this.row(), this.column));
-  protected readonly productOptions = computed<string[]>(() => this.host.lineColumnOptions(this.column, this.row()));
+  // Product Nature. A product has one nature, so nothing is asked for it -- except
+  // when the picked product's NAME is carried by products of different natures
+  // (e.g. a Fixed Asset and a Trading Goods "Canon Printer"). Then the Nature
+  // box appears with just those natures and decides which product the line is.
+  protected readonly natureFilter = signal<string | null>(null);
+  protected readonly natureNeeded = signal(false);
+  /** A shared name picked from the list, waiting for its nature to be chosen. */
+  private readonly pendingSharedName = signal('');
+
+  private readonly allProductOptions = computed<string[]>(() => {
+    const options: string[] = this.host.lineColumnOptions(this.column, this.row());
+    return Array.from(new Set(options));   // a shared name is listed once; the nature decides which product
+  });
+  protected readonly productOptions = computed<string[]>(() => this.allProductOptions());
+
+  /** The natures of every product carrying this name. */
+  private naturesOf(option: string): string[] {
+    const named: any[] = this.host.productsNamed?.(option) ?? [];
+    return Array.from(new Set(named.map((p: any) => String(p?.product_nature_name ?? '').trim()).filter(Boolean)));
+  }
+
+  /** The shared product name the Nature box is about: the picked product, else one awaiting its nature. */
+  protected readonly pickedSharedName = computed(() => {
+    const name = String(this.productValue() ?? '').trim() || this.pendingSharedName();
+    return name && this.host.productNameIsShared?.(name) ? name : '';
+  });
+  protected readonly showNatureFilter = computed(() => !!this.pickedSharedName());
+  protected readonly natureOptions = computed<string[]>(() => {
+    const name = this.pickedSharedName();
+    return name ? this.naturesOf(name).sort((a, b) => a.localeCompare(b)) : [];
+  });
+  /** What the Nature box shows: the user's choice, else the picked product's own nature. */
+  protected readonly natureShown = computed<string | null>(() => {
+    const name = this.pickedSharedName();
+    if (!name) return null;
+    const chosen = this.natureFilter();
+    if (chosen && this.naturesOf(name).includes(chosen)) return chosen;
+    if (!String(this.productValue() ?? '').trim()) return null;   // nothing picked yet: the user decides
+    return String(this.resolvedProduct()?.product_nature_name ?? '').trim() || null;
+  });
+  protected onNatureChange(nature: string | null): void {
+    this.natureFilter.set(nature || null);
+    this.natureNeeded.set(false);
+    const name = this.pickedSharedName();
+    if (name && nature) this.pickProduct(name);
+  }
 
   protected readonly showVariantStep = computed(() =>
     this.variantColumnIndex >= 0 && this.host.lineColumnAppliesToRow(this.row(), 'Variant')
@@ -475,7 +520,9 @@ export class InventoryLineProductPickerComponent implements OnDestroy {
     const attrPairs = this.attrSelections()
       .filter(attr => String(attr.value || '').trim())
       .map(attr => ({ name: attr.name, value: attr.value }));
-    return this.host.productSubtitleFromParts(this.variantValue(), attrPairs);
+    // Previous: return this.host.productSubtitleFromParts(this.variantValue(), attrPairs);
+    const brand = this.host.productBrandForSummary?.(this.resolvedProduct()) || '';
+    return this.host.productSubtitleFromParts(this.variantValue(), attrPairs, brand);
   });
 
   // The method exists on every screen (it's on the shared shell), so its mere
@@ -531,6 +578,8 @@ export class InventoryLineProductPickerComponent implements OnDestroy {
   }
 
   protected close(): void {
+    this.pendingSharedName.set('');
+    this.natureNeeded.set(false);
     if (this.host.activeLineProductPickerRow() === this.rowIndex) {
       this.host.activeLineProductPickerRow.set(null);
     }
@@ -823,6 +872,29 @@ export class InventoryLineProductPickerComponent implements OnDestroy {
   }
 
   protected pickProduct(value: string): void {
+    // Two products can share a name when their Product Natures differ: the
+    // line must know exactly which one, so the nature is asked for first.
+    if (value && this.host.productNameIsShared?.(value)) {
+      const nature = this.natureShown();
+      const product = nature ? this.host.productNamedWithNature(value, nature) : null;
+      if (!product) {
+        this.pendingSharedName.set(value);
+        this.natureNeeded.set(true);
+        this.openPopup();
+        return;
+      }
+      const usedElsewhere = this.host.entryLineRows().some((r: string[], i: number) =>
+        i !== this.rowIndex && String(this.host.lineCellValue(r, this.column) ?? '').trim().toLowerCase() === value.trim().toLowerCase());
+      const chosenBefore = this.host.chosenProductIdFor?.(value) ?? null;
+      if (usedElsewhere && chosenBefore && Number(chosenBefore) !== Number(product.id)) {
+        this.host.saveError.set('This document already has a product with this name under another nature. Use one nature per name in a document.');
+        return;
+      }
+      this.host.rememberProductChoice(product);
+    }
+    this.natureNeeded.set(false);
+    this.pendingSharedName.set('');
+    if (value && !this.host.productNameIsShared?.(value)) this.natureFilter.set(null);
     this.host.setEntryLineCell(this.rowIndex, this.productColumnIndex, value);
     if (!value) return;
 

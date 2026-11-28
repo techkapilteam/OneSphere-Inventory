@@ -42,6 +42,64 @@
   /api/reports/hsn-summary
   /api/reports/batch-serial-expiry
   /api/reports/product-profitability
+  /api/reports/dues-list
+  /api/reports/collection-report
+*/
+
+/*
+  /api/reports/dues-list  (Dues List Report, customer-wise)
+
+  Params: toDate (= "As on" date; default today), customerId, branchId.
+  One row per POSTED, non-cancelled Sales Invoice with invoiceDate <= toDate
+  whose due is > 0. Use the same outstanding logic as the Customer Receipt
+  outstanding-invoices API, but count only receipts / credit notes dated
+  <= toDate, so a back-dated "As on" shows what was due on that day.
+
+  Row fields:
+    invoiceDate     sales invoice date
+    invoiceNo       sales invoice number
+    customer        customer name
+    totalAmount     invoice grand total
+    receivedAmount  receipts + credit notes allocated to it up to toDate
+    dueAmount       totalAmount - receivedAmount
+    ageDays         toDate - invoiceDate (days)
+
+  Order by customer, invoiceDate, invoiceNo.
+  summary: { totalAmount, receivedAmount, dueAmount }
+
+  Later (after Sales Invoice saves the group-company branch): add
+  customerBranch and region (GLOBAL.tbl_mst_global_branch_configuration
+  .branch_name / .region_name) to each row.
+*/
+
+/*
+  /api/reports/collection-report  (Collection Report, from the accounts ledger - 319)
+
+  Params: fromDate, toDate, customerId, branchId.
+  Every credit to a customer under SUNDRY DEBITORS / SUNDRY DEBITORS-OPENING
+  in accounts.tbl_trans_total_transactions dated fromDate..toDate for the login
+  company + branch book: Inventory Customer Receipts, Accounts receipts,
+  cleared cheques (RJV) and JVs. Sales Returns / round-off are not counted.
+  A cheque counts on its clearing date (that is when the customer is credited).
+
+  Row fields (one per credit; per invoice for an Inventory receipt):
+    sNo             serial, ordered by receipt date / voucher no
+    receiptDate     ledger date
+    receiptNo       voucher no (R.., RCQ.., RJV.., JV..)
+    customer        customer name
+    invoiceNo       sales invoice (blank for Accounts receipts / JVs)
+    invoiceDate     invoice date
+    invoiceAmount   invoice total
+    receivedAmount  amount credited
+    mode            'CASH' | 'CHQ NO:..' | 'ONLINE REF:..' | 'BANK' | 'JV'
+    modeType        'CASH' | 'CHEQUE' | 'JV' (online is totalled as CHEQUE)
+
+  summary: { cashAmount, chequeAmount, jvAmount, totalCollection, receivedAmount }
+  Previous (281): one row per customer from Inventory Customer Receipts with
+  Cash / Pre Cash / Cheque / Pre Cheque / JV (0) / Pre JV (0) / Grand Total.
+
+  Later: Zone -> Region -> Branch grouping (after Sales Invoice saves the
+  group-company branch).
 */
 
 /*
