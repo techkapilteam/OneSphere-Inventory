@@ -749,6 +749,47 @@ export const PURCHASE_INVOICE_REPORT: InventoryReportDefinition = phaseOneReport
   ])
 });
 
+// Sale Invoice (user 2026-11-28): the client's old "Sales Report" - same screen as the
+// Sale Invoice Register (same filters and endpoint, 321), one grid row per item line,
+// grouped SALES / SALE RETURN / CANCEL like the old print. Used by
+// SaleInvoiceReportComponent (route 'sale-invoice'); kept out of INVENTORY_REPORTS.
+// On screen, Sale Return and Cancel amounts are negative, so the Grand Total row is
+// the net sales; the PDF / Excel print every section with positive amounts.
+export const SALE_INVOICE_REPORT: InventoryReportDefinition = phaseOneReport({
+  key: 'saleInvoice',
+  slug: 'sale-invoice',
+  title: 'Sale Invoice',
+  groupId: 'sales',
+  endpoint: 'sales-invoice-register',
+  icon: 'pi pi-receipt',
+  purpose: 'Item-wise sales invoices, sales returns and cancelled invoices with CGST / SGST / IGST.',
+  audience: ['Accountant', 'Sales', 'Business Owner'],
+  // Same filters as the Sale Invoice Register.
+  filters: [...baseFilters, 'customerId', 'productId', 'hsnSac', 'status', 'createdBy', 'approvedBy'],
+  columns: cols([
+    ['segment', 'Segment', 'text', false, false],
+    ['section', 'Type'],
+    ['invoiceDate', 'Date', 'date'],
+    ['invoiceNo', 'Invoice'],
+    ['customerLabel', 'Dealer/Customer Name'],
+    ['itemDescription', 'Item Description'],
+    ['qty', 'Qty.', 'number'],
+    ['price', 'Price', 'currency'],
+    ['amount', 'Amount', 'currency', true],
+    ['cgstRate', 'CGST Rate %', 'number'],
+    ['cgst', 'CGST Amount', 'currency', true],
+    ['sgstRate', 'SGST Rate %', 'number'],
+    ['sgst', 'SGST Amount', 'currency', true],
+    ['igstRate', 'IGST Rate %', 'number'],
+    ['igst', 'IGST Amount', 'currency', true],
+    ['otherCharges', 'Other Charges', 'currency', true],
+    ['otherDeductions', 'Other Deductions', 'currency', true],
+    ['totalAmount', 'Total Amount', 'currency', true],
+    ['status', 'Status', 'status', false, false]
+  ]),
+  defaultGroupBy: 'section'
+});
+
 export function inventoryReportGroupTitle(groupId: string): string {
   return INVENTORY_REPORT_GROUPS.find(group => group.id === groupId)?.title ?? 'Inventory Reports';
 }

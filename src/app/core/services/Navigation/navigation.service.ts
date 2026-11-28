@@ -164,6 +164,8 @@ export class NavigationService {
                 { id: 'sales-order-register', name: 'Sales Order Register', route: '/dashboard/inventory/reports/sales-order-register', group: 'Sales Reports' },
                 { id: 'delivery-challan-register', name: 'Delivery Challan Register', route: '/dashboard/inventory/reports/delivery-challan-register', group: 'Sales Reports' },
                 { id: 'sales-invoice-register', name: 'Sale Invoice Register', route: '/dashboard/inventory/reports/sales-invoice-register', group: 'Sales Reports' },
+                // Sale Invoice: client "Sales Report" format, item-wise (2026-11-28).
+                { id: 'sale-invoice', name: 'Sale Invoice', route: '/dashboard/inventory/reports/sale-invoice', group: 'Sales Reports' },
                 { id: 'dues-list', name: 'Dues List Report', route: '/dashboard/inventory/reports/dues-list', group: 'Customer & Supplier Reports' },
                 { id: 'productwise-dues', name: 'Product-wise Dues List', route: '/dashboard/inventory/reports/productwise-dues', group: 'Customer & Supplier Reports' },
                 { id: 'collection-report', name: 'Collection Report', route: '/dashboard/inventory/reports/collection-report', group: 'Customer & Supplier Reports' },

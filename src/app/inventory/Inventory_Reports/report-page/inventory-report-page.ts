@@ -1041,8 +1041,8 @@ export class InventoryReportPageComponent implements OnInit {
     // Stock Ledger and Dues List show plain amounts, no "Rs." prefix (user request).
     // Vendor Dues too (plain amounts, like the old Vendor Wise Dues List).
     // Collection Report too (client format: plain amounts).
-    // Purchase Invoice too (client "Purchase Report" format: plain amounts).
-    if (['stockLedger', 'duesList', 'productwiseDues', 'vendorDues', 'vendorPaymentReport', 'collectionReport', 'purchaseInvoice'].includes(this.report().key)) return amount;
+    // Purchase Invoice / Sale Invoice too (client Purchase / Sales Report format: plain amounts).
+    if (['stockLedger', 'duesList', 'productwiseDues', 'vendorDues', 'vendorPaymentReport', 'collectionReport', 'purchaseInvoice', 'saleInvoice'].includes(this.report().key)) return amount;
     return `Rs. ${amount}`;
   }
 

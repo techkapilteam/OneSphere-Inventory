@@ -493,6 +493,14 @@ export const inventoryRoutes: Routes = [
           .then(m => m.PurchaseInvoiceReportComponent)
       },
       {
+        // Sale Invoice (client "Sales Report" format, 2026-11-28): same screen and data as
+        // the Sale Invoice Register (321), item-wise columns - own static route; must stay
+        // ABOVE the ':reportKey' catch-all.
+        path: 'sale-invoice',
+        loadComponent: () => import('./Inventory_Reports/sale-invoice/sale-invoice-report')
+          .then(m => m.SaleInvoiceReportComponent)
+      },
+      {
         path: ':reportKey',
         canActivate: [reportPermissionGuard],
         loadComponent: () => import('./Inventory_Reports/report-page/inventory-report-page')
