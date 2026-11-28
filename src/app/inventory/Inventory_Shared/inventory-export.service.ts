@@ -235,18 +235,30 @@ export class InventoryExportService {
       const longest = rows.reduce((max, row) => Math.max(max, row[index].length), header.length);
       return { header, key: `c${index}`, width: Math.min(60, Math.max(20, longest + 2)) };
     });
-    worksheet.addRows(rows);
+    // Previous: worksheet.addRows(rows); — every amount went in as text, so
+    // Excel could not SUM it. Numeric columns are now real numbers with a
+    // number format (user request 2026-11-28, all Inventory Excel exports).
+    const numericCols = new Set(this.numericColumns(columns, rows));
+    rows.forEach(values => {
+      const row = worksheet.addRow(values.map((value, index) => numericCols.has(index) ? this.excelCell(value).value : value));
+      numericCols.forEach(index => {
+        const fmt = this.excelCell(values[index]).numFmt;
+        if (fmt) row.getCell(index + 1).numFmt = fmt;
+      });
+    });
 
     const summary = document.summary || [];
     summary.forEach(([label, value]) => {
-      const cells = columns.map(() => '');
+      const cells: Array<string | number> = columns.map(() => '');
       if (numCols >= 2) {
         cells[numCols - 2] = label;
-        cells[numCols - 1] = value;
+        cells[numCols - 1] = this.excelCell(value).value;
       } else {
         cells[0] = `${label} : ${value}`;
       }
-      worksheet.addRow(cells);
+      const row = worksheet.addRow(cells);
+      const fmt = numCols >= 2 ? this.excelCell(value).numFmt : undefined;
+      if (fmt) row.getCell(numCols).numFmt = fmt;
     });
 
     if (headerLines.length > 0) {
@@ -418,23 +430,25 @@ export class InventoryExportService {
     });
     }
     rows.forEach(values => {
-      const row = ws.addRow(values.map((value, index) => numeric.has(index) ? this.excelNumber(value) : value));
+      // Previous: this.excelNumber(value) + numFmt '#,##0.00' / '0'.
+      const row = ws.addRow(values.map((value, index) => numeric.has(index) ? this.excelCell(value).value : value));
       values.forEach((value, index) => {
         const cell = row.getCell(index + 1);
         cell.border = thin;
         cell.alignment = { vertical: 'top', wrapText: true, horizontal: numeric.has(index) ? 'right' : (columns[index]?.trim() === '#' || /^s\.?\s*no\.?$/i.test(columns[index] || '') ? 'center' : 'left') };
-        if (typeof cell.value === 'number') cell.numFmt = /\.\d/.test(value) ? '#,##0.00' : '0';
+        if (typeof cell.value === 'number') cell.numFmt = this.excelCell(value).numFmt || '0';
       });
     });
     if (document.totalRow) {
       const totals = columns.map((_, index) => String(document.totalRow![index] ?? ''));
-      const row = ws.addRow(totals.map((value, index) => index > 0 && numeric.has(index) ? this.excelNumber(value) : value));
-      totals.forEach((_, index) => {
+      // Previous: only numeric-column totals became numbers; now any amount in the Total row.
+      const row = ws.addRow(totals.map((value, index) => index > 0 ? this.excelCell(value).value : value));
+      totals.forEach((value, index) => {
         const cell = row.getCell(index + 1);
         cell.border = thin;
         cell.font = { bold: true };
         cell.alignment = { horizontal: index === 0 ? 'center' : 'right' };
-        if (typeof cell.value === 'number') cell.numFmt = '#,##0.00';
+        if (typeof cell.value === 'number') cell.numFmt = this.excelCell(value).numFmt || '#,##0.00';
       });
       mergeRow(row.number, 1, this.totalRowSpan(totals, columns.length));
     }
@@ -451,7 +465,10 @@ export class InventoryExportService {
         const labelCell = row.getCell(numCols - 1);
         const valueCell = row.getCell(numCols);
         labelCell.value = label;
-        valueCell.value = value;
+        // Previous: valueCell.value = value; (text) — totals are numbers now.
+        const summaryCell = this.excelCell(value);
+        valueCell.value = summaryCell.value;
+        if (summaryCell.numFmt) valueCell.numFmt = summaryCell.numFmt;
         // Previous: const isLast = index === summary.length - 1;
         // Grand Total stays the bold row when Previous Balance follows it.
         const grandTotalIndex = summary.findIndex(([l]) => /^grand total$/i.test(String(l).trim()));
@@ -552,6 +569,19 @@ export class InventoryExportService {
   private excelNumber(value: string): number | string {
     const cleaned = value.replace(/rs\.?/i, '').replace(/[,%\s]/g, '');
     return cleaned !== '' && !isNaN(Number(cleaned)) ? Number(cleaned) : value;
+  }
+
+  /** An amount / quantity / percent string ("1,23,456.50", "-200", "18%") as a
+   *  real Excel number with a matching format, so SUM etc. work; anything else
+   *  (text, "-", blank, codes) stays as given. */
+  private excelCell(raw: string): { value: number | string; numFmt?: string } {
+    const text = String(raw ?? '').trim();
+    if (!text || !NUMERIC_CELL.test(text)) return { value: raw ?? '' };
+    const value = this.excelNumber(text);
+    if (typeof value !== 'number') return { value: raw };
+    const places = (text.match(/\.(\d+)/)?.[1].length) || 0;
+    const base = places ? `#,##0.${'0'.repeat(places)}` : '0';
+    return { value, numFmt: /%$/.test(text) ? `${base}"%"` : base };
   }
 
   private saveWorkbook(workbook: ExcelJS.Workbook, document: InventoryExportDocument): void {
