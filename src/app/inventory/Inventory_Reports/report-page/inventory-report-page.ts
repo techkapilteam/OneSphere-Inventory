@@ -722,6 +722,8 @@ export class InventoryReportPageComponent implements OnInit {
   // }
 
     private exportDocument(): InventoryExportDocument {
+    // Purchase Invoice: the client's "Purchase Report" print (own layout below).
+    if (this.report().key === 'purchaseInvoiceRegister') return this.purchaseInvoiceExportDocument();
     const columns = this.visibleColumns();
     // Previous: const from = this.filterDateValue('fromDate'); const to = this.filterDateValue('toDate');
     // Only dates the report has a picker for - Dues List / Vendor Dues have no
@@ -853,6 +855,103 @@ export class InventoryReportPageComponent implements OnInit {
       groupRowIndexes,
       periodText,
       fileName: exportTitle
+    };
+  }
+
+  // Purchase Invoice (client "Purchase Report" format, 2026-11-28, SP 320):
+  // Date | Invoice | Vendor/Direct Sale | Item Description | Qty. | Price | Amount |
+  // CGST / SGST / IGST (Rate %, Amount) | Other Charges | Other Deductions | Total
+  // Amount, landscape. Date / Invoice / Vendor print on an invoice's first line
+  // only (rows stay in invoice order whatever the screen sort), then the Total
+  // row, the GST-rate summary (Purchase / Cancels / Returns / Net) and the
+  // Grand Total box. Fixed columns - the column chooser does not apply here.
+  private purchaseInvoiceExportDocument(): InventoryExportDocument {
+    const from = this.filterDateValue('fromDate');
+    const to = this.filterDateValue('toDate');
+    const pdfDate = (value: Date) => formatDate(value, 'dd-MMM-yyyy', 'en-US');
+    const periodText = [from ? `From : ${pdfDate(from)}` : '', to ? `To : ${pdfDate(to)}` : ''].filter(Boolean).join('    ');
+
+    const money = (value: unknown, blankZero = false) => {
+      if (value === '' || value === null || value === undefined) return '';
+      const v = Math.round(this.numberValue(value as InventoryReportRow[string]) * 100) / 100;
+      if (!v && blankZero) return '';
+      return v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+    const plain = (value: unknown) =>
+      value === '' || value === null || value === undefined ? '' : String(Math.round(this.numberValue(value as InventoryReportRow[string]) * 1000) / 1000);
+
+    // Search / filters as on screen, but in invoice order (the SP's order).
+    const visible = new Set(this.searchableRows());
+    const lines = this.rows().filter(row => visible.has(row));
+    const rows = lines.map(row => {
+      const first = !!row['firstLine'];
+      const invoiceNo = String(row['invoiceNo'] ?? '');
+      const piNo = String(row['piNo'] ?? '');
+      return [
+        first ? this.formatDisplayDate(row['invoiceDate'] ?? '') : '',
+        first ? (piNo && piNo !== invoiceNo ? `${invoiceNo}\n(${piNo})` : invoiceNo) : '',
+        first ? String(row['vendor'] ?? '') : '',
+        String(row['itemDescription'] ?? ''),
+        plain(row['qty']),
+        money(row['price']),
+        money(row['amount']),
+        plain(row['cgstRate']), money(row['cgst']),
+        plain(row['sgstRate']), money(row['sgst']),
+        plain(row['igstRate']), money(row['igst']),
+        money(row['otherCharges'], true),
+        money(row['otherDeductions'], true),
+        money(row['totalAmount'])
+      ];
+    });
+
+    const sum = (key: string) => lines.reduce((acc, row) => acc + this.numberValue(row[key]), 0);
+    const tax = ((this.summary() as unknown as { taxSummary?: Array<Record<string, number>> }).taxSummary) ?? [];
+    const grand = (key: string) => tax.reduce((acc, r) => acc + (Number(r[key]) || 0), 0);
+    const taxKeys = ['cgstRate', 'sgstRate', 'igstRate',
+      'purchase', 'purchaseCgst', 'purchaseSgst', 'purchaseIgst',
+      'cancel', 'cancelCgst', 'cancelSgst', 'cancelIgst',
+      'returns', 'returnCgst', 'returnSgst', 'returnIgst',
+      'net', 'netCgst', 'netSgst', 'netIgst'];
+
+    return {
+      title: this.report().title,
+      columns: ['Date', 'Invoice', 'Vendor/Direct Sale', 'Item Description', 'Qty.', 'Price', 'Amount',
+        'Rate %', 'Amount', 'Rate %', 'Amount', 'Rate %', 'Amount', 'Other Charges', 'Other Deductions', 'Total Amount'],
+      columnGroups: [['Date', 1], ['Invoice', 1], ['Vendor/Direct Sale', 1], ['Item Description', 1], ['Qty.', 1], ['Price', 1], ['Amount', 1],
+        ['CGST', 2], ['SGST', 2], ['IGST', 2], ['Other Charges', 1], ['Other Deductions', 1], ['Total Amount', 1]],
+      rows,
+      totalRow: ['Total', '', '', '', '', '', money(sum('amount')), '', money(sum('cgst')), '', money(sum('sgst')), '', money(sum('igst')),
+        money(sum('otherCharges'), true), money(sum('otherDeductions'), true), money(sum('totalAmount'))],
+      trailingTables: tax.length ? [
+        {
+          columns: ['CGST', 'SGST', 'IGST',
+            'TOTAL', 'CGST', 'SGST', 'IGST',
+            'TOTAL', 'CGST', 'SGST', 'IGST',
+            'TOTAL', 'CGST', 'SGST', 'IGST',
+            'NET PURCHASE', 'NET CGST', 'NET SGST', 'NET IGST'],
+          columnGroups: [['TAX PERCENTAGE', 3], ['PURCHASE', 4], ['PURCHASE CANCELS', 4], ['PURCHASE RETURNS', 4], ['NET PURCHASE', 4]],
+          rows: tax.map(r => taxKeys.map(key => money(r[key])))
+        },
+        {
+          columns: ['', 'PURCHASE', 'CGST', 'SGST', 'IGST'],
+          rows: [['GRAND TOTAL :', money(grand('purchase')), money(grand('purchaseCgst')), money(grand('purchaseSgst')), money(grand('purchaseIgst'))]],
+          pdfWidth: 160,
+          boldColumns: [0]
+        }
+      ] : [],
+      periodText,
+      orientation: 'landscape',
+      // Previous: plain white heading (as the client's old print). Now the usual
+      // Inventory report colours: #0b4093 heading, white text (user 2026-11-28).
+      pdfBlueHead: true,
+      pdfHeadFontSize: 7,
+      // "Rate %", "Other Charges", "Other Deductions", "Total Amount" on one line each.
+      pdfOneLinePercentHead: true,
+      pdfOneLineHeads: ['Other Charges', 'Other Deductions', 'Total Amount'],
+      // Previous: { 0: 17, 1: 20, 2: 30, 3: 34, 4: 10, 5: 15, 6: 18, 7: 8, 9: 8, 11: 8 }
+      // Wider Other Charges / Other Deductions / Total Amount so their headings fit one line.
+      pdfColumnWidths: { 0: 16, 1: 20, 2: 25, 3: 29, 4: 10, 5: 15, 6: 18, 7: 9.5, 9: 9.5, 11: 9.5, 13: 18, 14: 22, 15: 20 },
+      fileName: this.report().title
     };
   }
 
@@ -1034,6 +1133,10 @@ export class InventoryReportPageComponent implements OnInit {
   }
 
   private formatCurrency(value: number): string {
+    // Purchase Invoice (client format): plain amounts with 2 decimals (26,500.00).
+    if (this.report().key === 'purchaseInvoiceRegister') {
+      return value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
     const amount = value.toLocaleString('en-IN', { maximumFractionDigits: 2 });
     // Stock Ledger and Dues List show plain amounts, no "Rs." prefix (user request).
     // Vendor Dues too (plain amounts, like the old Vendor Wise Dues List).

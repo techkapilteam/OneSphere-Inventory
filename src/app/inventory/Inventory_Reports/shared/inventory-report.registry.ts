@@ -257,28 +257,37 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
   phaseOneReport({
     key: 'purchaseInvoiceRegister',
     slug: 'purchase-invoice-register',
-    title: 'Purchase Invoice Register',
+    // Previous: title 'Purchase Invoice Register', one row per invoice (Invoice Date /
+    // Invoice No / Supplier / Supplier Invoice No / Variant / Attribute / Taxable /
+    // CGST / SGST / IGST / Net / Status), grouped by Supplier.
+    // Now (client "Purchase Report" format, 2026-11-28, SP 320): renamed "Purchase
+    // Invoice", one row per item line (the service flattens items[]), no grouping.
+    title: 'Purchase Invoice',
     groupId: 'purchase',
     endpoint: 'purchase-invoice-register',
     icon: 'pi pi-file-import',
-    purpose: 'Purchase invoice register for accounts, tax and supplier reconciliation.',
+    purpose: 'Item-wise purchase invoices with CGST / SGST / IGST, other charges / deductions and a GST-rate summary.',
     audience: ['Accountant', 'Purchase', 'Admin'],
-    filters: [...baseFilters, 'supplierId', 'hsnSac', 'status', 'createdBy', 'approvedBy'],
+    filters: [...baseFilters, 'supplierId', 'status', 'createdBy', 'approvedBy'],
     columns: cols([
-      ['invoiceDate', 'Invoice Date', 'date'],
-      ['invoiceNo', 'Invoice No'],
-      ['supplier', 'Supplier'],
-      ['supplierInvoiceNo', 'Supplier Invoice No'],
-      ['variant', 'Variant'],
-      ['attribute', 'Attribute'],
-      ['taxableAmount', 'Taxable Amount', 'currency', true],
-      ['cgst', 'CGST', 'currency', true],
-      ['sgst', 'SGST', 'currency', true],
-      ['igst', 'IGST', 'currency', true],
-      ['netAmount', 'Net Amount', 'currency', true],
-      ['status', 'Status', 'status']
+      ['segment', 'Segment', 'text', false, false],
+      ['invoiceDate', 'Date', 'date'],
+      ['invoiceNo', 'Invoice'],
+      ['vendor', 'Vendor/Direct Sale'],
+      ['itemDescription', 'Item Description'],
+      ['qty', 'Qty.', 'number'],
+      ['price', 'Price', 'currency'],
+      ['amount', 'Amount', 'currency', true],
+      ['cgstRate', 'CGST Rate %', 'number'],
+      ['cgst', 'CGST Amount', 'currency', true],
+      ['sgstRate', 'SGST Rate %', 'number'],
+      ['sgst', 'SGST Amount', 'currency', true],
+      ['igstRate', 'IGST Rate %', 'number'],
+      ['igst', 'IGST Amount', 'currency', true],
+      ['otherCharges', 'Other Charges', 'currency', true],
+      ['otherDeductions', 'Other Deductions', 'currency', true],
+      ['totalAmount', 'Total Amount', 'currency', true]
     ]),
-    defaultGroupBy: 'supplier',
     drillDown: true
   }),
   // Vendor Dues (308): posted Purchase Invoices still unpaid or part-paid as on

@@ -191,6 +191,63 @@ export interface ProductwiseAgeingReport {
   message: string;
 }
 
+// Backs GET /api/reports/purchase-invoice-register (inventory.sp_get_purchase_invoice_register,
+// 320_purchase_report_line_items.sql): purchase invoices dated fromDate..toDate,
+// each with its lines, plus a per-GST-rate summary (purchases / cancels /
+// returns / net). Line totals + otherCharges - otherDeductions = netAmount.
+export interface PurchaseReportItem {
+  sno: number;
+  product: string;
+  variant: string | null;
+  qty: number;
+  price: number;
+  /** qty x price, before the line discount (ex-GST). */
+  amount: number;
+  /** Line discount amount. */
+  deduction: number;
+  taxableAmount: number;
+  cgstRate: number;
+  sgstRate: number;
+  igstRate: number;
+  cgst: number;
+  sgst: number;
+  igst: number;
+  total: number;
+}
+
+export interface PurchaseReportInvoice {
+  invoiceDate: string | null;
+  invoiceNo: string;
+  supplier: string;
+  supplierInvoiceNo: string | null;
+  supplierInvoiceDate: string | null;
+  vendorGstin: string;
+  taxableAmount: number;
+  cgst: number;
+  sgst: number;
+  igst: number;
+  /** Transport charges + positive round off. */
+  otherCharges: number;
+  /** Negative round off. */
+  otherDeductions: number;
+  transportCharges: number;
+  roundOff: number;
+  netAmount: number;
+  status: string;
+  items: PurchaseReportItem[];
+}
+
+export interface PurchaseReportTaxRow {
+  gstRate: number;
+  cgstRate: number;
+  sgstRate: number;
+  igstRate: number;
+  purchase: number; purchaseCgst: number; purchaseSgst: number; purchaseIgst: number;
+  cancel: number; cancelCgst: number; cancelSgst: number; cancelIgst: number;
+  returns: number; returnCgst: number; returnSgst: number; returnIgst: number;
+  net: number; netCgst: number; netSgst: number; netIgst: number;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -317,8 +374,75 @@ export class InventoryReportsService {
       .getAPI(`/reports/${report.endpoint}`, params, 'YES')
       .pipe(
         map(response => this.normalizeResponse(response)),
+        // Purchase Invoice (client "Purchase Report" format, 320): one grid row per item line.
+        map(response => {
+          if (report.key !== 'purchaseInvoiceRegister') return response;
+          const data = this.purchaseInvoiceLines(response.data as unknown as PurchaseReportInvoice[]);
+          return { ...response, data, totalRecords: data.length };
+        }),
         catchError(error => throwError(() => error))
       );
+  }
+
+  /** Purchase invoices (with items[]) -> one row per item; transport charges /
+   *  round off as an extra row of the invoice, so each invoice's rows add up
+   *  to its invoice total. invoiceKey ties an invoice's rows together and
+   *  firstLine marks its first row (the export prints Date / Invoice / Vendor
+   *  only there). */
+  private purchaseInvoiceLines(invoices: PurchaseReportInvoice[]): InventoryReportRow[] {
+    const rows: InventoryReportRow[] = [];
+    const n = (value: unknown) => Number(value) || 0;
+    (invoices || []).forEach((inv, index) => {
+      const vendor = [inv.supplier, inv.vendorGstin].map(v => String(v ?? '').trim()).filter(Boolean).join('-');
+      const head = {
+        invoiceKey: `${index}`,
+        invoiceDate: inv.invoiceDate,
+        invoiceNo: String(inv.supplierInvoiceNo ?? '').trim() || inv.invoiceNo,
+        piNo: inv.invoiceNo,
+        vendor,
+        supplier: inv.supplier,
+        status: inv.status
+      };
+      const lines: InventoryReportRow[] = (Array.isArray(inv.items) ? inv.items : []).map(item => ({
+        ...head,
+        itemDescription: [item.product, item.variant].map(v => String(v ?? '').trim()).filter(Boolean).join(' - '),
+        qty: n(item.qty),
+        price: n(item.price),
+        amount: n(item.amount),
+        cgstRate: n(item.cgstRate),
+        cgst: n(item.cgst),
+        sgstRate: n(item.sgstRate),
+        sgst: n(item.sgst),
+        igstRate: n(item.igstRate),
+        igst: n(item.igst),
+        otherCharges: 0,
+        otherDeductions: n(item.deduction),
+        totalAmount: n(item.total)
+      }));
+      const charges = n(inv.otherCharges);
+      const deductions = n(inv.otherDeductions);
+      if (charges || deductions) {
+        lines.push({
+          ...head,
+          itemDescription: [n(inv.transportCharges) ? 'Transport Charges' : '', n(inv.roundOff) ? 'Round Off' : '']
+            .filter(Boolean).join(' / ') || 'Other Charges',
+          qty: '', price: '', amount: '', cgstRate: '', cgst: '', sgstRate: '', sgst: '', igstRate: '', igst: '',
+          otherCharges: charges,
+          otherDeductions: deductions,
+          totalAmount: charges - deductions
+        });
+      }
+      if (!lines.length) {
+        // Invoice without item lines: one row carrying its totals.
+        lines.push({
+          ...head, itemDescription: '', qty: '', price: '', amount: n(inv.taxableAmount),
+          cgstRate: '', cgst: n(inv.cgst), sgstRate: '', sgst: n(inv.sgst), igstRate: '', igst: n(inv.igst),
+          otherCharges: 0, otherDeductions: 0, totalAmount: n(inv.netAmount)
+        });
+      }
+      lines.forEach((line, i) => rows.push({ ...line, firstLine: i === 0 }));
+    });
+    return rows;
   }
 
   private buildParams(filters: InventoryReportFilters, page: number, pageSize: number): HttpParams {

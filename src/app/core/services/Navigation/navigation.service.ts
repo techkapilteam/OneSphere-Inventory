@@ -158,7 +158,7 @@ export class NavigationService {
                 { id: 'warehouse-wise-stock', name: 'Warehouse-wise Stock Report', route: '/dashboard/inventory/reports/warehouse-wise-stock', group: 'Stock Reports' },
                 { id: 'purchase-order-register', name: 'Purchase Order Register', route: '/dashboard/inventory/reports/purchase-order-register', group: 'Purchase Reports' },
                 { id: 'grn-register', name: 'GRN Register', route: '/dashboard/inventory/reports/grn-register', group: 'Purchase Reports' },
-                { id: 'purchase-invoice-register', name: 'Purchase Invoice Register', route: '/dashboard/inventory/reports/purchase-invoice-register', group: 'Purchase Reports' },
+                { id: 'purchase-invoice-register', name: 'Purchase Invoice', route: '/dashboard/inventory/reports/purchase-invoice-register', group: 'Purchase Reports' },
                 { id: 'sales-order-register', name: 'Sales Order Register', route: '/dashboard/inventory/reports/sales-order-register', group: 'Sales Reports' },
                 { id: 'delivery-challan-register', name: 'Delivery Challan Register', route: '/dashboard/inventory/reports/delivery-challan-register', group: 'Sales Reports' },
                 { id: 'sales-invoice-register', name: 'Sale Invoice Register', route: '/dashboard/inventory/reports/sales-invoice-register', group: 'Sales Reports' },

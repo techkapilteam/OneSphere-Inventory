@@ -100,6 +100,10 @@ export interface InventoryExportDocument {
   /** PDF only: grouped tax-grid headings containing '%' (e.g. "Rate %") stay on
    *  one line, the font shrinking just enough to fit (Sales Invoice). */
   pdfOneLinePercentHead?: boolean;
+  /** PDF only, tax grid (columnGroups): these headings stay on one line, the
+   *  font shrinking just enough to fit (Purchase Invoice: Other Charges /
+   *  Other Deductions / Total Amount). */
+  pdfOneLineHeads?: string[];
 
   /** Invoice layout (Purchase Invoice): "Total Invoice Amount In Words" (and notes)
    *  on the left and the totals on the right, in ONE bordered block joined
@@ -120,6 +124,21 @@ export interface InventoryExportDocument {
    *  `column` printed bold while the rest of the cell stays normal — e.g. the
    *  "(serial nos)" line under the product name (Purchase / Sales Invoice). */
   boldCellSegments?: { column: number; byRow: Array<string | undefined> };
+  /** Extra ruled tables printed under the main grid, in order (Purchase
+   *  Report: GST-rate summary, then the Grand Total box). */
+  trailingTables?: InventoryExportTable[];
+}
+
+/** A plain ruled table under the main grid (see trailingTables). */
+export interface InventoryExportTable {
+  columns: string[];
+  rows: string[][];
+  /** Header row above `columns`, like the main grid's columnGroups. */
+  columnGroups?: Array<[string, number]>;
+  /** PDF only: table width in mm, left aligned (default: full width). */
+  pdfWidth?: number;
+  /** Body cells of these column indexes printed bold. */
+  boldColumns?: number[];
 }
 
 const HEADER_COLOR = '#0b4093';
@@ -213,7 +232,11 @@ export class InventoryExportService {
     document = stripRupeeDocument(document);
     // Single documents (invoice, challan, voucher …) get the same layout as
     // their PDF; plain grids keep the Accounts list-export layout below.
-    if (this.filledFields(document).length || document.summary?.length) {
+    // Previous: if (this.filledFields(document).length || document.summary?.length) {
+    // Grouped headings / trailing tables (Purchase Report) need the document
+    // layout too - the plain grid below has no group header row.
+    if (this.filledFields(document).length || document.summary?.length
+      || document.columnGroups?.length || document.trailingTables?.length) {
       this.documentExcel(document);
       return;
     }
@@ -415,7 +438,10 @@ export class InventoryExportService {
       [top, sub].forEach(row => {
         for (let c = 1; c <= columns.length; c++) {
           const cell = row.getCell(c);
-          cell.font = { bold: true };
+          // Previous: cell.font = { bold: true }; (plain white heading)
+          // pdfBlueHead documents get the #0b4093 / white heading like the PDF.
+          cell.font = document.pdfBlueHead ? { bold: true, color: { argb: 'FFFFFFFF' } } : { bold: true };
+          if (document.pdfBlueHead) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B4093' } };
           cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
           cell.border = thin;
         }
@@ -452,6 +478,53 @@ export class InventoryExportService {
       });
       mergeRow(row.number, 1, this.totalRowSpan(totals, columns.length));
     }
+
+    // Trailing tables (Purchase Report GST summary / Grand Total), same order as the PDF.
+    (document.trailingTables || []).forEach(table => {
+      ws.addRow([]);
+      const tCols = table.columns;
+      const tGroups = table.columnGroups || [];
+      const styleHead = (row: ExcelJS.Row) => {
+        for (let c = 1; c <= tCols.length; c++) {
+          const cell = row.getCell(c);
+          cell.font = document.pdfBlueHead ? { bold: true, color: { argb: 'FFFFFFFF' } } : { bold: true };
+          if (document.pdfBlueHead) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B4093' } };
+          cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+          cell.border = thin;
+        }
+      };
+      if (tGroups.length) {
+        const top = ws.addRow([]);
+        const sub = ws.addRow([]);
+        let col = 1;
+        tGroups.forEach(([title, span]) => {
+          if (span > 1) {
+            top.getCell(col).value = title;
+            tCols.slice(col - 1, col - 1 + span).forEach((header, i) => { sub.getCell(col + i).value = header; });
+            mergeRow(top.number, col, col + span - 1);
+          } else {
+            top.getCell(col).value = tCols[col - 1] ?? title;
+            ws.mergeCells(top.number, col, sub.number, col);
+          }
+          col += span;
+        });
+        styleHead(top);
+        styleHead(sub);
+      } else {
+        styleHead(ws.addRow(tCols));
+      }
+      table.rows.forEach(values => {
+        const cells = tCols.map((_, index) => String(values[index] ?? ''));
+        const row = ws.addRow(cells.map(value => this.excelCell(value).value));
+        cells.forEach((value, index) => {
+          const cell = row.getCell(index + 1);
+          cell.border = thin;
+          cell.alignment = { horizontal: typeof cell.value === 'number' ? 'right' : 'left' };
+          if (typeof cell.value === 'number') cell.numFmt = this.excelCell(value).numFmt || '0';
+          if ((table.boldColumns || []).includes(index)) cell.font = { bold: true };
+        });
+      });
+    });
 
     // Totals on the right, last one bold — same as the PDF summary box.
     const summary = document.summary || [];
@@ -966,8 +1039,10 @@ export class InventoryExportService {
       didParseCell: (data: any) => {
         // Previous: "Rate %" broke as "Rat / e %" in its narrow column. Now it
         // prints on ONE straight line, shrinking its font only if needed.
-        if (taxGrid && document.pdfOneLinePercentHead && data.section === 'head'
-          && data.cell.colSpan === 1 && /%/.test(String(data.cell.raw?.content ?? data.cell.raw ?? ''))) {
+        // Previous: only '%' headings (pdfOneLinePercentHead); pdfOneLineHeads adds named ones.
+        const headText = String(data.cell.raw?.content ?? data.cell.raw ?? '');
+        if (taxGrid && data.section === 'head' && data.cell.colSpan === 1
+          && ((document.pdfOneLinePercentHead && /%/.test(headText)) || (document.pdfOneLineHeads || []).includes(headText))) {
           const cell = data.cell;
           cell.styles.overflow = (text: string | string[], space: number) => {
             const value = (Array.isArray(text) ? text : [String(text ?? '')]).join(' ').trim();
@@ -1065,6 +1140,33 @@ export class InventoryExportService {
     // Previous: y = (doc as any).lastAutoTable.finalY + 6;
     const wordsBox = document.amountInWordsPosition === 'box';
     y = (doc as any).lastAutoTable.finalY + (wordsBox ? 0 : 6);
+
+    // Trailing tables (Purchase Report: GST-rate summary, Grand Total box).
+    for (const table of document.trailingTables || []) {
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const fullWidth = pageWidth - L_MARGIN - R_MARGIN;
+      const width = Math.min(table.pdfWidth || fullWidth, fullWidth);
+      const grouped = !!table.columnGroups?.length;
+      autoTable(doc, {
+        head: grouped ? this.pdfGroupedHead(table.columns, table.columnGroups!) : [table.columns],
+        body: table.rows.map(row => table.columns.map((_, index) => String(row[index] ?? ''))),
+        theme: 'grid',
+        startY: y,
+        margin: { left: L_MARGIN, right: pageWidth - L_MARGIN - width, top: 15, bottom: 15 },
+        // Same heading colours as the main grid (pdfBlueHead = #0b4093, white text).
+        headStyles: { fillColor: document.pdfBlueHead ? HEADER_COLOR : 255, textColor: document.pdfBlueHead ? 255 : 0, fontStyle: 'bold', halign: 'center', valign: 'middle', fontSize: 7, cellPadding: 0.8, lineColor: 0, lineWidth: 0.2 },
+        styles: { fontSize: 7, cellPadding: 0.8, overflow: 'linebreak', valign: 'middle', halign: 'right', lineColor: 0, lineWidth: 0.2, textColor: 0 } as any,
+        didParseCell: (data: any) => {
+          if (data.section === 'body' && (table.boldColumns || []).includes(data.column.index)) {
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.halign = 'center';
+          }
+        },
+        rowPageBreak: 'avoid',
+        showHead: 'everyPage'
+      });
+      y = (doc as any).lastAutoTable.finalY + 6;
+    }
 
         // Invoice layout (Purchase Invoice): words + totals joined under the table,
     // then the signature row. The blocks below are then skipped for this document.
