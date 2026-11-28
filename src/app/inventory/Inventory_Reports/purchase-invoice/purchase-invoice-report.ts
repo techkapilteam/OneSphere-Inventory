@@ -64,7 +64,7 @@ export class PurchaseInvoiceReportComponent extends InventoryReportPageComponent
       next: response => {
         const invoices = response.data as unknown as PurchaseReportInvoice[];
         const rows = invoices.flatMap((invoice, index) => this.linesOf(invoice, index));
-        const summary = (response.summary ?? {}) as { taxSummary?: PurchaseReportTaxRow[] };
+        const summary = (response.summary ?? {}) as unknown as { taxSummary?: PurchaseReportTaxRow[] };
         this.rows.set(rows);
         this.summary.set({});
         this.taxSummary.set(Array.isArray(summary.taxSummary) ? summary.taxSummary : []);
