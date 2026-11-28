@@ -300,8 +300,8 @@ export const INVENTORY_SCREEN_EXPLANATIONS: Record<string, string> = {
     'Use it to follow up on outstanding receivables.',
 
   'collection report':
-    'Collection Report shows the money received from each customer in a period, split into cash, cheque and journal voucher, ' +
-    'separately for current period invoices and previous period invoices.',
+    'Collection Report lists every amount credited to customers under Sundry Debitors in a period: receipts, cleared cheques and journal vouchers, ' +
+    'with the invoice where there is one, and grand totals for cheque, cash and journal voucher.',
 
   'pending document report':
     'Pending Document Report shows pending quantity and amount across purchase orders, GRNs, delivery challans, invoices and approvals, ' +

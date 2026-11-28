@@ -73,30 +73,30 @@
 */
 
 /*
-  /api/reports/collection-report  (Collection Report, customer-wise)
+  /api/reports/collection-report  (Collection Report, from the accounts ledger - 319)
 
   Params: fromDate, toDate, customerId, branchId.
-  Money received in POSTED Customer Receipts dated fromDate..toDate, one row
-  per customer. Mode 'cash' -> Cash; 'cheque', 'online', 'debit_card',
-  'credit_card', 'bank' -> Cheque. Each sales invoice allocation is split
-  across the receipt's modes in proportion to the mode amounts; Credit Note
-  allocations and TDS are not money received and are left out. The
-  unallocated (advance) part of a receipt counts as current.
+  Every credit to a customer under SUNDRY DEBITORS / SUNDRY DEBITORS-OPENING
+  in accounts.tbl_trans_total_transactions dated fromDate..toDate for the login
+  company + branch book: Inventory Customer Receipts, Accounts receipts,
+  cleared cheques (RJV) and JVs. Sales Returns / round-off are not counted.
+  A cheque counts on its clearing date (that is when the customer is credited).
 
-  Row fields:
-    customer          customer name
-    noOfInvoices      distinct sales invoices that got money in the period
-    cashAmount        cash against invoices dated >= fromDate (+ advance)
-    preCashAmount     cash against invoices dated <  fromDate
-    chequeAmount      cheque/online/card/bank against invoices dated >= fromDate (+ advance)
-    preChequeAmount   cheque/online/card/bank against invoices dated <  fromDate
-    jvAmount          0 for now ("Company Adjustment" receipt mode later)
-    preJvAmount       0 for now
-    grandTotal        sum of the 6 amounts
+  Row fields (one per credit; per invoice for an Inventory receipt):
+    sNo             serial, ordered by receipt date / voucher no
+    receiptDate     ledger date
+    receiptNo       voucher no (R.., RCQ.., RJV.., JV..)
+    customer        customer name
+    invoiceNo       sales invoice (blank for Accounts receipts / JVs)
+    invoiceDate     invoice date
+    invoiceAmount   invoice total
+    receivedAmount  amount credited
+    mode            'CASH' | 'CHQ NO:..' | 'ONLINE REF:..' | 'BANK' | 'JV'
+    modeType        'CASH' | 'CHEQUE' | 'JV' (online is totalled as CHEQUE)
 
-  Order by customer.
-  summary: { noOfInvoices, cashAmount, preCashAmount, chequeAmount,
-             preChequeAmount, jvAmount, preJvAmount, grandTotal }
+  summary: { cashAmount, chequeAmount, jvAmount, totalCollection, receivedAmount }
+  Previous (281): one row per customer from Inventory Customer Receipts with
+  Cash / Pre Cash / Cheque / Pre Cheque / JV (0) / Pre JV (0) / Grand Total.
 
   Later: Zone -> Region -> Branch grouping (after Sales Invoice saves the
   group-company branch).

@@ -798,10 +798,37 @@ export class InventoryReportPageComponent implements OnInit {
     // same figures as the on-screen footer (user request).
     // Collection Report gets the same Grand Total line so PDF / Excel totals match the screen.
     // Previous: if (this.report().key === 'duesList' && rows.length && columns.some(column => column.total)) {
-    if (['duesList', 'productwiseDues', 'collectionReport', 'vendorDues', 'vendorPaymentReport'].includes(this.report().key) && rows.length && columns.some(column => column.total)) {
+    // Previous: [..., 'collectionReport', ...] -- Collection Report now ends with its own
+    // Cheque / Cash / JV / Total Collection lines below instead.
+    if (['duesList', 'productwiseDues', 'vendorDues', 'vendorPaymentReport'].includes(this.report().key) && rows.length && columns.some(column => column.total)) {
       const totals = this.totals();
       groupRowIndexes.push(rows.length);
       rows.push(columns.map((column, index) => index === 0 ? 'Grand Total' : (column.total ? totals[column.key] ?? '' : '')));
+    }
+
+    // Collection Report (client format, 2026-11-28): GRAND TOTAL CHEQUE / CASH / JV and
+    // TOTAL COLLECTION under the Received Amount column, from the rows on screen.
+    if (this.report().key === 'collectionReport' && rows.length) {
+      const amountIndex = columns.findIndex(column => column.key === 'receivedAmount');
+      if (amountIndex >= 0) {
+        const labelIndex = amountIndex > 0 ? amountIndex - 1 : 0;
+        const amountColumn = columns[amountIndex];
+        const sumOfMode = (modeType?: string) => this.sortedRows()
+          .filter(row => !modeType || String(row['modeType'] ?? '') === modeType)
+          .reduce((acc, row) => acc + this.numberValue(row['receivedAmount']), 0);
+        const lines: Array<[string, string | undefined]> = [
+          ['GRAND TOTAL CHEQUE:', 'CHEQUE'],
+          ['GRAND TOTAL CASH:', 'CASH'],
+          ['GRAND TOTAL JV:', 'JV'],
+          ['TOTAL COLLECTION', undefined]
+        ];
+        lines.forEach(([label, modeType]) => {
+          groupRowIndexes.push(rows.length);
+          rows.push(columns.map((_, index) => index === labelIndex
+            ? label
+            : index === amountIndex ? this.formatCell(sumOfMode(modeType), amountColumn) : ''));
+        });
+      }
     }
 
     // Stock Summary: Grand Total line at the end of PDF / Print / Excel, only for
@@ -1010,7 +1037,8 @@ export class InventoryReportPageComponent implements OnInit {
     const amount = value.toLocaleString('en-IN', { maximumFractionDigits: 2 });
     // Stock Ledger and Dues List show plain amounts, no "Rs." prefix (user request).
     // Vendor Dues too (plain amounts, like the old Vendor Wise Dues List).
-    if (['stockLedger', 'duesList', 'productwiseDues', 'vendorDues', 'vendorPaymentReport'].includes(this.report().key)) return amount;
+    // Collection Report too (client format: plain amounts).
+    if (['stockLedger', 'duesList', 'productwiseDues', 'vendorDues', 'vendorPaymentReport', 'collectionReport'].includes(this.report().key)) return amount;
     return `Rs. ${amount}`;
   }
 

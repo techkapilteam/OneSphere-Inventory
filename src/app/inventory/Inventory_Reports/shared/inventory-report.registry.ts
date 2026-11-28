@@ -480,11 +480,15 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
       ['ageDays', 'Age (Days)', 'number']
     ]),
     defaultGroupBy: 'product'  }),
-  // Collection Report: money received from customers between "Date From" and
-  // "Date To" (posted Customer Receipts), one row per customer. Cash = 'cash'
-  // mode; Cheque = cheque / online / card / bank. "Pre" = receipts against
-  // invoices dated before "Date From". JV columns stay 0 until the "Company
-  // Adjustment" receipt mode is added. Zone / Region / Branch grouping later.
+  // Collection Report (319, user request 2026-11-28): every credit to a customer
+  // under SUNDRY DEBITORS between From / To date, read from the accounts ledger --
+  // Inventory / Accounts receipts, cleared cheques (RJV) and JVs. One row per
+  // receipt (per invoice for Inventory receipts); Accounts receipts / JVs have no
+  // invoice, so those columns stay blank. A cheque counts on its clearing date.
+  // Cards and export lines: Grand Total Cheque / Cash / JV and Total Collection
+  // (online receipts are totalled under Cheque).
+  // Previous (281): one row per customer with Cash / Pre Cash / Cheque / Pre Cheque /
+  // JV / Pre JV / Grand Total from Inventory Customer Receipts only.
   phaseOneReport({
     key: 'collectionReport',
     slug: 'collection-report',
@@ -492,21 +496,27 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
     groupId: 'customerSupplier',
     endpoint: 'collection-report',
     icon: 'pi pi-money-bill',
-    purpose: 'Customer-wise money received in a period, split into cash, cheque and JV for current and previous-period invoices.',
+    purpose: 'Money collected from customers in a period: every receipt, cleared cheque and JV credited to Sundry Debitors, with Cheque / Cash / JV totals.',
     audience: ['Accountant', 'Sales', 'Business Owner'],
     filters: ['branchId', 'fromDate', 'toDate', 'customerId'],
+    summaryCards: [
+      { label: 'Grand Total Cheque', valueKey: 'chequeAmount', icon: 'pi pi-credit-card', tone: 'blue' },
+      { label: 'Grand Total Cash', valueKey: 'cashAmount', icon: 'pi pi-wallet', tone: 'green' },
+      { label: 'Grand Total JV', valueKey: 'jvAmount', icon: 'pi pi-book', tone: 'amber' },
+      { label: 'Total Collection', valueKey: 'totalCollection', icon: 'pi pi-money-bill', tone: 'blue' }
+    ],
     columns: cols([
       // Segment is auto-added to every report; hidden here, same as Dues List.
       ['segment', 'Segment', 'text', false, false],
+      ['sNo', 'S.No', 'number'],
+      ['receiptDate', 'Receipt Date', 'date'],
+      ['receiptNo', 'Receipt / JV No'],
       ['customer', 'Customer'],
-      ['noOfInvoices', 'No. of Invoices', 'number', true],
-      ['cashAmount', 'Cash', 'currency', true],
-      ['preCashAmount', 'Pre Cash', 'currency', true],
-      ['chequeAmount', 'Cheque', 'currency', true],
-      ['preChequeAmount', 'Pre Cheque', 'currency', true],
-      ['jvAmount', 'JV', 'currency', true],
-      ['preJvAmount', 'Pre JV', 'currency', true],
-      ['grandTotal', 'Grand Total', 'currency', true]
+      ['invoiceNo', 'Invoice'],
+      ['invoiceDate', 'Invoice Date', 'date'],
+      ['invoiceAmount', 'Invoice Amount', 'currency'],
+      ['receivedAmount', 'Received Amount', 'currency', true],
+      ['mode', 'CHQ / CASH']
     ])  }),
   phaseOneReport({
     key: 'pendingDocument',
