@@ -485,6 +485,14 @@ export const inventoryRoutes: Routes = [
           .then(m => m.ProductwiseAgeingReportComponent)
       },
       {
+        // Purchase Invoice (client "Purchase Report" format, 2026-11-28): same data
+        // as the Purchase Invoice Register (320), item-wise columns, own layout -
+        // so its own static route; must stay ABOVE the ':reportKey' catch-all.
+        path: 'purchase-invoice',
+        loadComponent: () => import('./Inventory_Reports/purchase-invoice/purchase-invoice-report')
+          .then(m => m.PurchaseInvoiceReportComponent)
+      },
+      {
         path: ':reportKey',
         canActivate: [reportPermissionGuard],
         loadComponent: () => import('./Inventory_Reports/report-page/inventory-report-page')

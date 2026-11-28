@@ -248,6 +248,11 @@ export interface PurchaseReportTaxRow {
   net: number; netCgst: number; netSgst: number; netIgst: number;
 }
 
+export interface PurchaseReport {
+  invoices: PurchaseReportInvoice[];
+  taxSummary: PurchaseReportTaxRow[];
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -374,75 +379,33 @@ export class InventoryReportsService {
       .getAPI(`/reports/${report.endpoint}`, params, 'YES')
       .pipe(
         map(response => this.normalizeResponse(response)),
-        // Purchase Invoice (client "Purchase Report" format, 320): one grid row per item line.
-        map(response => {
-          if (report.key !== 'purchaseInvoiceRegister') return response;
-          const data = this.purchaseInvoiceLines(response.data as unknown as PurchaseReportInvoice[]);
-          return { ...response, data, totalRecords: data.length };
-        }),
+        // Purchase Invoice Register: newest invoice first, as before 320 (320 lists oldest
+        // first for the separate Purchase Invoice screen).
+        map(response => report.key === 'purchaseInvoiceRegister'
+          ? { ...response, data: [...response.data].reverse() }
+          : response),
         catchError(error => throwError(() => error))
       );
   }
 
-  /** Purchase invoices (with items[]) -> one row per item; transport charges /
-   *  round off as an extra row of the invoice, so each invoice's rows add up
-   *  to its invoice total. invoiceKey ties an invoice's rows together and
-   *  firstLine marks its first row (the export prints Date / Invoice / Vendor
-   *  only there). */
-  private purchaseInvoiceLines(invoices: PurchaseReportInvoice[]): InventoryReportRow[] {
-    const rows: InventoryReportRow[] = [];
-    const n = (value: unknown) => Number(value) || 0;
-    (invoices || []).forEach((inv, index) => {
-      const vendor = [inv.supplier, inv.vendorGstin].map(v => String(v ?? '').trim()).filter(Boolean).join('-');
-      const head = {
-        invoiceKey: `${index}`,
-        invoiceDate: inv.invoiceDate,
-        invoiceNo: String(inv.supplierInvoiceNo ?? '').trim() || inv.invoiceNo,
-        piNo: inv.invoiceNo,
-        vendor,
-        supplier: inv.supplier,
-        status: inv.status
-      };
-      const lines: InventoryReportRow[] = (Array.isArray(inv.items) ? inv.items : []).map(item => ({
-        ...head,
-        itemDescription: [item.product, item.variant].map(v => String(v ?? '').trim()).filter(Boolean).join(' - '),
-        qty: n(item.qty),
-        price: n(item.price),
-        amount: n(item.amount),
-        cgstRate: n(item.cgstRate),
-        cgst: n(item.cgst),
-        sgstRate: n(item.sgstRate),
-        sgst: n(item.sgst),
-        igstRate: n(item.igstRate),
-        igst: n(item.igst),
-        otherCharges: 0,
-        otherDeductions: n(item.deduction),
-        totalAmount: n(item.total)
-      }));
-      const charges = n(inv.otherCharges);
-      const deductions = n(inv.otherDeductions);
-      if (charges || deductions) {
-        lines.push({
-          ...head,
-          itemDescription: [n(inv.transportCharges) ? 'Transport Charges' : '', n(inv.roundOff) ? 'Round Off' : '']
-            .filter(Boolean).join(' / ') || 'Other Charges',
-          qty: '', price: '', amount: '', cgstRate: '', cgst: '', sgstRate: '', sgst: '', igstRate: '', igst: '',
-          otherCharges: charges,
-          otherDeductions: deductions,
-          totalAmount: charges - deductions
-        });
-      }
-      if (!lines.length) {
-        // Invoice without item lines: one row carrying its totals.
-        lines.push({
-          ...head, itemDescription: '', qty: '', price: '', amount: n(inv.taxableAmount),
-          cgstRate: '', cgst: n(inv.cgst), sgstRate: '', sgst: n(inv.sgst), igstRate: '', igst: n(inv.igst),
-          otherCharges: 0, otherDeductions: 0, totalAmount: n(inv.netAmount)
-        });
-      }
-      lines.forEach((line, i) => rows.push({ ...line, firstLine: i === 0 }));
-    });
-    return rows;
+  /** Purchase Invoice screen (client "Purchase Report" format, 320): the
+   *  invoices with their items[] (oldest first) and the GST-rate summary.
+   *  Location = the login company / branch (API EffectiveReportLocation). */
+  getPurchaseInvoiceReport(fromDate: Date, toDate: Date): Observable<PurchaseReport> {
+    const params = new HttpParams()
+      .set('fromDate', this.toDateParam(fromDate))
+      .set('toDate', this.toDateParam(toDate));
+
+    return this.commonService.getAPI('/reports/purchase-invoice-register', params, 'YES').pipe(
+      map((response: { data?: PurchaseReportInvoice[]; summary?: { taxSummary?: PurchaseReportTaxRow[] } }) => ({
+        invoices: (Array.isArray(response?.data) ? response.data : []).map(inv => ({
+          ...inv,
+          items: Array.isArray(inv?.items) ? inv.items : []
+        })),
+        taxSummary: Array.isArray(response?.summary?.taxSummary) ? response.summary!.taxSummary! : []
+      })),
+      catchError(error => throwError(() => error))
+    );
   }
 
   private buildParams(filters: InventoryReportFilters, page: number, pageSize: number): HttpParams {

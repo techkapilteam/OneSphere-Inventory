@@ -257,39 +257,33 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
   phaseOneReport({
     key: 'purchaseInvoiceRegister',
     slug: 'purchase-invoice-register',
-    // Previous: title 'Purchase Invoice Register', one row per invoice (Invoice Date /
-    // Invoice No / Supplier / Supplier Invoice No / Variant / Attribute / Taxable /
-    // CGST / SGST / IGST / Net / Status), grouped by Supplier.
-    // Now (client "Purchase Report" format, 2026-11-28, SP 320): renamed "Purchase
-    // Invoice", one row per item line (the service flattens items[]), no grouping.
-    title: 'Purchase Invoice',
+    title: 'Purchase Invoice Register',
     groupId: 'purchase',
     endpoint: 'purchase-invoice-register',
     icon: 'pi pi-file-import',
-    purpose: 'Item-wise purchase invoices with CGST / SGST / IGST, other charges / deductions and a GST-rate summary.',
+    purpose: 'Purchase invoice register for accounts, tax and supplier reconciliation.',
     audience: ['Accountant', 'Purchase', 'Admin'],
-    filters: [...baseFilters, 'supplierId', 'status', 'createdBy', 'approvedBy'],
+    filters: [...baseFilters, 'supplierId', 'hsnSac', 'status', 'createdBy', 'approvedBy'],
     columns: cols([
-      ['segment', 'Segment', 'text', false, false],
-      ['invoiceDate', 'Date', 'date'],
-      ['invoiceNo', 'Invoice'],
-      ['vendor', 'Vendor/Direct Sale'],
-      ['itemDescription', 'Item Description'],
-      ['qty', 'Qty.', 'number'],
-      ['price', 'Price', 'currency'],
-      ['amount', 'Amount', 'currency', true],
-      ['cgstRate', 'CGST Rate %', 'number'],
-      ['cgst', 'CGST Amount', 'currency', true],
-      ['sgstRate', 'SGST Rate %', 'number'],
-      ['sgst', 'SGST Amount', 'currency', true],
-      ['igstRate', 'IGST Rate %', 'number'],
-      ['igst', 'IGST Amount', 'currency', true],
-      ['otherCharges', 'Other Charges', 'currency', true],
-      ['otherDeductions', 'Other Deductions', 'currency', true],
-      ['totalAmount', 'Total Amount', 'currency', true]
+      ['invoiceDate', 'Invoice Date', 'date'],
+      ['invoiceNo', 'Invoice No'],
+      ['supplier', 'Supplier'],
+      ['supplierInvoiceNo', 'Supplier Invoice No'],
+      ['variant', 'Variant'],
+      ['attribute', 'Attribute'],
+      ['taxableAmount', 'Taxable Amount', 'currency', true],
+      ['cgst', 'CGST', 'currency', true],
+      ['sgst', 'SGST', 'currency', true],
+      ['igst', 'IGST', 'currency', true],
+      ['netAmount', 'Net Amount', 'currency', true],
+      ['status', 'Status', 'status']
     ]),
+    defaultGroupBy: 'supplier',
     drillDown: true
   }),
+  // Purchase Invoice (client item-wise format) is its own component -
+  // Inventory_Reports/purchase-invoice, route 'purchase-invoice' - not in this list.
+  // Its definition is PURCHASE_INVOICE_REPORT at the end of this file.
   // Vendor Dues (308): posted Purchase Invoices still unpaid or part-paid as on
   // "Date To" - same due as the Vendor Payment pending list. Layout follows the
   // old "Vendor Wise Dues List": vendor heading, vendor bill no / date, Total and
@@ -715,6 +709,45 @@ export const INVENTORY_PHASE_1_REPORTS: InventoryReportDefinition[] = [
 ];
 
 export const INVENTORY_REPORTS = INVENTORY_PHASE_1_REPORTS;
+
+// Purchase Invoice (user 2026-11-28): the same screen as the Purchase Invoice
+// Register - same filters, Generate, search, columns, export, paging - and the same
+// endpoint (320), but one grid row per item line in the client's "Purchase Report"
+// columns. Used by PurchaseInvoiceReportComponent (route 'purchase-invoice'), which
+// extends the report page; kept out of INVENTORY_REPORTS so ':reportKey' never picks it.
+export const PURCHASE_INVOICE_REPORT: InventoryReportDefinition = phaseOneReport({
+  key: 'purchaseInvoice',
+  slug: 'purchase-invoice',
+  title: 'Purchase Invoice',
+  groupId: 'purchase',
+  endpoint: 'purchase-invoice-register',
+  icon: 'pi pi-file-import',
+  purpose: 'Item-wise purchase invoices with CGST / SGST / IGST, other charges and deductions.',
+  audience: ['Accountant', 'Purchase', 'Admin'],
+  // Same filters as the Purchase Invoice Register.
+  filters: [...baseFilters, 'supplierId', 'hsnSac', 'status', 'createdBy', 'approvedBy'],
+  columns: cols([
+    ['segment', 'Segment', 'text', false, false],
+    ['invoiceDate', 'Date', 'date'],
+    ['invoiceNo', 'Invoice'],
+    ['piNo', 'PI No', 'text', false, false],
+    ['vendor', 'Vendor/Direct Sale'],
+    ['itemDescription', 'Item Description'],
+    ['qty', 'Qty.', 'number'],
+    ['price', 'Price', 'currency'],
+    ['amount', 'Amount', 'currency', true],
+    ['cgstRate', 'CGST Rate %', 'number'],
+    ['cgst', 'CGST Amount', 'currency', true],
+    ['sgstRate', 'SGST Rate %', 'number'],
+    ['sgst', 'SGST Amount', 'currency', true],
+    ['igstRate', 'IGST Rate %', 'number'],
+    ['igst', 'IGST Amount', 'currency', true],
+    ['otherCharges', 'Other Charges', 'currency', true],
+    ['otherDeductions', 'Other Deductions', 'currency', true],
+    ['totalAmount', 'Total Amount', 'currency', true],
+    ['status', 'Status', 'status', false, false]
+  ])
+});
 
 export function inventoryReportGroupTitle(groupId: string): string {
   return INVENTORY_REPORT_GROUPS.find(group => group.id === groupId)?.title ?? 'Inventory Reports';
