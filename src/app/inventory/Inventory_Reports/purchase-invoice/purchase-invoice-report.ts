@@ -62,7 +62,11 @@ export class PurchaseInvoiceReportComponent extends InventoryReportPageComponent
 
     this.piReportsService.getReport(this.report(), this.apiFilters(), this.page(), this.pageSize()).subscribe({
       next: response => {
-        const invoices = response.data as unknown as PurchaseReportInvoice[];
+        // Previous: const invoices = response.data as unknown as PurchaseReportInvoice[];
+        // Only invoices saved (posted) from Transactions - drafts are left out (user 2026-11-28),
+        // same as Sale Invoice. The Purchase Invoice Register still lists drafts.
+        const invoices = (response.data as unknown as PurchaseReportInvoice[])
+          .filter(inv => String(inv.status ?? '').toLowerCase() !== 'draft');
         const rows = invoices.flatMap((invoice, index) => this.linesOf(invoice, index));
         const summary = (response.summary ?? {}) as unknown as { taxSummary?: PurchaseReportTaxRow[] };
         this.rows.set(rows);
